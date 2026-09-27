@@ -4,7 +4,7 @@
 # later ActuatorIntegrationTest, and any future context-load test) keep running with no broker and
 # no database, and therefore without Docker. Container-backed suites do NOT activate it: they boot
 # the real configuration against Testcontainers.
-courtregister:
+yotresultsdistribution:
   # record | progression-post. The same default `application.yaml` carries, stated rather than
   # inherited: this profile's context-load tests assert the recording pipeline is the one wired, and
   # a default that moved would move them silently.
@@ -31,7 +31,7 @@ courtregister:
     # data to reach and no identity mounted to reach it with. LIVE would correctly refuse to start.
     mode: STUB
   generation:
-    # Off, and off UNCONDITIONALLY: `application.yaml` reads COURTREGISTER_GENERATION_ENABLED and a
+    # Off, and off UNCONDITIONALLY: `application.yaml` reads YOTRESULTSDISTRIBUTION_GENERATION_ENABLED and a
     # developer who exported it for a local run would otherwise turn the job, the listener and the
     # second datasource on inside every context-load test. Written as a literal here for that
     # reason, so nothing in this profile can be switched on from the environment.
@@ -52,7 +52,7 @@ courtregister:
 
   report:
     # Off, and off UNCONDITIONALLY, for the reason `generation.enabled` above is: `application.yaml`
-    # reads COURTREGISTER_REPORT_ENABLED, and a developer who exported it for a local run would
+    # reads YOTRESULTSDISTRIBUTION_REPORT_ENABLED, and a developer who exported it for a local run would
     # otherwise turn the 07:00 job on inside every context-load test. The e-mail output is pinned
     # off beside it because its two settings become REQUIRED at startup the moment it is true, and
     # this profile deliberately mounts neither a template nor a recipient.
@@ -60,8 +60,8 @@ courtregister:
     email:
       enabled: false
 
-  # Deliberately absent from this profile: courtregister.feature.*, courtregister.fileservice.*,
-  # courtregister.endpoints.* and courtregister.email.templates.*. They are required only when
+  # Deliberately absent from this profile: yotresultsdistribution.feature.*, yotresultsdistribution.fileservice.*,
+  # yotresultsdistribution.endpoints.* and yotresultsdistribution.email.templates.*. They are required only when
   # generation is enabled, and it is disabled above; leaving them unset is what proves the refusals
   # are conditional rather than making them pass with placeholder values. The one `spring.artemis`
   # key this profile does set is the embedded switch below, and it is there to keep the promise the
@@ -86,7 +86,7 @@ audit:
     enabled: false
 
 # The audit starter's own switch, off in this profile - the same reasoning
-# `courtregister.generation.enabled` above is written as a literal for. `application.yaml` reads
+# `yotresultsdistribution.generation.enabled` above is written as a literal for. `application.yaml` reads
 # CP_AUDIT_ENABLED, and without this line every context-load test in this profile would inherit
 # whatever that placeholder resolved to and build an Artemis connection factory for an audit broker
 # that is not there: the library's auto-configuration validates `cp.audit.hosts` and `cp.audit.port`

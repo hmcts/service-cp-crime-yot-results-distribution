@@ -16,7 +16,7 @@ export const meta = {
 //   tasks            task ids in order, ["T007","T008"] or "T007 T008"                   required
 //   baseCommit       the commit the range starts from; gates diff baseCommit..HEAD        required
 //   lock             the gradle lock file shared by EVERY tree and EVERY agent
-//                    (default /home/sachin/.cache/courtregister/gradle.lock - fixed, not per session)
+//                    (default /home/sachin/.cache/yotresultsdistribution/gradle.lock - fixed, not per session)
 //   maxRemediations  remediation rounds before giving up (default 2 => at most 3 gates)
 //   codex            true adds Codex as a fourth reviewer in every gate (default false)
 //   codexFocus       extra questions for Codex, specific to this range (optional)
@@ -36,7 +36,7 @@ for (const k of ['tree', 'specDir', 'tasks', 'baseCommit']) {
 }
 const TASKS = Array.isArray(a.tasks) ? a.tasks : String(a.tasks).split(/[,\s]+/).filter(Boolean)
 if (!TASKS.length) throw new Error('phase-gate: args.tasks is empty')
-const LOCK = a.lock || '/home/sachin/.cache/courtregister/gradle.lock'
+const LOCK = a.lock || '/home/sachin/.cache/yotresultsdistribution/gradle.lock'
 const MAX_REMEDIATIONS = a.maxRemediations === undefined ? 2 : a.maxRemediations
 if (!Number.isInteger(MAX_REMEDIATIONS) || MAX_REMEDIATIONS < 0) throw new Error('phase-gate: args.maxRemediations must be a non-negative integer')
 const RANGE = `${a.baseCommit}..HEAD`

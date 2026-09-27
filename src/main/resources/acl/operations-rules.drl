@@ -22,7 +22,7 @@ global uk.gov.moj.cpp.authz.http.providers.UserAndGroupProvider userAndGroupProv
 rule "Allow - check-flag"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.check-flag")
+  $a: Action(name == "yot-results-distribution-operations.check-flag")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -31,7 +31,7 @@ end
 rule "Allow - list-batches"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.list-batches")
+  $a: Action(name == "yot-results-distribution-operations.list-batches")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -40,7 +40,7 @@ end
 rule "Allow - list-recorded-while-off"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.list-recorded-while-off")
+  $a: Action(name == "yot-results-distribution-operations.list-recorded-while-off")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -49,7 +49,7 @@ end
 rule "Allow - generate-register"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.generate-register")
+  $a: Action(name == "yot-results-distribution-operations.generate-register")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -58,7 +58,7 @@ end
 rule "Allow - notify-register"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.notify-register")
+  $a: Action(name == "yot-results-distribution-operations.notify-register")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -67,7 +67,7 @@ end
 rule "Allow - supersede-before"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.supersede-before")
+  $a: Action(name == "yot-results-distribution-operations.supersede-before")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -76,7 +76,7 @@ end
 rule "Allow - report-exceptions"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.report-exceptions")
+  $a: Action(name == "yot-results-distribution-operations.report-exceptions")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);

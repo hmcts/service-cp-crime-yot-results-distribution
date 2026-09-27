@@ -8,7 +8,7 @@ a service-owned job at 18:00 Europe/London (Mon–Fri) batches the recorded docu
 Artemis `public.event` topic, and e-mails each matched Youth Offending Team through
 **notificationnotify** with the PDF attached by file-service id. This replaces both the court
 register function app and progression's court-register leg. The whole flow is switched between
-legacy and new by the single App Configuration flag `CourtRegisterService`, which this service's
+legacy and new by the single App Configuration flag `YotResultsDistributionService`, which this service's
 nightly job reads (fail-closed) as its third reader.
 
 It is a fix-first port: every catalogued defect — the function app's `C` rows and the progression
@@ -22,9 +22,9 @@ Jira: none — this work carries no ticket; it lands on plain `main`
 
 ## Stack
 - Spring Boot 4.1, Java 25, **Gradle — never Maven**
-- Package: uk.gov.hmcts.cp.courtregister
+- Package: uk.gov.hmcts.cp.yotresultsdistribution
 - Port: 8082 (local) / 4550 (Kubernetes)
-- Deployment/release name: `courtregister-service`
+- Deployment/release name: `yotresultsdistribution-service`
 - Provenance: derived from the `hmcts/service-hmcts-crime-springboot-template` crime Spring Boot
   template by way of the `service-cp-crime-informant-register` reference implementation. **Never
   scaffold from scratch and never use Spring Initializr** — the shape of this repo is inherited, and
@@ -37,7 +37,7 @@ Jira: none — this work carries no ticket; it lands on plain `main`
 | Defect-fix register | `doc/DEFECT-FIXES.md` |
 | Constitution | `.specify/memory/constitution.md` |
 | Specifications | `specs/001-court-register-port/` (complete), `specs/002-consolidate-progression-leg/` (complete), `specs/003-exception-report/` (complete), `specs/004-release-stale-batches/` (complete), `specs/005-operations-rest-api/` (current) |
-| Operations API (owned) | `src/main/resources/courtregister-openapi.yaml`; authorisation rules `src/main/resources/acl/operations-rules.drl` |
+| Operations API (owned) | `src/main/resources/yot-results-distribution-openapi.yaml`; authorisation rules `src/main/resources/acl/operations-rules.drl` |
 | Inbound message schema | `src/main/resources/contracts/distribution-command.schema.json` |
 | Register contract (frozen) | `src/main/resources/contracts/progression/` (+ `PROVENANCE.md`) |
 
@@ -46,11 +46,11 @@ This service exposes **no business REST API**: nothing about intake, recording, 
 or notification is reachable over HTTP. Its HTTP surface is actuator plus the **operations API**
 under `/operations/**` — the named operator actions that replaced the CLI in increment 005, each
 behind `cp-auth-rules-filter` ("Second Line Support" only, identity from the `CJSCPPUID` header) and
-`cp-audit-filter-springboot`, and each described in `src/main/resources/courtregister-openapi.yaml`. Its contracts
+`cp-audit-filter-springboot`, and each described in `src/main/resources/yot-results-distribution-openapi.yaml`. Its contracts
 are:
-- **Inbound**: the `courtregister.requests` queue message (`distribution-command.schema.json`,
+- **Inbound**: the `yotresultsdistribution.requests` queue message (`distribution-command.schema.json`,
   `additionalProperties: false`), agreed with `cpp-context-results` (the publisher).
-- **Operations API**: `src/main/resources/courtregister-openapi.yaml`, owned here and versioned with the repo; a
+- **Operations API**: `src/main/resources/yot-results-distribution-openapi.yaml`, owned here and versioned with the repo; a
   contract test asserts the controllers against it, and `cp-audit-filter-springboot` reads it at
   runtime to resolve path parameters. Adding a path that is not a named operator action needs a
   constitution amendment (Principle III).
@@ -61,7 +61,7 @@ are:
   systemdocgenerator `generate-document` (REST command, 202) and its public
   `document-available` / `generation-failed` events; notificationnotify `send-email-notification`
   (REST command, 202); the framework file-service `metadata` + `content` table schema (write-only,
-  pinned to changesets 001–006); the App Configuration flag `CourtRegisterService`.
+  pinned to changesets 001–006); the App Configuration flag `YotResultsDistributionService`.
 
 Contract changes are cross-team events. The spec-validator agent checks contract compliance, the
 defect-fix register, and the operations API's four conditions (authorised, audited, flag-gated where
@@ -75,7 +75,7 @@ a row is reverted; an uncatalogued behaviour change needs written sign-off befor
 constitution Principle I.
 
 ## Cutover Rule
-One lever: the App Configuration flag `CourtRegisterService`. Never add a second switch (Helm value,
+One lever: the App Configuration flag `YotResultsDistributionService`. Never add a second switch (Helm value,
 static-data patch, endpoint) that decides which implementation is live. The nightly job reads the
 flag once per run with no cache and does nothing when it is off or unreadable; `POST
 /operations/batches/generate` reads the same flag at the same point and refuses `FLAG_OFF` unless

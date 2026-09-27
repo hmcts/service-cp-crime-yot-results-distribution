@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Court Register Service — full pipeline port, fix-first
+# Specification Quality Checklist: YOT Results Distribution Service — full pipeline port, fix-first
 
 **Purpose**: Validate specification completeness and quality before planning
 **Created**: 2026-08-31 (authored at bootstrap alongside the spec, not generated post-hoc)

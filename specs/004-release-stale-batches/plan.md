@@ -31,7 +31,7 @@ Everything else is **removal**. `GenerationReconciler` goes, and with it its `@S
 `tally.chased(reconciler.reconcile())`, and the entire systemdocgenerator query path:
 `DocumentRenderer.query`, `SystemDocGeneratorClient.query` (`GET document/{payloadFileId}` and its
 answer parsing), `StubDocumentRenderer.query` and `domain/DocumentStatus`. The
-`courtregister.generation.completion` setting goes with them, because `poll-only` named a way of
+`yotresultsdistribution.generation.completion` setting goes with them, because `poll-only` named a way of
 learning an outcome that no longer exists. `BatchFailureReason.GENERATION_TIMED_OUT` and
 `CompletedBy.RECONCILER` go too, from the enums **and** from the schema's bounded lists
 **[review, revised]** — nothing is deployed, so no row anybody must read carries them.
@@ -44,7 +44,7 @@ Two small things replace what the removal would otherwise take with it:
   which FR-003a asks be counted and which the design rules ask of any path that leaves something
   undone. No schedule, no lock, no renderer, no HTTP client.
 - **`batch/BatchAgeSweep`** — the three readings the retired timer took on its way past
-  (`courtregister_oldest_generating_age`, `_pending_age`, `_generated_age`) plus the "this batch holds
+  (`yotresultsdistribution_oldest_generating_age`, `_pending_age`, `_generated_age`) plus the "this batch holds
   a document nobody was told about" WARN, on its own lockless fixed delay in every non-command JVM
   that has the generation half. A Micrometer gauge never decays, so leaving these to a once-a-night
   pass would freeze three readings at whatever the last run saw; the GENERATED-but-unnotified one is
@@ -70,11 +70,11 @@ Three further consequences the reviews surfaced, each now a requirement:
 The run report's `reconciled` becomes **three** numbers - `released_batches`, `released_registers`
 and, by the coordinator's decision of 2026-09-20 taken at Phase 4, `contended` for the batches the
 pass could not give back, which are a night's undone work and must not be silent on the line that
-describes the night - and `courtregister_generation_reconciled_total` is retired in favour of
-`courtregister_generation_released_batches_total` and `_released_registers_total`, beside
-`courtregister_generation_contended_total` for the batches a run could not give back.
-`courtregister.generation.grace-period` becomes `courtregister.generation.stale-after` (default `10m`
-→ `30m`), and `courtregister.report.batch-generated-within` stops resolving from it and takes its own
+describes the night - and `yotresultsdistribution_generation_reconciled_total` is retired in favour of
+`yotresultsdistribution_generation_released_batches_total` and `_released_registers_total`, beside
+`yotresultsdistribution_generation_contended_total` for the batches a run could not give back.
+`yotresultsdistribution.generation.grace-period` becomes `yotresultsdistribution.generation.stale-after` (default `10m`
+→ `30m`), and `yotresultsdistribution.report.batch-generated-within` stops resolving from it and takes its own
 `@DefaultValue("10m")`.
 
 **Two** additive migrations, because the admission and the removals cannot share one:
@@ -96,7 +96,7 @@ design reviews of the same day (spec Clarifications, second session).
 |---|---|---|
 | 1 | `failure_reason` is CHECK-constrained to six values in `V2`; the new reason would be rejected by Postgres | `V6` **and** `V7` (the split found in implementation, below), and `SchemaMigrationV2IT` extended to hold the enum and the constraint to each other in both directions after each |
 | 2 | `markFailed` + `releaseFailed` is two operations with a read between them; a crash or a race strands registers on a terminal batch | The pass becomes `failAndReleaseStale`: one fenced statement per batch, each in its own transaction and with its own bounded retry (narrowed at gate 3); concurrent `*IT`s in both race orders; SC-009 |
-| 3 | The refused-transition drop is logged, not counted | New bounded reason `terminal-batch` on `courtregister_public_events_ignored_total`; FR-008, SC-010 |
+| 3 | The refused-transition drop is logged, not counted | New bounded reason `terminal-batch` on `yotresultsdistribution_public_events_ignored_total`; FR-008, SC-010 |
 | 4 | The retirement's blast radius is wider than the three classes named | Full file inventory below, including the three gauges, the counter, `RunReport`, `RunCorrelation`'s nesting javadoc and sixteen suites |
 | 5 | The report's late-batch threshold derives from the grace period | Its own setting at the previous derived value |
 | 6 → revised | Keep the retired vocabulary as history / **remove it** | Removed from the enums and the schema; the migration's one operational caveat recorded |
@@ -166,10 +166,10 @@ AI attribution; TDD red-run convention, including for deletion.
 
 | Property | Before | After | Note |
 |---|---|---|---|
-| `courtregister.generation.grace-period` | `10m` | **renamed** `courtregister.generation.stale-after`, default `30m` | How long a batch the **schedule** made may be in flight before the next run gives up on it. The positive-value refusal is kept verbatim under the new key. Removed, not aliased: there is no `${...}` placeholder for the old key in this repository, so nothing outside can be relying on one |
-| `courtregister.generation.completion` | `event` \| `poll-only` | **removed** | `poll-only` would mean "learn no outcome and re-render nightly for ever". `PublicEventsConfig` subscribes whenever generation is enabled; `PropertiesValidator`'s broker rule drops its conjunct and applies unconditionally |
-| `courtregister.report.batch-generated-within` | unset, resolved from `generation.grace-period` | own `@DefaultValue("10m")` | The two now answer different questions. `resolvedBatchGeneratedWithin` and the "a zero grace period makes the unset limit refuse" case go |
-| `courtregister.generation.batch-age-refresh` | — | **new**, `10m` | `BatchAgeSweep`'s fixed delay, written twice (placeholder + `@DefaultValue`) for the reason `courtregister.intake.gauge-refresh` is. Refused if not positive |
+| `yotresultsdistribution.generation.grace-period` | `10m` | **renamed** `yotresultsdistribution.generation.stale-after`, default `30m` | How long a batch the **schedule** made may be in flight before the next run gives up on it. The positive-value refusal is kept verbatim under the new key. Removed, not aliased: there is no `${...}` placeholder for the old key in this repository, so nothing outside can be relying on one |
+| `yotresultsdistribution.generation.completion` | `event` \| `poll-only` | **removed** | `poll-only` would mean "learn no outcome and re-render nightly for ever". `PublicEventsConfig` subscribes whenever generation is enabled; `PropertiesValidator`'s broker rule drops its conjunct and applies unconditionally |
+| `yotresultsdistribution.report.batch-generated-within` | unset, resolved from `generation.grace-period` | own `@DefaultValue("10m")` | The two now answer different questions. `resolvedBatchGeneratedWithin` and the "a zero grace period makes the unset limit refuse" case go |
+| `yotresultsdistribution.generation.batch-age-refresh` | — | **new**, `10m` | `BatchAgeSweep`'s fixed delay, written twice (placeholder + `@DefaultValue`) for the reason `yotresultsdistribution.intake.gauge-refresh` is. Refused if not positive |
 | *(no new key for the manual grace)* | — | derived | The manual cutoff is `max(staleAfter, lockAtMostFor)`, both of which are already settings and already validated. A third key would be a third thing to get wrong and a second answer to "how long may a run take" |
 
 Three `application.yaml` comment sites move with the rename (the intake block's "a value borrowed
@@ -285,7 +285,7 @@ config/SchedulingConfig.java           staleBatchReleaser bean beside the job, u
                                        stops describing two surfaces sharing it once the
                                        reconciler's timer goes
 config/SchedulingInfrastructureConfig.java, config/ProcessedLogConfig.java,
-config/CourtRegisterProperties.java, config/PublicEventsConfig.java,
+config/YotResultsDistributionProperties.java, config/PublicEventsConfig.java,
 config/PublicEventsHealthIndicator.java, config/PropertiesValidator.java,
 config/GenerationMetrics.java, config/ReportProperties.java
                                        config/CliModeConfig.java is the 005 worktree's and was
@@ -293,7 +293,7 @@ config/GenerationMetrics.java, config/ReportProperties.java
                                        handed over rather than written here
 adapter/publicevents/DocumentEventListener.java   comments, and the one counter gate round 1 asked
                                        for: the two incomplete-outcome drops now move
-                                       courtregister_public_events_ignored_total under the bounded
+                                       yotresultsdistribution_public_events_ignored_total under the bounded
                                        reason incomplete-outcome (GenerationMetrics with it), pinned
                                        by two cases in DocumentEventListenerTest
 resources/application.yaml             the four sites
@@ -324,7 +324,7 @@ docker/wiremock/README.md              loses the query line
 
 | Area | Suite | Kind | What it holds |
 |---|---|---|---|
-| The pass | `batch/StaleBatchReleaserTest` (new) | U | FR-001/002/003/017/020: both cutoffs computed from the clock and the settings; the manual cutoff is the longer of the two, asserted **each way round** so neither ordering of the two settings is assumed; the two numbers returned; one line per batch naming it by id; nothing else read. **P2's re-pointed pinning test lives here.** **Phase 3** adds two more: a batch the store reports on `contended()` is counted on `courtregister_generation_contended_total`, said once at WARN by identity, and the pass answers normally (FR-003a); and a store that went away leaves the pass as the port's own `StoreUnavailableException`, which is the per-method outage proof gate 4 deferred here from `RegisterStoreIT`. |
+| The pass | `batch/StaleBatchReleaserTest` (new) | U | FR-001/002/003/017/020: both cutoffs computed from the clock and the settings; the manual cutoff is the longer of the two, asserted **each way round** so neither ordering of the two settings is assumed; the two numbers returned; one line per batch naming it by id; nothing else read. **P2's re-pointed pinning test lives here.** **Phase 3** adds two more: a batch the store reports on `contended()` is counted on `yotresultsdistribution_generation_contended_total`, said once at WARN by identity, and the pass answers normally (FR-003a); and a store that went away leaves the pass as the port's own `StoreUnavailableException`, which is the per-method outage proof gate 4 deferred here from `RegisterStoreIT`. |
 | The statement | `persistence/RegisterStoreIT` (extended) | IT | The predicate: PENDING by `assembled_at`, GENERATING by `requested_at`, GENERATED never, `system_generated = false` on the longer cutoff, PENDING with a null `payload_file_id` included (FR-020); the mark and the release in one transaction; supersession against a later re-share and against the share the register coming back overtook; the failure names no completion mechanism — the statement writes `completed_by = NULL` and `register_batch_completed_by_shape_chk` is what refuses the contrary, pinned by `the_failure_names_no_completion_mechanism`; a refusal on a rule that is no key at all reaches the caller as the domain's own class [gate 5]; a batch that no longer matches yields zero rows and no error. |
 | Atomicity | `persistence/StaleReleaseConcurrencyIT` (new) | IT | **SC-009 [review]**: the pass raced against `markRequested` and against `markGenerated`, both winner orders, repeated; and against a re-share of one of the batch's own hearings, including one committed **inside the statement's own window**, where the snapshot cannot see it — no register ever stamped to a terminal batch, at most one live batch per key (a released day has none until it is re-assembled), exactly one notification aggregate, and nothing escaping the pass. **Gate 3**: and a batch whose every attempt is refused for the key is reported on `contended()` and left untouched while another court centre's stale batch is failed and released anyway. **Gate 4**: that refusal is now staged by a trigger scoped to the round's hearing, which takes the day's active register back inside every attempt — the refusal a re-share committing inside each window produces — because the out-of-order share it used to be staged with is one the release now decides, and the release supersedes it. **Gate 5**: the batch that must be released anyway stands on the **day after** the contended one, because the pass walks its batches by register date and then by batch id — so "the pass goes on to the batches after a contended one" is asserted on every run rather than on the runs where two random identities happen to fall the right way. |
 | The run | `batch/RegisterGenerationJobTest` (extended) | U | The `InOrder` gate → releaser → `activeUnbatched`; a skipped run releases nothing, driven over both `FLAG_OFF` and `FLAG_UNREADABLE` (FR-005/FR-018); `released_batches=`, `released_registers=` and `contended=` on the line, zero when none, `reconciled=` nowhere; a releaser that throws still writes a line and rethrows; **a batch the pass could not release does not stop the run** (FR-003a), as `a_batch_the_pass_could_not_release_should_not_stop_the_run`. |
@@ -348,5 +348,5 @@ docker/wiremock/README.md              loses the query line
 | A new store method rather than reusing `markFailed` per batch | Atomicity and the fence are the correctness of the feature | A loop of `markFailed` strands registers on a crash and lets one refused transition end the night |
 | `BatchAgeSweep`, a new class in a subtractive increment | Three gauges would otherwise freeze at whatever the last run saw, and a Micrometer gauge never decays | Leaving them in the pass makes them a daily sample under the run's lock; folding them into `IntakeAgeSweep` puts generation readings on a sweep that runs where generation is off |
 | `ExceptionKind.BATCH_RELEASED` | A released batch's registers went out the same night | Reporting it as `BATCH_FAILED` sends support after something already put right, every morning after any lost outcome |
-| Removing `courtregister.generation.completion` rather than pinning it | `poll-only` would re-render everything nightly for ever | A setting with one legal value reads as a choice and is not one |
+| Removing `yotresultsdistribution.generation.completion` rather than pinning it | `poll-only` would re-render everything nightly for ever | A setting with one legal value reads as a choice and is not one |
 | Two released numbers rather than one | A batch is a document and an e-mail; a register is a hearing. The run line already keeps both accounts | One number answers only one of the two questions a night raises |

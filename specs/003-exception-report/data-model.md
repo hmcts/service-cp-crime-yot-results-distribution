@@ -338,7 +338,7 @@ public enum ExceptionKind {
 ```
 
 Closed, five values, and the `kind` field of every event and the `kind` label of
-`courtregister_exceptions_reported_total`. A sixth kind is a spec change, not an addition: the
+`yotresultsdistribution_exceptions_reported_total`. A sixth kind is a spec change, not an addition: the
 report's whole claim is that these five are what can be wrong. `BATCH_FAILED` is the one the two
 state machines make unavoidable - a batch that reached its own terminal failure is the downstream
 half's equivalent of a `FAILED` request, and a report that named the late batches but not the dead
@@ -378,7 +378,7 @@ is a boundary the next run cannot open on, and the delay between the two is a sl
 twice. What that costs is stated rather than hidden: a row that fails *after* the occurrence waits
 for the next run, and **a skipped run loses its period** - the following run opens at its own
 previous occurrence, not at the last one that reported. The report is not the alerting surface for a
-report that did not run; `courtregister_exception_report_runs_total` is, and a missing series on it
+report that did not run; `yotresultsdistribution_exception_report_runs_total` is, and a missing series on it
 is what says so. There is deliberately **no tolerance** around the occurrence - "near enough to count
 as on it" is a second boundary to get wrong, and the at-or-before step answers the only case a
 tolerance was ever for.
@@ -400,7 +400,7 @@ report zone instead. That class answers both boundaries: `before(cron, zone, ins
 expression, a zone and an instant: it reaches nothing, holds nothing, and `ReportWindow` - itself a
 domain record - is one of its two callers, so a `domain` type would otherwise depend on a `batch`
 one. There is no
-`courtregister.report.window` setting and there is deliberately no fixed default duration: a
+`yotresultsdistribution.report.window` setting and there is deliberately no fixed default duration: a
 duration and a schedule are two statements of the same fact, and the morning they disagree is the
 morning a failure falls into the gap between two windows or is reported twice. A Monday 07:00 run
 therefore reads back to Friday 07:00, and a schedule changed to twice a day changes the window with
@@ -452,7 +452,7 @@ is a projection that has drifted from its table.
 | `runId` | `String` | The correlation the caller opened and passed in, the same value `RunCorrelation` put in the MDC |
 | `window` | `ReportWindow` | What was asked for |
 | `snapshotAt` | `Instant` | When the reads were taken, which is not the same as when the events were written |
-| `entries` | `List<ExceptionEntry>` | Oldest first, across all five kinds; ties broken by `kind` in enum order and then by the most specific identifier the entry carries. **At most `courtregister.report.max-entries` of the two late kinds**; every failure the reads found, whatever the count |
+| `entries` | `List<ExceptionEntry>` | Oldest first, across all five kinds; ties broken by `kind` in enum order and then by the most specific identifier the entry carries. **At most `yotresultsdistribution.report.max-entries` of the two late kinds**; every failure the reads found, whatever the count |
 | `truncated` | `int` | How many **late** entries the reads found and the cap dropped - never a failure; nought on every ordinary morning |
 | `counts` | `Map<ExceptionKind, Integer>` | How many of each kind the reads found, **before** the cap, zero-filled |
 
@@ -555,8 +555,8 @@ One mechanism each, and never two for one value:
 
 | Setting | Default | How it resolves |
 |---|---|---|
-| `courtregister.report.batch-generated-within` | none; binds `null` | `PropertiesValidator` resolves the null to `GenerationProperties.gracePeriod()` and publishes the resolved value for the report to read. **No `application.yaml` placeholder**, because nothing reads this key through the placeholder resolver - it is read from a record, and writing it twice would let the two copies disagree |
-| `courtregister.intake.gauge-refresh` | `10m`, its own `@DefaultValue` | Read as a placeholder by `@Scheduled(fixedDelayString = "${courtregister.intake.gauge-refresh}")` and bound on the intake record. It borrows nothing from the generation half: the sweep runs where that half is switched off, so a value resolved from `courtregister.generation.grace-period` would be a value an intake-only pod could not read |
+| `yotresultsdistribution.report.batch-generated-within` | none; binds `null` | `PropertiesValidator` resolves the null to `GenerationProperties.gracePeriod()` and publishes the resolved value for the report to read. **No `application.yaml` placeholder**, because nothing reads this key through the placeholder resolver - it is read from a record, and writing it twice would let the two copies disagree |
+| `yotresultsdistribution.intake.gauge-refresh` | `10m`, its own `@DefaultValue` | Read as a placeholder by `@Scheduled(fixedDelayString = "${yotresultsdistribution.intake.gauge-refresh}")` and bound on the intake record. It borrows nothing from the generation half: the sweep runs where that half is switched off, so a value resolved from `yotresultsdistribution.generation.grace-period` would be a value an intake-only pod could not read |
 
 The rule behind both rows: a duration is either a record value resolved once in the validator, or a
 placeholder with a literal default - never both. The earlier plan gave `gauge-refresh` a
@@ -662,15 +662,15 @@ the way the framework spells them:
 |---|---|
 | `fileName` | `court-register-exceptions_{yyyy-MM-dd}.csv`, the date being the run's own day in `Europe/London` |
 | `conversionFormat` | `csv` |
-| `templateName` | `courtregister-exception-report` |
+| `templateName` | `yot-results-distribution-exception-report` |
 | `numberOfPages` | `1` |
 | `fileSize` | the CSV's byte count |
 
-The port both writes go through is chosen by `config/FileServiceNeeded` - `courtregister.generation
-.enabled` **or** `courtregister.report.email.enabled` - and not by the generation half's switch
-alone, because those are the two halves that write a file. `courtregister.fileservice.url` is
+The port both writes go through is chosen by `config/FileServiceNeeded` - `yotresultsdistribution.generation
+.enabled` **or** `yotresultsdistribution.report.email.enabled` - and not by the generation half's switch
+alone, because those are the two halves that write a file. `yotresultsdistribution.fileservice.url` is
 required of whichever of them is on, the refusal naming the half that asked, and the mode key
-`courtregister.generation.fileservice-mode` still chooses LIVE or STUB for both.
+`yotresultsdistribution.generation.fileservice-mode` still chooses LIVE or STUB for both.
 
 The two inserts are `FileServicePayloadStore`'s own, character for character, in the same order:
 **content first**, because `metadata.file_id` is a foreign key onto `content.file_id`. The content
@@ -731,11 +731,11 @@ group already makes about the other five commands).
 
 ## Log event field shapes
 
-### `courtregister_exception_report` - once per run
+### `yotresultsdistribution_exception_report` - once per run
 
 | Field | Type | Notes |
 |---|---|---|
-| `event` | string | `courtregister_exception_report` |
+| `event` | string | `yotresultsdistribution_exception_report` |
 | `run_id` | string | the run's correlation, the same value on every line of the run |
 | `window_from`, `window_to`, `snapshot_at` | ISO-8601 instants | |
 | `request_failed`, `request_late`, `batch_late`, `batch_failed`, `notification_failed` | integers | always present, zero included; **what the reads found**, never what the cap kept |
@@ -777,9 +777,9 @@ event=exception_report_run run_id=<id> window_from=<instant> window_to=<instant>
 | `run_id` | the run's correlation |
 | `window_from`, `window_to` | the window that was read |
 | `entries` | how many exceptions the report holds, across all five kinds |
-| `truncated` | how many **late** entries the reads found and `courtregister.report.max-entries` dropped; never a failure |
+| `truncated` | how many **late** entries the reads found and `yotresultsdistribution.report.max-entries` dropped; never a failure |
 | `delivered_log` | `ok` or `failed` |
-| `delivered_email` | `ok`, `failed`, `skipped` (the command was run without `--email`) or `disabled` (there is no e-mail sink on the context, which is what `courtregister.report.email.enabled=false` produces). Both callers read presence off the sinks the context contributed, never off the setting |
+| `delivered_email` | `ok`, `failed`, `skipped` (the command was run without `--email`) or `disabled` (there is no e-mail sink on the context, which is what `yotresultsdistribution.report.email.enabled=false` produces). Both callers read presence off the sinks the context contributed, never off the setting |
 | `outcome` | `delivered` (every sink asked said ok), `partial` (at least one sink asked failed and at least one said ok), or `failed` (the run could not build the report, or no sink asked said ok) |
 | `duration_ms` | how long the run took, from opening the correlation to writing this line |
 
@@ -792,7 +792,7 @@ says the same things about its own delivery that the 07:00 run does. The fold be
 the word behind each `delivered_*` field are `ReportRunOutcome.from` and `DeliveryWord.forSink`, used by both
 callers: two copies are two ways for a dashboard and a terminal to partition the same morning.
 
-### `courtregister_exception` - once per exception
+### `yotresultsdistribution_exception` - once per exception
 
 `event`, `run_id`, `kind`, then the applicable subset of `source`, `request_id`, `hearing_id`,
 `hearing_day`, `batch_id`, `notification_id`, `court_centre_id`, `register_date`, `status`,

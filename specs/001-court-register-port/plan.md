@@ -1,11 +1,11 @@
-# Implementation Plan: Court Register Service — full pipeline port, fix-first
+# Implementation Plan: YOT Results Distribution Service — full pipeline port, fix-first
 
 **Branch**: `main` | **Date**: 2026-08-31 | **Spec**: [spec.md](spec.md)
 **Input**: Feature specification from `/specs/001-court-register-port/spec.md`
 
 ## Summary
 
-Build the whole court-register service in one increment: the delivery machinery cloned from
+Build the whole YOT results distribution service in one increment: the delivery machinery cloned from
 `service-cp-crime-informant-register` (Service Bus consumer with explicit settlement, durable
 Postgres idempotency guard, deferred Flyway, suspend-on-store-outage, the agreed health policy),
 plus the full ported pipeline — payload fetch (Lettuce + results-query fallback), register
@@ -46,7 +46,7 @@ via the cloned static `support/` fixtures; `*Test` needs no Docker, `*IT` does; 
 under `./gradlew test`.
 
 **Target Platform**: AKS (port 4550; local 8082); local dev via `docker-compose.yml` (Postgres,
-Service Bus emulator; queue `courtregister.requests` declared in
+Service Bus emulator; queue `yotresultsdistribution.requests` declared in
 `docker/servicebus-emulator/config.json`).
 
 **Project Type**: single Spring Boot service, actuator-only HTTP surface.
@@ -65,19 +65,19 @@ legacy-repo items, Progression leg, KEDA, alert wiring.
 
 ### Configuration (this increment)
 
-The informant configuration table carries over with the prefix `courtregister.*` and these
+The informant configuration table carries over with the prefix `yotresultsdistribution.*` and these
 differences:
 
 | Property | Local default | Purpose |
 |----------|---------------|---------|
-| `courtregister.servicebus.queue-name` | `courtregister.requests` | Inbound queue |
-| `courtregister.progression.base-url` | `${PROGRESSION_BASE_URL:http://localhost:8080}` | Outbound command API (replaces `results.base-url` as the submission target) |
-| `courtregister.progression.system-user-id` | `${COURT_REGISTER_SYSTEM_USER_ID:}` | `CJSCPPUID` for the POST; startup refusal if absent in LIVE mode |
-| `courtregister.progression.max-attempts` / `initial-backoff` / `max-backoff` / `connect-timeout` / `read-timeout` | `4` / `500ms` / `20s` / `5s` / `30s` | Submission retry policy (C1/C3) |
-| `courtregister.results.base-url` + `system-user-id` | `${RESULTS_BASE_URL:…}` | Payload query **fallback only** (the results context keeps the query API) |
-| `courtregister.referencedata.*` | as informant | now-subscriptions lookup |
-| `courtregister.payload.redis.*` | as informant, `key-prefix: INT_`, **`ssl` verified when on (C15)** | claim-check cache |
-| `courtregister.submission.validate-outbound` | `true` | Pre-send contract validation (C29); never disabled in a deployed profile |
+| `yotresultsdistribution.servicebus.queue-name` | `yotresultsdistribution.requests` | Inbound queue |
+| `yotresultsdistribution.progression.base-url` | `${PROGRESSION_BASE_URL:http://localhost:8080}` | Outbound command API (replaces `results.base-url` as the submission target) |
+| `yotresultsdistribution.progression.system-user-id` | `${YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID:}` | `CJSCPPUID` for the POST; startup refusal if absent in LIVE mode |
+| `yotresultsdistribution.progression.max-attempts` / `initial-backoff` / `max-backoff` / `connect-timeout` / `read-timeout` | `4` / `500ms` / `20s` / `5s` / `30s` | Submission retry policy (C1/C3) |
+| `yotresultsdistribution.results.base-url` + `system-user-id` | `${RESULTS_BASE_URL:…}` | Payload query **fallback only** (the results context keeps the query API) |
+| `yotresultsdistribution.referencedata.*` | as informant | now-subscriptions lookup |
+| `yotresultsdistribution.payload.redis.*` | as informant, `key-prefix: INT_`, **`ssl` verified when on (C15)** | claim-check cache |
+| `yotresultsdistribution.submission.validate-outbound` | `true` | Pre-send contract validation (C29); never disabled in a deployed profile |
 
 Startup validation clones the informant `PropertiesValidator` rules, with the worst-case-fetch
 arithmetic extended to include the submission policy: exactly-one credential source; deadline
@@ -99,7 +99,7 @@ against the approved v2.0.0 design (Principle I = Defect-Fix-First with Characte
 | V | SOLID with Ports and Adapters | **PASS** — same core/port shape as informant; `pipeline/` classes are pure (no I/O, no clock reads — the clock is injected); adapters own all transport. |
 | VI | Explicit Failure | **PASS (inherited waiver on alert wiring)** — the whole C1/C2/C3/C32/C33 fix family is this principle; four bounded no-op completion reasons replace silence; DLQ countable; ERROR + metric on every failure path. |
 | VII | Privacy in Telemetry | **PASS** — correlation set only; the register handles youth-defendant data, so the privacy tests matter more here: no names, addresses, ethnicity or dates of birth in any log or label; C25's fix changes document content, never telemetry. |
-| VIII | Estate Conventions | **PASS** — cloned build/gates/CI; package root `uk.gov.hmcts.cp.courtregister`; Conventional Commits on `main`, no ticket prefix (user decision), no AI attribution. |
+| VIII | Estate Conventions | **PASS** — cloned build/gates/CI; package root `uk.gov.hmcts.cp.yotresultsdistribution`; Conventional Commits on `main`, no ticket prefix (user decision), no AI attribution. |
 
 ## Project Structure
 
@@ -123,8 +123,8 @@ specs/001-court-register-port/
 ### Source Code (repository root)
 
 ```text
-src/main/java/uk/gov/hmcts/cp/courtregister/
-├── inbound/          # ServiceBusConsumerConfig, CourtRegisterMessageListener,
+src/main/java/uk/gov/hmcts/cp/yotresultsdistribution/
+├── inbound/          # ServiceBusConsumerConfig, YotResultsDistributionMessageListener,
 │                     # DistributionCommandParser, ConsumerLifecycleController, StoreGate
 ├── application/      # DistributionPipeline, IdempotencyGuard,
 │                     # ports: HearingPayloadSource, NowSubscriptionsSource,
@@ -147,7 +147,7 @@ src/main/java/uk/gov/hmcts/cp/courtregister/
 │                     #  ProsecutionCaseOrApplication,Offence,Result,Defendant,Address,Alias,
 │                     #  Counsel}Mapper, Json, JsStrings
 ├── persistence/      # ProcessedLogProbe, ProcessedRequestRepository, ProcessedOutputRepository
-└── config/           # CourtRegisterProperties, PropertiesValidator, JacksonConfig,
+└── config/           # YotResultsDistributionProperties, PropertiesValidator, JacksonConfig,
                       # DeferredFlywayMigration, ServiceBusHealthIndicator,
                       # IntakeStartupHealth(+Indicator), ProcessingMetrics, PipelineConfig,
                       # Live/Stub adapter configs
@@ -205,7 +205,7 @@ Layers: **U** unit · **W** WireMock · **PG** Postgres `*IT` · **SB** emulator
 | Guard | `IdempotencyGuardIT`, `ProcessedLogDurabilityIT`, `ClaimContentionIT`, `ClaimReclamationIT`, `StaleRunnerRejectionIT`, `CrashWindowIT`, `FailedReplayIT`, `IdempotencyCollisionIT`, `ProcessedOutputRepositoryIT` | PG | inherited FR-004…008/016/018 semantics; N15 |
 | Listener | `MessageListenerSettlementTest`, `SettlementFailureEdgeTest` | U | one settlement per delivery; edges, store-gate failures included |
 | Lifecycle | `ConsumerLifecycleControllerTest` | U | suspension ordering: SUSPENDED only after a stop that succeeded, refusals reported/counted/retried |
-| Transport | `QueueSettlementIT`, `ContractValidationDeadLetterIT`, `DeliveryExhaustionIT`, `DuplicateDetectionIT`, `StoreOutageIT`, `ProlongedStoreOutageIT`, `ReadinessPolicyIT`, `StartupWithQueueDownIT`, `QueueOutageRecoveryIT` | SB/PG | inherited transport semantics on `courtregister.requests` |
+| Transport | `QueueSettlementIT`, `ContractValidationDeadLetterIT`, `DeliveryExhaustionIT`, `DuplicateDetectionIT`, `StoreOutageIT`, `ProlongedStoreOutageIT`, `ReadinessPolicyIT`, `StartupWithQueueDownIT`, `QueueOutageRecoveryIT` | SB/PG | inherited transport semantics on `yotresultsdistribution.requests` |
 | Transport | `RequestDedupeIT` | SB/PG | C17 end to end through the real listener + guard, distinct broker `messageId`s: identical redelivery ⇒ one run, row untouched, completed; changed immutable field ⇒ collision dead-letter, record untouched |
 | Health | `ServiceBusHealthIndicatorTest` | U | broker-silence model |
 | Pipeline | `DistributionPipelineTest` | U | N1–N7 orchestration; C2 always-a-terminal-status; C32 transient; four no-op reasons N29–N33; C6; the reference-data read the core owns (day, identity, unanswered ⇒ transient — the CS1 split's second half); the cumulative run budget under a moving clock |
@@ -230,7 +230,7 @@ Layers: **U** unit · **W** WireMock · **PG** Postgres `*IT` · **SB** emulator
 | Submission | `SubmissionRedeliveryIT` | PG+W | replay skips already-POSTED output |
 | HTTP surface | `HttpSurfaceTest`, `ActuatorIntegrationTest`, `SharedObjectMapperTest` | U | actuator-only, BigDecimal pin |
 | Privacy | `TelemetryPrivacyTest` | U | no PII at INFO+ (youth-defendant fields named explicitly) |
-| E2E | `CourtRegisterEndToEndIT` | E2E | SC-103 happy path → POSTED; each no-op reason observable |
+| E2E | `YotResultsDistributionEndToEndIT` | E2E | SC-103 happy path → POSTED; each no-op reason observable |
 | E2E | `PayloadSourceEndToEndIT` | E2E | cache hit (query side untouched); cache miss → query fallback → COMPLETED; both miss → C32 transient → redelivery recovers |
 | E2E | `SubmissionOutcomeEndToEndIT` | E2E | C29 pre-send refusal with zero POSTs; C1 400 → FAILED + parked + `response_code`; C3 5xx-then-202 → one POSTED row; non-202 2xx → `SUBMISSION_NOT_ACCEPTED`; exhaustion → `exhausted_message_id`; re-share → two POSTED rows |
 | E2E | `RegisterAddressingEndToEndIT` | E2E | reference data unanswered → transient → redelivery; empty answer → `no-subscriptions`; C31 adult-first/youth-second hearing produces the youth register |

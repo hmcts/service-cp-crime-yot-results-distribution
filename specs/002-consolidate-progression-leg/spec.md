@@ -148,7 +148,7 @@ NOTIFIED.
 
 ### User Story 4 - One flag decides which implementation is live (Priority: P1)
 
-Operations flip the existing `CourtRegisterService` feature flag. When it is on, the results
+Operations flip the existing `YotResultsDistributionService` feature flag. When it is on, the results
 producer publishes to this service, the legacy triggers stand down, and this service's nightly job
 generates. When it is off — or cannot be read — this service's job does nothing and the legacy,
 whose schedule is never touched, generates as it does today. Cutover and rollback are that single
@@ -282,7 +282,7 @@ for absorbing it.
 - **FR-005**: A scheduled job MUST run at 18:00 Europe/London Monday to Friday, guarded so that at
   most one run proceeds at a time across instances, and MUST refuse to start with any other zone
   unless an explicit override acknowledgement is configured.
-- **FR-006**: The job MUST first read the `CourtRegisterService` feature flag (once per run, no
+- **FR-006**: The job MUST first read the `YotResultsDistributionService` feature flag (once per run, no
   cache, bounded timeout) and MUST skip the run, counting the reason, when the flag is OFF or
   unreadable.
 - **FR-007**: The job MUST group active, unbatched, recorded-while-on records by court centre and
@@ -343,7 +343,7 @@ for absorbing it.
 - **Register notification**: one per batch and recipient — notification identity, address, name,
   template, state (PENDING, ACCEPTED, FAILED), response, sent time.
 - **Run**: one per scheduled or manual execution — flag outcome, counts per outcome, duration.
-- **Feature flag**: the external `CourtRegisterService` toggle, read per run.
+- **Feature flag**: the external `YotResultsDistributionService` toggle, read per run.
 
 ## Success Criteria *(mandatory)*
 

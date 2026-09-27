@@ -38,11 +38,11 @@ approval **before** the commit lands — never argued for afterwards in a commit
    001–003, not in this increment, and it stops and asks.
 2. **The coordination contract in `plan.md` is binding.** 005 must not touch
    `batch/RegisterGenerationJob`, `batch/GenerationReconciler`, `application/DocumentRenderer`,
-   `adapter/systemdocgenerator/*`, the `courtregister.generation.*` block of `application.yaml`, or
+   `adapter/systemdocgenerator/*`, the `yotresultsdistribution.generation.*` block of `application.yaml`, or
    README's generation section. Where a task is near one of those, it says so.
 
-**Conventions**: package root `uk.gov.hmcts.cp.courtregister`; production code under
-`src/main/java/uk/gov/hmcts/cp/courtregister/`, tests under `src/test/java/uk/gov/hmcts/cp/courtregister/`.
+**Conventions**: package root `uk.gov.hmcts.cp.yotresultsdistribution`; production code under
+`src/main/java/uk/gov/hmcts/cp/yotresultsdistribution/`, tests under `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/`.
 `*IT` suites need Docker and run inside `./gradlew test`. Conventional Commits on
 `005-operations-rest-api`; accepted types `feat`, `fix`, `chore`, `docs`, `test`, `refactor`,
 `build`, `ci`, `style`. No AI attribution in any commit, comment, document or test name. Every
@@ -66,7 +66,7 @@ proposal) is in `spec.md`; step 2 (the bump) is commit `d73ef50`; step 3 is this
 
 - [x] **T001** [A] **Run `/speckit-analyze` for `specs/005-operations-rest-api/`, and again for the
       concurrent `specs/004-release-stale-batches/`** (in the main checkout —
-      `/home/sachin/moj/service-cp-crime-court-register`, **read-only**: never edit that tree from
+      `/home/sachin/moj/service-cp-crime-yot-results-distribution`, **read-only**: never edit that tree from
       this branch). Governance step 3 requires every in-flight spec to be re-checked against the
       amended principles and each conflict updated or explicitly waived. Update this spec where the
       analysis finds a conflict; for 004, **record** each conflict in this task's commit narrative
@@ -156,7 +156,7 @@ refusal in this repository is.
       (run on this commit's tree: `./gradlew test --tests '...AuditComponentScanTest'` - 3 tests,
       0 failures, all three PASSED, the predicted green-today. The context refreshed in 2.064s on
       the `test` profile with `cp.audit.enabled=false`, `audit.http.enabled=false`,
-      `authz.http.enabled=false` and `courtregister.operations.enabled=false`; nothing on the
+      `authz.http.enabled=false` and `yotresultsdistribution.operations.enabled=false`; nothing on the
       classpath is in `uk.gov.hmcts.cp.filter.audit`, so `auditStarterBeans()` is empty for the
       only reason it can be today. The second of the three runs - the one that fails - is recorded
       against T003, which is where the dependency arrives. Deviation from the task text, additive:
@@ -228,7 +228,7 @@ refusal in this repository is.
       `apply from:` files, which dependabot cannot read, and a version catalogue is one it can.)
 - [x] **T004** [P] [US1] `config/OperationsPropertiesTest` (new) and `config/ConfigurationValidationTest`
       (extend) — **the defaults and the value refusals**. Defaults off an
-      `ApplicationContextRunner`: `courtregister.operations.enabled=true`, `supersede-max-age=30d`,
+      `ApplicationContextRunner`: `yotresultsdistribution.operations.enabled=true`, `supersede-max-age=30d`,
       `lock-wait=0s`, and off the shipped file `authz.http.enabled=true` and
       `audit.http.enabled=true`. Refusals, each asserting the message **names the offending
       setting**: `an_audit_transport_with_no_broker_refuses_to_start`,
@@ -264,7 +264,7 @@ refusal in this repository is.
       (**Rewritten at gate round 3, and the rewrite is the point of this entry.** Gate rounds 1 and
       2 grew this task a family of cases that pinned a **cross-field start-up refusal**: the
       operations API enabled with `audit.http.enabled` or `authz.http.enabled` off, absent, or
-      spelled `yes`, refused on a `courtregister.servicebus.namespace` discriminator, with two
+      spelled `yes`, refused on a `yotresultsdistribution.servicebus.namespace` discriminator, with two
       "should start" counterparts for the local loop. The design owner withdrew the rule on
       2026-09-20 — the two switches are ordinary configuration an operator may set, and the pod
       always comes up — and constitution 5.0.0 redefined conditions (a) and (b) to the defaults
@@ -279,7 +279,7 @@ refusal in this repository is.
       for pass without it, because the rule that needed it is gone.
       red: 178 tests, 23 failed, every one an assertion — three "should start" cases on *"Expecting
       <Unstarted application context ...> to have not failed"*, the transport and range cases on a
-      message naming `courtregister.operations.enabled` where their own setting was expected, the
+      message naming `yotresultsdistribution.operations.enabled` where their own setting was expected, the
       two shipped-default cases on *`expected: "true" but was: null`*, and the five pre-existing
       cases the widened base runner had been propping up.)
       (**Extended at gate round 4**, with the pair of cases that pin what the defaults leave
@@ -293,7 +293,7 @@ refusal in this repository is.
       red: 180 tests, 1 failed, an assertion — *"Expecting any element of: [] to satisfy the given
       assertions requirements but none did"*.)
 - [x] **T005** [US1] `config/OperationsProperties` and `config/PropertiesValidator` — the record
-      bound at `@ConfigurationProperties(prefix = "courtregister.operations")` with its
+      bound at `@ConfigurationProperties(prefix = "yotresultsdistribution.operations")` with its
       `@DefaultValue`s, following `GenerationProperties`' style, and T004's refusals written as the
       validator's existing helpers write generation's; plus the `authz.http.enabled` and
       `audit.http.enabled` defaults in `application.yaml` and the two files that override them.
@@ -314,7 +314,7 @@ refusal in this repository is.
       so the HTTP half on over a transport that is off traps nothing; and the two duration rules are
       unchanged. `validateTheOperationsApiIsNeverServedUnauthorisedWhereItIsDeployed` and its audit
       twin are **deleted**, with `unaudited`, `unauthorised` and `servedOnADeployedPod`;
-      `validateOperations` no longer takes `CourtRegisterProperties`, because the discriminator was
+      `validateOperations` no longer takes `YotResultsDistributionProperties`, because the discriminator was
       the only thing that read them. The static `validate(...)` is **still** byte-for-byte what it
       was.
       The transport rules read `cp.audit.enabled` with an absent key taken as **off** rather than as
@@ -423,7 +423,7 @@ wants to claim beyond this.
       from the current thread, and the nested class renamed off PMD's short-name list.)
 - [x] **T009** [US2] `src/main/resources/acl/operations-rules.drl` — seven allow rules in the
       reference implementation's exact form (research R3): no `package` declaration, the two
-      imports, the global, `$o: Outcome()` / `$a: Action(name == "courtregister-operations.<verb>")`
+      imports, the global, `$o: Outcome()` / `$a: Action(name == "yot-results-distribution-operations.<verb>")`
       / `eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))` /
       `$o.setSuccess(true)`. No deny rule anywhere — absence is the denial. Green: T008.
 - [x] **T010** [P] [US2] `api/OperationsActionFilterTest` (new) — **the action name is derived by
@@ -459,7 +459,7 @@ wants to claim beyond this.
       visible through one accessor and not another is the same hole in a quieter spelling. The
       registration is a `FilterRegistrationBean` rather than a `@Component`, because the order is
       the whole reason the class exists and a registration is where an order is stated; it is
-      gated on `courtregister.operations.enabled`, default on, and mapped over every path rather
+      gated on `yotresultsdistribution.operations.enabled`, default on, and mapped over every path rather
       than over `/operations/*` so that the list of this service's paths lives in exactly one
       place.)
 - [x] **T012** [P] [US2] `api/OperationsErrorAttributesTest` (new) — **the `/error` body carries
@@ -527,7 +527,7 @@ the "a controller may not hold a repository" rule both land.
       cannot be added without a case; the reader asked exactly once with
       `verifyNoMoreInteractions`; a second call asking again rather than answering from a cache;
       and a method the endpoint does not answer never reaching the reader.
-      The slice sets a fourth property the task does not name, `courtregister.generation.enabled=true`,
+      The slice sets a fourth property the task does not name, `yotresultsdistribution.generation.enabled=true`,
       and it is not incidental - see T015's entry.)
 - [x] **T015** [US1] `api/FlagController` and `api/dto/FlagResponse` — the three readings through a
       switch expression over `FlagDecision`, as `CheckFlagCli.answered` did. Green: T014.
@@ -536,16 +536,16 @@ the "a controller may not hold a repository" rule both land.
       finding was fixed rather than suppressed, a loop over the unreadable causes becoming an
       `@EnumSource`.
       **A condition the task did not name, and a question for T040/T041.** `FeatureFlagReader` is
-      contributed only where `courtregister.generation.enabled` is true - `LiveFeatureFlagConfig`
+      contributed only where `yotresultsdistribution.generation.enabled` is true - `LiveFeatureFlagConfig`
       and `StubGenerationConfig` are both behind that key - so a `@RestController` holding one
       would fail the refresh on every pod that renders nothing, including the whole `test` profile.
       The controller therefore carries
-      `@ConditionalOnProperty(prefix = "courtregister.generation", name = "enabled", havingValue = "true")`,
+      `@ConditionalOnProperty(prefix = "yotresultsdistribution.generation", name = "enabled", havingValue = "true")`,
       which is exactly where `check-flag` answered `command-not-wired`. T041's text says the flag
       endpoint is among "the other four served normally" on a generation-off pod; on today's wiring
       it is a **fourth** endpoint that needs those beans, so T040/T041 must either add it to the
       not-wired set or make the reader unconditional. Not decided here: `LiveFeatureFlagConfig` and
-      the `courtregister.generation.*` block are outside this increment's range.)
+      the `yotresultsdistribution.generation.*` block are outside this increment's range.)
 - [x] **T016** [P] [US6] `application/BatchListingServiceTest` (new) — **`ListBatchesCli`'s reads,
       moved and unchanged**. Cases: a date's batches in the statement's order, each with its record
       count from `RegisterStore.batched` and its recipients from `RegisterNotificationRepository`;
@@ -610,7 +610,7 @@ the "a controller may not hold a repository" rule both land.
       controller", which stopped being true the moment the first endpoint landed:
       • `config/GenerationMetricsContextTest` and `adapter/publicevents/DocumentEventListenerIT`
         would not refresh - `No qualifying bean of type FeatureFlagReader` for `flagController`.
-        Both run on the **`test` profile with `courtregister.generation.enabled=true`**, and both
+        Both run on the **`test` profile with `yotresultsdistribution.generation.enabled=true`**, and both
         configurations that contribute a reader (`LiveFeatureFlagConfig`, `StubGenerationConfig`)
         are `@Profile("!test")`, so that combination has the switch without the bean. Closed by
         giving `FlagController` the profile condition beside its property one, which is the same
@@ -696,7 +696,7 @@ exception report has the widest refusal set of any endpoint.
       nowhere else** (`technical-rules.md`); it must be unreachable from the listeners and the jobs.
       Green: T024.
       (Green: `OperationsExceptionHandlerTest` 39 tests, 0 failures; the whole `api` package 190
-      tests, 0 failures. The advice is declared `basePackages = "…courtregister.api"`, so it is
+      tests, 0 failures. The advice is declared `basePackages = "…yotresultsdistribution.api"`, so it is
       unreachable from the listeners and the jobs by declaration and not only by fact. It has **no
       `Exception` fallback**: an unmapped path, an unmapped method and a genuine defect reach
       Boot's `/error` and come back through `OperationsErrorAttributes` in the same bounded shape,
@@ -849,7 +849,7 @@ departure is forced — research R16 has the reasoning.
       does not need. Every line the launcher writes carries `run_id=` explicitly, which is what the
       caller was answered with.
       The two beans are contributed by a nested `OperationsWebConfig.GenerationBackedOperations`,
-      conditional on `courtregister.generation.enabled` and on not-CLI-mode: the executor is the
+      conditional on `yotresultsdistribution.generation.enabled` and on not-CLI-mode: the executor is the
       generation scheduler taken by `SchedulingConfig.GENERATION_SCHEDULER` and adapted to a plain
       `Executor`, so no Spring scheduling type reaches the application layer.
       ⚠ **The operator trigger is not on the run report line yet.** T036/T037 add the field and run
@@ -878,7 +878,7 @@ departure is forced — research R16 has the reasoning.
       lock are all the launcher's, and the `202` body carries this service's own parse of the date
       rather than the characters the caller typed. `GenerateRegisterRequest` joins
       `OperationsRequestBodies`'s closed set, so a field this service does not take is `400`.
-      **The class gained a second `@ConditionalOnProperty`, on `courtregister.generation.enabled`,
+      **The class gained a second `@ConditionalOnProperty`, on `yotresultsdistribution.generation.enabled`,
       in this commit rather than in T041's.** It had to: the launcher is contributed only where the
       generating half is, and a controller left scanned over a bean that does not exist is an
       `UnsatisfiedDependencyException` at refresh - so the commit that adds the endpoint is the
@@ -989,20 +989,20 @@ of them.
       and a batch that does not exist stays in the controller, because the two shapes an outage
       arrives in are Spring's and belong nowhere nearer the store.)
 - [x] **T040** [P] [US6] `api/NotWiredControllerTest` (new) — `501 COMMAND_NOT_WIRED` on a pod with
-      `courtregister.generation.enabled=false` for the three endpoints that need those beans
+      `yotresultsdistribution.generation.enabled=false` for the three endpoints that need those beans
       (generate, notify, the batch listing), and the other four served normally. This is exactly
       what the CLI answered on such a pod; a `404` would read as a mistyped URL and a `500` as a
       bean-definition error reaching an operator. Red: the context fails to start for want of a
       bean, or the path answers 404.
 - [x] **T041** [US6] `api/NotWiredController` and `config/OperationsWebConfig` — the controllers
       that need the generation beans registered `@ConditionalOnProperty` on
-      `courtregister.generation.enabled`, the not-wired fallback registered when it is off, and the
-      whole set conditional on `courtregister.operations.enabled`. **Reads the generation property;
+      `yotresultsdistribution.generation.enabled`, the not-wired fallback registered when it is off, and the
+      whole set conditional on `yotresultsdistribution.operations.enabled`. **Reads the generation property;
       does not change it** (004 owns that block). Green: T040.
       (Landed with T040 in one commit under the Phase 2 TDD exception, so there is no red run to
       quote. Green: `NotWiredControllerTest` 4 tests and `HttpSurfaceTest` 14 tests, 0 failures;
       the whole `api` package green beside them. Checkstyle and PMD clean on main and test. The
-      generation property is read and not changed: `courtregister.generation.*` is untouched.
+      generation property is read and not changed: `yotresultsdistribution.generation.*` is untouched.
       **The gating half of this landed in T035's commit**, because it had to - the commit that
       added an endpoint over a generation-only bean is the commit that had to gate the class, or
       the build was not green. What lands here is the fallback: `api/NotWiredController`, mapped
@@ -1018,7 +1018,7 @@ of them.
       while mapping nothing for the others would be worse than saying so. The flag endpoint's own
       conflict was settled separately, above.
       **The full build found a third condition the controller needs, and it landed straight after.**
-      `courtregister.cli=true` withdraws `SchedulingConfig` and `SchedulingInfrastructureConfig`,
+      `yotresultsdistribution.cli=true` withdraws `SchedulingConfig` and `SchedulingInfrastructureConfig`,
       so a command JVM holds neither the generation scheduler nor the ShedLock provider the
       regeneration hand-off is built over - and with the generation switch on, that made
       `batchesController` an `UnsatisfiedDependencyException` at refresh and cost every command its
@@ -1033,12 +1033,12 @@ of them.
       controllers into a commit about a fallback. Recorded here rather than done quietly.)
 
       **Half of this landed in gate round 1's remediation**, because it was not a shape improvement
-      but a crash: `courtregister.operations.enabled=false` withdrew the only `BatchListingService`
+      but a crash: `yotresultsdistribution.operations.enabled=false` withdrew the only `BatchListingService`
       bean while the controllers went on being component-scanned, so the switch could not be turned
       off without an `UnsatisfiedDependencyException` at refresh, and `FlagController` went on
       serving `/operations/flag` whatever it said. The three controllers, the action filter and the
       listing bean now all carry
-      `@ConditionalOnProperty(courtregister.operations.enabled, matchIfMissing = true)`;
+      `@ConditionalOnProperty(yotresultsdistribution.operations.enabled, matchIfMissing = true)`;
       `OperationsErrorAttributes` deliberately does not, because a pod with the surface off still
       answers whatever an operator tried and Boot's own body for that echoes the path they typed.
       `HttpSurfaceTest.WithTheOperationsApiSwitchedOff` is the context case over the real scan.
@@ -1048,14 +1048,14 @@ of them.
       **The flag endpoint's conflict is decided, ahead of the task (design call, 2026-09-21).**
       T040 names "the three endpoints that need those beans (generate, notify, the batch listing),
       and the other four served normally" — but `FlagController` was carrying
-      `@ConditionalOnProperty(courtregister.generation.enabled)` too, because that was the only
+      `@ConditionalOnProperty(yotresultsdistribution.generation.enabled)` too, because that was the only
       place a `FeatureFlagReader` was contributed. Those two cannot both be true. The decision is
       T040's wording: **`GET /operations/flag` is served on every pod**, including one with the
       generation half off. Which implementation is live is not a property of the replica an
       operator happened to reach, and answering `501 command-not-wired` there would make the
       lever's state look like one.
       What moved for it is the reader, not the endpoint: `config/LiveFeatureFlagConfig` no longer
-      carries the class-level `courtregister.generation.enabled` condition (its `!test` profile
+      carries the class-level `yotresultsdistribution.generation.enabled` condition (its `!test` profile
       gating and its LIVE/STUB mode selection are untouched, and `StubGenerationConfig`'s bean
       already had no such condition), and the workload identity is built only where an endpoint
       names a store — a pod with no nightly job is deployed with no App Configuration endpoint,
@@ -1083,14 +1083,14 @@ the **real** authorisation filter refuses the people it should.
       parameter — the audit filter registers a path **only** if it does (research R7); assert every
       bounded `reason` the handler can emit appears in the document's enumerations. Seam: an
       `openapi.yaml` with the info block and no paths. Red: seven paths mapped, none described.
-- [x] **T043** [US1] `src/main/resources/courtregister-openapi.yaml` — the seven endpoints as data-model describes
+- [x] **T043** [US1] `src/main/resources/yot-results-distribution-openapi.yaml` — the seven endpoints as data-model describes
       them, plus the rest of the `audit.http.*` settings block **beside** the
       `enabled: ${HTTP_AUDIT_ENABLED:true}` key T005 already landed (do not restate it, and do not
       flip it: the `true` default is how condition (b) of Principle III is carried, and there is no
       start-up refusal behind it):
       `openapi-rest-spec` and `include-payload-body: false` **explicitly** (the library default is
-      `true` and would publish every response body), **and the `courtregister.operations` block**:
-      `enabled: ${COURTREGISTER_OPERATIONS_ENABLED:true}`, `supersede-max-age: 30d`,
+      `true` and would publish every response body), **and the `yotresultsdistribution.operations` block**:
+      `enabled: ${YOTRESULTSDISTRIBUTION_OPERATIONS_ENABLED:true}`, `supersede-max-age: 30d`,
       `lock-wait: 0s` — the record's defaults restated in the file the way every other block of this
       service's own settings is, so a deployment can see and override them. Green: T042.
       ⚠ **`openapi-rest-spec` must be uniquely scoped, and a test must prove it.** The filter
@@ -1098,7 +1098,7 @@ the **real** authorisation filter refuses the people it should.
       classpath, not a path — so a value of `openapi.yaml` matches this service's document and any
       other `*openapi.yaml` a dependency ships, and the parser is handed whichever the glob returns
       first. Name the file and the value for this service (for example
-      `courtregister-openapi.yaml`, the file renamed to match), and add a case that runs the real
+      `yot-results-distribution-openapi.yaml`, the file renamed to match), and add a case that runs the real
       glob against the **real** test classpath and asserts **exactly one** resource matches and that
       it is this repository's. A count assertion is the only thing that catches a dependency adding
       a second document later; asserting that the parser found *a* document would pass on the wrong
@@ -1108,7 +1108,7 @@ the **real** authorisation filter refuses the people it should.
       to quote. Green: `OpenApiContractTest` 8 tests, 0 failures; Checkstyle and PMD clean on main
       and test after two findings were fixed rather than suppressed - an import out of
       lexicographical order, and `getClassLoader()` where the test ruleset wants the context one.
-      **The file is `src/main/resources/courtregister-openapi.yaml` and the setting matches it**,
+      **The file is `src/main/resources/yot-results-distribution-openapi.yaml` and the setting matches it**,
       which is this warning carried out. Every document that named
       `src/main/resources/openapi.yaml` was re-pointed in the same commit - CLAUDE.md, README.md,
       the two rules files, three agent files - and the constitution with them, as a PATCH (5.0.3):
@@ -1125,7 +1125,7 @@ the **real** authorisation filter refuses the people it should.
       same three paths the generating half maps and is contributed only where that half is off, so
       exactly one of the two is ever present and the document describes the paths rather than the
       fallback.
-      The `courtregister.operations` block and the two `audit.http.*` keys landed in
+      The `yotresultsdistribution.operations` block and the two `audit.http.*` keys landed in
       `application.yaml` as the task asks, beside the `enabled` key T005 left there and without
       restating or flipping it.)
 - [x] **T044** [P] [US1] `api/OperationsAuditFactsTest` (new) — the payload carries the action, the
@@ -1200,7 +1200,7 @@ the **real** authorisation filter refuses the people it should.
       entry "needs the design owner's dated sign-off before Phase 8 lands"; nobody was available to
       give one during this run, so the shortfall stands exactly as recorded - a response event that
       cannot be published is logged at ERROR naming the action and the run id, moves
-      `courtregister_operations_audit_unpublished`, and is dressed up as nothing else. It is
+      `yotresultsdistribution_operations_audit_unpublished`, and is dressed up as nothing else. It is
       carried to the orchestrator rather than assumed.)
 - [x] **T046** [US2] `api/OperationsAuthzIT` (new) — **the real filter, wired as deployed**, with
       usersgroups stubbed at the HTTP boundary by WireMock and
@@ -1344,8 +1344,8 @@ not there to switch them off.
 (FR-051). At no commit is there neither surface. The deletion tasks carry the mechanical exemption:
 a deletion has no red run, and its evidence is the green build with the replaced suite gone.
 
-- [x] **T053** [US5] Delete `src/main/java/uk/gov/hmcts/cp/courtregister/batch/cli/` (all ten
-      classes) and `src/test/java/uk/gov/hmcts/cp/courtregister/batch/cli/` (all nine suites), plus
+- [x] **T053** [US5] Delete `src/main/java/uk/gov/hmcts/cp/yotresultsdistribution/batch/cli/` (all ten
+      classes) and `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/batch/cli/` (all nine suites), plus
       `src/main/resources/logback-cli.xml`. Nothing else in this commit. Evidence: the build is
       green and the test count drops by exactly the deleted suites' cases.
       (Done. The deletion exemption applies: no red run, and the evidence is the green suite with
@@ -1375,7 +1375,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       line writes through `Enum::toString` - which is a difference worth having recorded: the same
       refusal is spelled two ways depending on whether it is being answered or logged.)
 - [x] **T054** [US5] Delete `config/CliModeConfig` and `config/CliModeConfigTest`; remove
-      `courtregister.cli` from `application.yaml`; make **every** conditional that reads it
+      `yotresultsdistribution.cli` from `application.yaml`; make **every** conditional that reads it
       unconditional. **`PublicEventsConfig`'s javadoc about a CLI JVM not subscribing goes with
       it** — the rule is retired with the JVM it was about. Evidence: the build is green; a context
       still starts with the schedulers, the sweeps and the listener present.
@@ -1395,7 +1395,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       `config/CliModeConfigTest` (deleted), `config/ReportSchedulingConfigTest`,
       `e2e/CliDispatchIT` (deleted by T055); plus 004's `config/BatchSweepConfig` and whatever suite
       proves its wiring. `batch/cli/CliMain` and `batch/cli/GenerateRegisterCli` read it too and are
-      gone at T053. Every one of them is re-grepped for `CliModeConfig`, `courtregister.cli` and
+      gone at T053. Every one of them is re-grepped for `CliModeConfig`, `yotresultsdistribution.cli` and
       `cliMode` after the rebase, and the list in this task is corrected in the same commit —
       a stale enumeration here is a conditional left behind on a property that no longer exists.
       (Done. The deletion exemption applies. Green: every suite under `config/` and `api/` - the
@@ -1480,7 +1480,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       main and test, Checkstyle main and test, and the JaCoCo gate at the **unchanged** thresholds
       (LINE ≥ 0.88, BRANCH ≥ 0.85 — the ratchet is never loosened to admit a controller). Records
       the counts.
-      (Done. `flock -w 7200 /home/sachin/.cache/courtregister/gradle.lock ./gradlew
+      (Done. `flock -w 7200 /home/sachin/.cache/yotresultsdistribution/gradle.lock ./gradlew
       jacocoTestReport check -Dtest.noFailFast=true` — **exit 0** in 4m 18s.
       **The counts.** 3867 tests, 0 failures, 0 errors, 0 skipped. Coverage: LINE 0.9765 (7019
       covered, 169 missed), BRANCH 0.9051 (2098 covered, 220 missed), INSTRUCTION 0.9768, METHOD
@@ -1495,7 +1495,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       the CLI examples replaced by the `curl` ones from this increment's `quickstart.md`. `README.md`
       and `CLAUDE.md`: the final read-through — the operations paragraphs landed in `d73ef50` and
       this is the check that nothing else in either still says "command". Then a repository-wide
-      grep for `batch/cli`, `CliModeConfig`, `courtregister.cli`, `startup.sh <command>` and the six
+      grep for `batch/cli`, `CliModeConfig`, `yotresultsdistribution.cli`, `startup.sh <command>` and the six
       command names: nothing outside this spec, the constitution's history and the earlier
       increments' own records (SC-007). **README's generation section is 004's — do not touch it.**
       (Done. Markdown and javadoc only; Checkstyle, PMD and `compileTestJava` clean afterwards.
@@ -1507,7 +1507,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       switches both estate filters off for the local loop; and step 2's warning is inverted - the
       command held no lock and could race the 18:00 run, and the endpoint takes the same ShedLock,
       so a call landing inside the night's run is refused by the lock rather than racing it.
-      **The repository-wide grep.** `batch/cli`, `CliModeConfig`, `courtregister.cli`,
+      **The repository-wide grep.** `batch/cli`, `CliModeConfig`, `yotresultsdistribution.cli`,
       `logback-cli`, `CliMain` and `startup.sh <command>` now appear only where the task permits:
       this spec, the constitution's amendment record, and the earlier increments' own `tasks.md`,
       `plan.md`, `research.md`, `data-model.md` and checklists. What was corrected outside those:
@@ -1560,7 +1560,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       endpoint table; the flag rule per endpoint; a `curl` example per endpoint against the compose
       stack; the five deployment gates; and the switches with their defaults.
       **The table is one row per endpoint** with method, path, body fields, the 2xx shape and every
-      refusal code with its status — read off `courtregister-openapi.yaml`, the controllers and the
+      refusal code with its status — read off `yot-results-distribution-openapi.yaml`, the controllers and the
       application services rather than off the spec, so what is documented is what is served. The
       four the *surface* answers (`401`, `403`, `415`, `503 AUDIT_UNAVAILABLE`) are stated once
       above the table instead of repeated in all seven rows, with `501 command-not-wired` explained
@@ -1571,7 +1571,7 @@ a deletion has no red run, and its evidence is the green build with the replaced
       servlet thread before the caller is told `503`. It changes how long a refusal takes and not
       what is refused.
       **`CLAUDE.md`.** The Message-Contract Rule already named the operations API and
-      `courtregister-openapi.yaml` as the third owned contract, and no "exposes NO REST API"
+      `yot-results-distribution-openapi.yaml` as the third owned contract, and no "exposes NO REST API"
       sentence remained - both landed in `d73ef50`, and this task is where that was checked rather
       than assumed. What was missing is the Deployment section, which now names
       `AUTHZ_HTTP_ENABLED` and `HTTP_AUDIT_ENABLED` defaulting `true` and switched off only by local
@@ -1673,7 +1673,7 @@ settings. The deployment review is what checks it.
   happens. The **response** event has no such lever: by the time it is published the action has been
   taken, so a publish that fails leaves a request event with no response event beside it. What this
   service does is count the shortfall on
-  `courtregister_operations_audit_unpublished` and answer the caller anyway — the alternative would
+  `yotresultsdistribution_operations_audit_unpublished` and answer the caller anyway — the alternative would
   be undoing work that has already happened. **A durable outbox is what would close it**, and that
   is a design decision rather than a defect: it is recorded here **awaiting the design owner's
   sign-off**, and the counter is the evidence in the meantime.
@@ -1723,7 +1723,7 @@ three things that were true and untested.
   routes on, was executed by no test: both suites mock the template. Captured and applied.
   (`031f0324`, no production change.)
 - **T042** — and a real one behind it: with no open facts every publish was treated as a request
-  event, so on a pod with `courtregister.operations.enabled=false` a broker outage threw
+  event, so on a pod with `yotresultsdistribution.operations.enabled=false` a broker outage threw
   `AUDIT_UNAVAILABLE` out of the audit filter after the response was committed, with nothing above
   it to render the refusal. No open call means nothing to refuse: counted and said instead.
   (`2eb9291f`.)

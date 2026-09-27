@@ -219,7 +219,7 @@ retro-edited; this document is the live statement of the vocabulary.)*
 
 ### The ignored-outcome vocabulary **[review]**
 
-`courtregister_public_events_ignored_total{reason}` gains **`terminal-batch`**: an outcome for a batch
+`yotresultsdistribution_public_events_ignored_total{reason}` gains **`terminal-batch`**: an outcome for a batch
 the state machine will not move. Today that drop is a WARN and nothing else — the counter fires for a
 foreign source, an unknown correlation, a payload mismatch and three envelope faults, and
 `late-acceptance-ignored` / `late-failure-ignored` belong to the *notifications* counter and describe
@@ -289,15 +289,15 @@ before** its cutoff, so a batch at exactly the minimum age is stale.
 
 | Name | Before | After |
 |---|---|---|
-| `courtregister_generation_reconciled_total` | outcomes the reconciler fetched | **retired** |
-| `courtregister_generation_released_batches_total` | — | **new**: batches a run released |
-| `courtregister_generation_released_registers_total` | — | **new**: registers that came back with them |
-| `courtregister_generation_contended_total` | — | **new [Phase 3]**: batches the pass could not release, every attempt at them having lost the day's active-register key. Unlabelled, because a batch id may never be a series; FR-003a asks for it by name ("counted by the pass's line and its counter") and the design rules ask for it generally — a path that leaves something undone moves a counter |
-| `courtregister_oldest_generating_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
-| `courtregister_oldest_pending_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
-| `courtregister_oldest_generated_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
-| `courtregister_batches_total{outcome}` | six failure reasons | six, with the swap |
-| `courtregister_public_events_ignored_total{reason}` | six reasons | seven: + `terminal-batch` |
+| `yotresultsdistribution_generation_reconciled_total` | outcomes the reconciler fetched | **retired** |
+| `yotresultsdistribution_generation_released_batches_total` | — | **new**: batches a run released |
+| `yotresultsdistribution_generation_released_registers_total` | — | **new**: registers that came back with them |
+| `yotresultsdistribution_generation_contended_total` | — | **new [Phase 3]**: batches the pass could not release, every attempt at them having lost the day's active-register key. Unlabelled, because a batch id may never be a series; FR-003a asks for it by name ("counted by the pass's line and its counter") and the design rules ask for it generally — a path that leaves something undone moves a counter |
+| `yotresultsdistribution_oldest_generating_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
+| `yotresultsdistribution_oldest_pending_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
+| `yotresultsdistribution_oldest_generated_age` | the retired timer | `BatchAgeSweep`, same meaning and cadence |
+| `yotresultsdistribution_batches_total{outcome}` | six failure reasons | six, with the swap |
+| `yotresultsdistribution_public_events_ignored_total{reason}` | six reasons | seven: + `terminal-batch` |
 
 The three gauges are now **per pod**, which they were not before: under the retired timer they were
 taken under a lock, so one pod published and the others published nothing. An alert aggregates them
@@ -323,5 +323,5 @@ and said nothing about those would describe as complete a night that had left a 
 without its document, which is the silence this service exists to end. So `RunReport` carries
 `contended` beside the two released numbers, the line carries `contended=`, and the accounting
 paragraph names all three as being in neither of the night's totals. It is the same number
-`courtregister_generation_contended_total` already carries — the line and the counter say one thing,
+`yotresultsdistribution_generation_contended_total` already carries — the line and the counter say one thing,
 as they do for every other reading a run publishes.

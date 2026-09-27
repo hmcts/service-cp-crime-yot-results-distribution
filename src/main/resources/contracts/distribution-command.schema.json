@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://hmcts.gov.uk/cp/crime/court-register/contracts/distribution-command.schema.json",
   "title": "Court Register distribution command",
-  "description": "Body of a message on the ASB queue courtregister.requests. This is the inbound queue message contract, agreed jointly with cpp-context-results (results-event-processor), which publishes one message per resulted hearing. The message is a claim check: the hearing payload is fetched separately from Redis, with the results query API as fallback. Any change to this schema is a cross-team change and must be agreed with the Results team first. The narrative companion is the Confluence design page; if the two disagree, this schema plus its tests win.",
+  "description": "Body of a message on the ASB queue yotresultsdistribution.requests. This is the inbound queue message contract, agreed jointly with cpp-context-results (results-event-processor), which publishes one message per resulted hearing. The message is a claim check: the hearing payload is fetched separately from Redis, with the results query API as fallback. Any change to this schema is a cross-team change and must be agreed with the Results team first. The narrative companion is the Confluence design page; if the two disagree, this schema plus its tests win.",
   "type": "object",
   "additionalProperties": false,
   "required": [

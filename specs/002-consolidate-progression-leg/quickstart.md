@@ -7,7 +7,7 @@ docker compose up -d postgres servicebus-emulator artemis fileservice-postgres w
 ```
 
 - `postgres` - the service's store (Flyway V1 + V2 on first start), on 5432.
-- `servicebus-emulator` (+ its SQL Server companion) — `courtregister.requests`.
+- `servicebus-emulator` (+ its SQL Server companion) — `yotresultsdistribution.requests`.
 - `artemis` - an Artemis broker (`apache/activemq-artemis`, pinned) with `public.event` created as a
   multicast address, on 61616; console on 8161 (admin/admin).
 - `sdg-echo` - the helper that closes the loop: it watches WireMock's request journal and publishes
@@ -28,20 +28,20 @@ docker compose up -d postgres servicebus-emulator artemis fileservice-postgres w
 ## Run the service with generation enabled
 
 ```bash
-COURTREGISTER_PAYLOAD_MODE=STUB COURTREGISTER_REFERENCEDATA_MODE=STUB \
-COURT_REGISTER_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 \
-COURTREGISTER_GENERATION_ENABLED=true \
+YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB YOTRESULTSDISTRIBUTION_REFERENCEDATA_MODE=STUB \
+YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 \
+YOTRESULTSDISTRIBUTION_GENERATION_ENABLED=true \
 FILESERVICE_DATASOURCE_URL=jdbc:postgresql://localhost:5433/fileservice \
 FILESERVICE_DATASOURCE_USERNAME=fileservice FILESERVICE_DATASOURCE_PASSWORD=fileservice \
 SYSTEMDOCGENERATOR_BASE_URL=http://localhost:8089 NOTIFICATIONNOTIFY_BASE_URL=http://localhost:8089 \
 APPCONFIG_ENDPOINT=http://localhost:8089 STACK_LABEL=LOCAL \
-COURTREGISTER_FEATURE_CREDENTIAL=local-test \
+YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL=local-test \
 CR_EMAIL_TEMPLATE_ID=11111111-1111-1111-1111-111111111111 \
 ARTEMIS_BROKER_URL=tcp://localhost:61616 ARTEMIS_USER=admin ARTEMIS_PASSWORD=admin \
 ./gradlew bootRun
 ```
 
-`COURTREGISTER_FEATURE_CREDENTIAL=local-test` is what lets the **real** flag reader read the
+`YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL=local-test` is what lets the **real** flag reader read the
 WireMock `kv` stub, and without it a generation-enabled run refuses to start on a laptop:
 `workload-identity`, the default, builds the credential from `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`
 and `AZURE_FEDERATED_TOKEN_FILE`, which only the AKS webhook projects - and a credential's token is
@@ -70,8 +70,8 @@ own walkthrough was about. No `CJSCPPUID` is sent, because `docker-compose.yml` 
 filters off for the local loop.
 
 **The local stack records no registers, so these calls run against an empty day.** The compose
-`app` sets `COURTREGISTER_PAYLOAD_MODE=STUB`, and the stub payload source fetches nothing: a
-message published to `courtregister.requests` is processed to completion `no-defendants` and
+`app` sets `YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB`, and the stub payload source fetches nothing: a
+message published to `yotresultsdistribution.requests` is processed to completion `no-defendants` and
 writes no `processed_output` row, so nothing is ever there to batch. `LIVE` is the only source
 that yields a register, and it needs the results payload cache, reference data and a CJSCPPUID
 identity, none of which this stack has. So the RECORDED to NOTIFIED sequence is proved by
@@ -109,7 +109,7 @@ curl -s localhost:8082/operations/flag                  # {"flag":"OFF"}
 
 # 5. flag back on (either form; they set the same WireMock scenario state)
 curl -X PUT http://localhost:8089/flag/on
-curl -X PUT http://localhost:8089/__admin/scenarios/CourtRegisterServiceFlag/state -d '{"state":"Started"}'
+curl -X PUT http://localhost:8089/__admin/scenarios/YotResultsDistributionServiceFlag/state -d '{"state":"Started"}'
 curl -s http://localhost:8089/__admin/scenarios      # which state the flag is in now
 ```
 

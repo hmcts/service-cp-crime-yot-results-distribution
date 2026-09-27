@@ -1,4 +1,4 @@
-# Feature Specification: Court Register Service — full pipeline port, fix-first
+# Feature Specification: YOT Results Distribution Service — full pipeline port, fix-first
 
 **Feature Branch**: `main`
 **Created**: 2026-08-31
@@ -237,7 +237,7 @@ telemetry privacy and container/CI requirements are **inherited verbatim from th
 specification** (FR-001 – FR-018 of
 `service-cp-crime-informant-register/specs/CRA-220-informant-register-initial-poc/spec.md`), with
 `no-authorities` replaced by the four completion reasons below and the queue renamed
-`courtregister.requests`. They are re-proven here by the cloned test suites, not respecified.
+`yotresultsdistribution.requests`. They are re-proven here by the cloned test suites, not respecified.
 The requirements below are this increment's own.
 
 - **FR-101**: The service MUST fetch the hearing payload for a command by Redis claim-check first
@@ -320,7 +320,7 @@ The requirements below are this increment's own.
 
 ## Out of Scope (this increment)
 
-- Cutover, rollback and the `CourtRegisterService` feature flag in App Configuration; the producer
+- Cutover, rollback and the `YotResultsDistributionService` feature flag in App Configuration; the producer
   increment in `cpp-context-results` (`CourtRegisterQueuePublisher`); Event Grid subscription
   changes.
 - The legacy-repository fixes C18 (trigger kill-switch wiring), C28 (dead `AddressMapperTest.js`

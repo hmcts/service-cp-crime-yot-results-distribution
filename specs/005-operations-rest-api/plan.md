@@ -7,7 +7,7 @@
 ## Summary
 
 Seven endpoints under `/operations/**` replace the six operations commands, and the CLI is removed.
-The HTTP layer is an inbound adapter in `uk.gov.hmcts.cp.courtregister.api`: it parses, calls one
+The HTTP layer is an inbound adapter in `uk.gov.hmcts.cp.yotresultsdistribution.api`: it parses, calls one
 application service, and maps the answer. Where a command class held orchestration — `list-batches`,
 `generate-register`, `report-exceptions` — that orchestration moves into an application service
 **unchanged**, because a controller may not call a repository.
@@ -53,9 +53,9 @@ and ~20 removed
 
 | Key | Default | Why |
 |---|---|---|
-| `courtregister.operations.enabled` | `true` | Deployment shape: whether the endpoints are served. **Not** a cutover lever |
-| `courtregister.operations.supersede-max-age` | `30d` | The oldest `sharedBefore` supersede will accept; an unbounded irreversible mutation is one keystroke from the estate's whole history |
-| `courtregister.operations.lock-wait` | `0s` | How long the background regeneration waits for the register-generation lock before recording that it could not take it. Zero is a non-blocking attempt |
+| `yotresultsdistribution.operations.enabled` | `true` | Deployment shape: whether the endpoints are served. **Not** a cutover lever |
+| `yotresultsdistribution.operations.supersede-max-age` | `30d` | The oldest `sharedBefore` supersede will accept; an unbounded irreversible mutation is one keystroke from the estate's whole history |
+| `yotresultsdistribution.operations.lock-wait` | `0s` | How long the background regeneration waits for the register-generation lock before recording that it could not take it. Zero is a non-blocking attempt |
 | `authz.http.enabled` | `${AUTHZ_ENABLED:true}` | The library default is **false**; the filter does not exist unless this is explicitly true |
 | `authz.http.identity-url-template` | `${CP_BASE_URL}/usersgroups-query-api/query/api/rest/usersgroups/users/logged-in-user/permissions` | usersgroups; the caller id travels in the header, not the path |
 | `authz.http.user-id-header` | `CJSCPPUID` | |
@@ -68,11 +68,11 @@ and ~20 removed
 | `authz.http.exclude-path-prefixes` | `/actuator`, `/error` | Setting this **replaces** the library list; omitting `/actuator` makes the probes answer 401 |
 | `authz.http.enabled` | `${AUTHZ_HTTP_ENABLED:true}` | **On by default** — the library's own condition defaults off, and this reverses it. No refusal behind it: an operator may switch it off and the pod starts (FR-045) |
 | `audit.http.enabled` | `${HTTP_AUDIT_ENABLED:true}` | **On by default**, on the same terms as `authz.http.enabled`, and half of condition (b) — the other half is `cp.audit.enabled` below, without which this switch builds no filter |
-| `audit.http.openapi-rest-spec` | `courtregister-openapi.yaml` | A **suffix** glob over the whole classpath, not a path: uniquely scoped so exactly one resource matches, proven by a real-classpath test (T043). Unset where both audit switches are on, start-up refuses |
+| `audit.http.openapi-rest-spec` | `yot-results-distribution-openapi.yaml` | A **suffix** glob over the whole classpath, not a path: uniquely scoped so exactly one resource matches, proven by a real-classpath test (T043). Unset where both audit switches are on, start-up refuses |
 | `audit.http.include-payload-body` | `false` | Explicit. The library default is `true` and would publish every response body |
 | `cp.audit.enabled` | `${CP_AUDIT_ENABLED:false}` — `false` unless the environment sets it, and every deployed values file MUST (deployment gate 5) | The library's own switch, and **the second half of condition (b)**: every `audit.http.*` bean sits inside the `@AutoConfiguration` class it gates, so the row above builds no filter without it. Shipped off because the transport's connection factory validates `cp.audit.hosts`/`port` while it is constructed and a laptop has no broker; the compose and test profiles set it `false` explicitly for the same reason. A pod with the filter on over it says so at WARN (FR-045) |
 | `cp.audit.hosts` / `port` / `user` / `password` / `ssl-*` | per environment, from Key Vault via CSI | No secret in a committed value |
-| `courtregister.cli` | **removed** | — |
+| `yotresultsdistribution.cli` | **removed** | — |
 
 ### Constitution Check
 
@@ -85,7 +85,7 @@ and ~20 removed
 | V — ports and adapters | The controllers are inbound adapters. No controller holds a repository, an HTTP client or a decision; the three command classes that held orchestration give it to application services |
 | VI — nothing swallowed | Every refusal is an explicit status with a bounded reason. The one place this is at risk is the audit starter, whose `AuditService.postMessageToArtemis` catches every `Exception`, logs it and returns — so an operations call could succeed with no audit event, which condition (b) of Principle III also forbids. **Not accepted as the library's behaviour**: the starter registers that bean `@ConditionalOnMissingBean` (research R10), so T045 supplies `api/OperationsAuditService` in its place and it does not swallow. What remains after that is one case and is in Complexity Tracking below |
 | VII — privacy in telemetry | FR-025, FR-026, FR-038, FR-046. Audit bodies off; the `CJSCPPUID` out of every log line; the privacy sweep extended to controller responses and `ProblemDetail` |
-| VIII — estate conventions | Gradle, the pinned analysis set, Conventional Commits, no AI attribution, package root `uk.gov.hmcts.cp.courtregister` |
+| VIII — estate conventions | Gradle, the pinned analysis set, Conventional Commits, no AI attribution, package root `uk.gov.hmcts.cp.yotresultsdistribution` |
 
 One entry in Complexity Tracking, below — a residual of the audit library that Principle VI and
 Principle III(b) both reach. Nothing else here asks for an exception to a principle: the amendment
@@ -110,7 +110,7 @@ specs/005-operations-rest-api/
 ```
 src/main/java/uk/gov/hmcts/cp/
 ├── Application.java                          CHANGED  the component-scan exclude filter (R9)
-└── courtregister/
+└── yotresultsdistribution/
     ├── api/                                  NEW
     │   ├── OperationsActionFilter.java               path+method → action name, server-derived,
     │   │                                             overrides the caller's header (R2)
@@ -138,7 +138,7 @@ src/main/java/uk/gov/hmcts/cp/
     │   │                                             generation executor, take the lock (R12, R16)
     │   └── OnDemandExceptionReportService.java       ReportExceptionsCli's window and sinks
     ├── config/
-    │   ├── OperationsProperties.java         NEW     courtregister.operations.*
+    │   ├── OperationsProperties.java         NEW     yotresultsdistribution.operations.*
     │   ├── OperationsWebConfig.java          NEW     filter registration, conditional controllers
     │   ├── PropertiesValidator.java          CHANGED the audit transport's and the operations
     │   │                                             API's value refusals (FR-053); no cross-field
@@ -151,7 +151,7 @@ src/main/resources/
 ├── openapi.yaml                              NEW  the third owned contract
 ├── acl/operations-rules.drl                  NEW  seven allow rules, "Second Line Support" only
 ├── application.yaml                          CHANGED  the authz/audit/operations blocks; the
-│                                                      courtregister.cli key removed
+│                                                      yotresultsdistribution.cli key removed
 └── logback-cli.xml                           DELETED
 
 docker/startup.sh                             CHANGED  the command dispatch removed
@@ -213,14 +213,14 @@ and `RegisterRecord` are reused as they are. No existing port's signature change
 ## Coordination contract with the concurrent 004 tree
 
 004 (`release-stale-batches`) is built at the same time in the **main checkout**,
-`/home/sachin/moj/service-cp-crime-court-register`. This branch never touches that tree, and the
+`/home/sachin/moj/service-cp-crime-yot-results-distribution`. This branch never touches that tree, and the
 file ownership is:
 
 **005 owns** — `batch/cli/*`, `config/CliModeConfig`, `docker/startup.sh`, the new `api/` package,
 the new `application/` services listed above, `src/main/resources/openapi.yaml`,
 `src/main/resources/acl/`, `build.gradle`, `gradle/libs.versions.toml`, the `authz.*`, `audit.*`,
-`cp.audit.*` and `courtregister.operations.*` blocks of `application.yaml` and the deletion of
-`courtregister.cli`, `Application.java`,
+`cp.audit.*` and `yotresultsdistribution.operations.*` blocks of `application.yaml` and the deletion of
+`yotresultsdistribution.cli`, `Application.java`,
 `.specify/memory/constitution.md`, `CLAUDE.md`, `.claude/rules/*`, `.claude/agents/*`, README's
 operations section, `specs/002-consolidate-progression-leg/quickstart.md`'s CLI examples,
 `scripts/container-smoke.sh`, `logback-cli.xml`.
@@ -231,7 +231,7 @@ releaser and sweep that replace it**, `application/DocumentRenderer`, `adapter/s
 `domain/CompletedBy`, `config/GenerationProperties`, `config/GenerationMetrics`,
 `config/SchedulingConfig`, `config/SchedulingInfrastructureConfig`, `config/BatchSweepConfig`
 (004's, new), `config/IntakeSweepConfig`, `config/ProcessedLogConfig`, `db/migration/V6*` and
-`V7*`, the `courtregister.generation.*` and `courtregister.report.*` blocks of
+`V7*`, the `yotresultsdistribution.generation.*` and `yotresultsdistribution.report.*` blocks of
 `application.yaml`, README's generation section, or `design_rules.md`'s flow diagram and batch
 state machine. Those are 004's.
 
@@ -258,7 +258,7 @@ from under an unmerged branch and loses both edits.
   section.
 - `config/PublicEventsConfig` — **both**, and the earlier draft of this contract had it as 005's
   alone (T001's analysis). 005 takes the connection factory by name (R8); 004 removes
-  `courtregister.generation.completion`, and with it the `setAutoStartup` conjunct and the CLI-JVM
+  `yotresultsdistribution.generation.completion`, and with it the `setAutoStartup` conjunct and the CLI-JVM
   javadoc. Two separate edits to one file: expect a textual conflict on the rebase and resolve it by
   keeping both.
 - `domain/RunReport` — **both**, and it is `domain/`, not `batch/`: 004 replaces `reconciled` with
@@ -284,9 +284,9 @@ from under an unmerged branch and loses both edits.
   library keys to it for a refusal that gate round 3 withdrew, and the list is back to the five
   identity and endpoint properties 004 will see. Additive on both sides.
 - `src/main/resources/application.yaml` — **both**. 004 touches four sites in the
-  `courtregister.generation.*` block (the rename and its comments); 005 adds the `cp.audit.*` key
+  `yotresultsdistribution.generation.*` block (the rename and its comments); 005 adds the `cp.audit.*` key
   and the `authz.http.enabled` / `audit.http.enabled` defaults, will add the rest of the `authz.*`,
-  `audit.http.*` and `courtregister.operations.*` blocks, and deletes `courtregister.cli` —
+  `audit.http.*` and `yotresultsdistribution.operations.*` blocks, and deletes `yotresultsdistribution.cli` —
   **after the rebase**, because the conditionals that read it are 004's until then. Different
   blocks of one file.
 - `config/CliModeConfig` and `config/CliModeConfigTest` — 004 **edits** them (the releaser and the
@@ -312,7 +312,7 @@ from under an unmerged branch and loses both edits.
   replaces the reconciler wording, 005 replaces the CLI wording.
 - `config/GenerationProperties` — 004's alone, but it **breaks two of 005's test files on the
   rebase**: it deletes `completion` and its two constants, and `config/PublicEventsFactoryTest`
-  (005's, new) sets `courtregister.generation.completion=event` while the pre-existing
+  (005's, new) sets `yotresultsdistribution.generation.completion=event` while the pre-existing
   `config/PublicEventsConfigTest` constructs `GenerationProperties` positionally with
   `COMPLETION_EVENT`. One line each, test-only, and expected.
 

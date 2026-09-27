@@ -81,7 +81,7 @@ cannot drift in the other.
 
 ## 1. `GET /operations/flag`
 
-Action `courtregister-operations.check-flag`. Replaces `check-flag`. Reads the flag — that is its
+Action `yot-results-distribution-operations.check-flag`. Replaces `check-flag`. Reads the flag — that is its
 purpose. Takes nothing.
 
 **200**
@@ -98,7 +98,7 @@ All three readings are `200`: the endpoint answered its question (spec assumptio
 
 ## 2. `GET /operations/batches?date=D`
 
-Action `courtregister-operations.list-batches`. Replaces `list-batches --date D`. `date` is a
+Action `yot-results-distribution-operations.list-batches`. Replaces `list-batches --date D`. `date` is a
 required ISO local date.
 
 **200**
@@ -126,7 +126,7 @@ response, not in a log line, not in the audit event.
 
 ## 3. `GET /operations/registers/recorded-while-off`
 
-Action `courtregister-operations.list-recorded-while-off`. Replaces
+Action `yot-results-distribution-operations.list-recorded-while-off`. Replaces
 `list-batches --recorded-while-off`. Takes nothing.
 
 **200**
@@ -144,7 +144,7 @@ Action `courtregister-operations.list-recorded-while-off`. Replaces
 
 ## 4. `POST /operations/batches/generate`
 
-Action `courtregister-operations.generate-register`. Replaces `generate-register`. **Asynchronous**
+Action `yot-results-distribution-operations.generate-register`. Replaces `generate-register`. **Asynchronous**
 (research R16).
 
 **Request**
@@ -186,7 +186,7 @@ withheld one. A caller learns them from the run report and endpoint 2 — which 
 
 ## 5. `POST /operations/batches/{batchId}/notify`
 
-Action `courtregister-operations.notify-register`. Replaces `notify-register --batch B`.
+Action `yot-results-distribution-operations.notify-register`. Replaces `notify-register --batch B`.
 Synchronous. No body. `{batchId}` is the one path parameter in the whole document, which is what the
 audit filter resolves path parameters for.
 
@@ -221,7 +221,7 @@ right, and sending them back to check it is the one thing a bounded code must no
 
 ## 6. `POST /operations/registers/supersede`
 
-Action `courtregister-operations.supersede-before`. Replaces `supersede-before --shared-before T`.
+Action `yot-results-distribution-operations.supersede-before`. Replaces `supersede-before --shared-before T`.
 Synchronous, and **stricter than its command** (spec assumption 11).
 
 **Request**
@@ -244,7 +244,7 @@ The count goes into the audit event as well as the response.
 | `sharedBefore` absent | `400` | `missing-argument` |
 | `sharedBefore` will not read | `400` | `unreadable-argument`, `argument: sharedBefore` |
 | `sharedBefore` in the future | `400` | `SUPERSEDE_INSTANT_IN_FUTURE` |
-| `sharedBefore` older than `courtregister.operations.supersede-max-age` | `400` | `SUPERSEDE_INSTANT_TOO_OLD` |
+| `sharedBefore` older than `yotresultsdistribution.operations.supersede-max-age` | `400` | `SUPERSEDE_INSTANT_TOO_OLD` |
 | Flag ON — this service is live | `409` | `FLAG_ON` |
 | Flag unreadable | `409` | `flag-unreadable` (fail-closed) |
 | The store will not answer | `503` | `supersession-failed` |
@@ -256,7 +256,7 @@ rollback while this service is the live implementation is not a rollback.
 
 ## 7. `POST /operations/exception-reports`
 
-Action `courtregister-operations.report-exceptions`. Replaces `report-exceptions`. Synchronous.
+Action `yot-results-distribution-operations.report-exceptions`. Replaces `report-exceptions`. Synchronous.
 **Reads the cutover flag nowhere**, as its command did not.
 
 **Request**

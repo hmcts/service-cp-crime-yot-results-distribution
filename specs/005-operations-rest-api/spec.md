@@ -55,9 +55,9 @@ is Spring Boot Actuator. There is no OpenAPI file ... Operational actions are a 
 It now says: there is still **no business REST API**, and an **operations API** is permitted only
 while every endpoint satisfies four conditions — (a) behind `cp-auth-rules-filter` with an explicit
 allow rule naming the groups admitted, (b) audited by `cp-audit-filter-springboot`, (c) gated by the
-`CourtRegisterService` flag **at least as strictly** as the CLI command it replaces was, with any
+`YotResultsDistributionService` flag **at least as strictly** as the CLI command it replaces was, with any
 override recorded in the audit event and on the run report, and (d) answering under Principle VII.
-`src/main/resources/courtregister-openapi.yaml` becomes a third contract this service owns.
+`src/main/resources/yot-results-distribution-openapi.yaml` becomes a third contract this service owns.
 
 **Version**: MAJOR (4.0.0). A previously forbidden endpoint is now permitted, the CLI the principle
 named as the operational surface ceases to exist, and the repository gains an owned OpenAPI
@@ -75,7 +75,7 @@ as obligations on "every endpoint" with no environment named, and FR-045 and FR-
 start-up refusals on a **deployed** pod only — so the spec was granting itself an exemption from a
 condition stated in the constitution, which the Governance section does not permit. **Proposal**:
 state in Principle III where (a) and (b) are enforced — a start-up refusal naming the offending
-setting wherever `courtregister.servicebus.namespace` is set — and record the local loop as the one
+setting wherever `yotresultsdistribution.servicebus.namespace` is set — and record the local loop as the one
 exemption, at the constitution. **Version**: MINOR (4.1.0): the scope of a NON-NEGOTIABLE condition
 is materially narrowed *and* a new obligation arrives with it (the refusals themselves), but no
 endpoint that was forbidden becomes permitted and no deployed environment may do anything it could
@@ -203,7 +203,7 @@ assert the refusal; call it with one that is and assert it is served. No endpoin
 
 ### User Story 3 - Regenerating a date is still gated by the one lever, and now cannot collide with the nightly run (Priority: P1)
 
-An operator asks for a register date to be regenerated. The endpoint reads the `CourtRegisterService`
+An operator asks for a register date to be regenerated. The endpoint reads the `YotResultsDistributionService`
 flag through the same gate the 18:00 run reads it through, at the same point `generate-register`
 read it, and refuses when it says off unless the operator has explicitly asked to override. An
 override is an operator decision that is written down: in the audit event, with the caller's
@@ -287,7 +287,7 @@ only to protect a process that no longer exists. Leaving it behind leaves a seco
 pod that does not consume.
 
 **Independent Test**: build the image, start it, and assert the application starts; assert the
-repository contains no `batch/cli/`, no `CliModeConfig`, no `courtregister.cli` and no dispatch in
+repository contains no `batch/cli/`, no `CliModeConfig`, no `yotresultsdistribution.cli` and no dispatch in
 `docker/startup.sh`.
 
 **Acceptance Scenarios**:
@@ -295,7 +295,7 @@ repository contains no `batch/cli/`, no `CliModeConfig`, no `courtregister.cli` 
 1. **Given** the built image, **When** it is started with no arguments, **Then** the application
    starts exactly as it does today.
 2. **Given** the repository, **When** it is searched, **Then** `batch/cli/`, `config/CliModeConfig`,
-   the `courtregister.cli` property and every reference to them are gone, and every conditional
+   the `yotresultsdistribution.cli` property and every reference to them are gone, and every conditional
    that read that property — the nine FR-048 enumerates, from the consumer and the four schedulers
    to the operations wiring this increment added — is unconditional again.
 3. **Given** the documentation, **When** it is read, **Then** no page instructs an operator to
@@ -399,10 +399,10 @@ command printed.
   is quoted from task records, review findings and the tasks file and must keep meaning what it
   meant.
 - **FR-002**: Every endpoint MUST be described in an OpenAPI 3 document at
-  `src/main/resources/courtregister-openapi.yaml`, owned and versioned by this repository, covering
+  `src/main/resources/yot-results-distribution-openapi.yaml`, owned and versioned by this repository, covering
   its request, its success shape and every bounded `reason` it can refuse under. A contract test
   MUST assert that the controllers and the document agree in both directions.
-- **FR-003**: The HTTP layer MUST be an inbound adapter in `uk.gov.hmcts.cp.courtregister.api`: it
+- **FR-003**: The HTTP layer MUST be an inbound adapter in `uk.gov.hmcts.cp.yotresultsdistribution.api`: it
   parses, calls application services, and maps the answer. It MUST NOT hold a repository, an HTTP
   client, a broker client or a business decision, and no logic MUST be rewritten on the way in —
   where a command class held orchestration, that orchestration moves into an application service
@@ -426,7 +426,7 @@ command printed.
 
 **The cutover lever**
 
-- **FR-010**: `POST /operations/batches/generate` MUST read the `CourtRegisterService` flag through
+- **FR-010**: `POST /operations/batches/generate` MUST read the `YotResultsDistributionService` flag through
   the same gate the 18:00 run uses, at the same point `generate-register` read it, with no cache,
   and MUST refuse — changing nothing — when it says off or is unreadable and the request did not ask
   to override.
@@ -496,13 +496,13 @@ command printed.
 - **FR-021**: `POST /operations/registers/supersede` MUST take a required instant and answer,
   synchronously, `200` with the count superseded and the instant it was taken from. The instant MUST
   NOT be defaulted: an absent one is a refusal. It MUST additionally:
-  - be admitted **only while an uncached read of the `CourtRegisterService` flag says OFF** — the
+  - be admitted **only while an uncached read of the `YotResultsDistributionService` flag says OFF** — the
     flag ON refuses `409 FLAG_ON`, an unreadable flag refuses `409 FLAG_UNREADABLE` (fail-closed),
     and there is **no override**: this endpoint makes the service give up a period of registers, and
     doing so while it is the live implementation is a second lever;
   - support `dryRun` (default `false`), which answers the count that **would** be superseded and
     supersedes nothing;
-  - refuse `400` an instant in the future, and one older than `courtregister.operations.supersede-max-age`
+  - refuse `400` an instant in the future, and one older than `yotresultsdistribution.operations.supersede-max-age`
     (default 30 days) — an unbounded irreversible mutation is one keystroke from giving up the
     estate's whole history of registers;
   - carry the count in the audit event.
@@ -602,7 +602,7 @@ command printed.
 
 - **FR-047**: `batch/cli/` (every class and every test), `config/CliModeConfig` and its test MUST be
   removed.
-- **FR-048**: The `courtregister.cli` property MUST be removed, and **every** conditional that
+- **FR-048**: The `yotresultsdistribution.cli` property MUST be removed, and **every** conditional that
   reads it MUST become unconditional. The enumeration is made against the tree the removal lands
   on, not against this list, because later phases and the merge of 004 both add readers; as the
   removal found them there are **nine**, each a class-level
@@ -631,10 +631,10 @@ command printed.
 - **FR-034**: No secret, no connection string and no static credential MUST appear in a committed
   value or an environment default.
 - **FR-044**: The operations API MUST have a deployment-shape switch of its own,
-  `courtregister.operations.enabled` (default **true**), which decides whether the endpoints are
+  `yotresultsdistribution.operations.enabled` (default **true**), which decides whether the endpoints are
   served — and nothing else. It is **not** a cutover lever and MUST NOT be documented as one.
 - **FR-052**: On a pod where the generation half is switched off
-  (`courtregister.generation.enabled=false`), the endpoints that need its beans — generate, notify
+  (`yotresultsdistribution.generation.enabled=false`), the endpoints that need its beans — generate, notify
   and the batch listing — MUST answer `501` with the bounded reason `COMMAND_NOT_WIRED`, which is
   exactly what the CLI answered on such a pod, rather than a `404` that reads as a mistyped URL or a
   `500` about a missing bean. The endpoints that do not need them — the flag, the recorded-while-off
@@ -658,7 +658,7 @@ command printed.
   `audit.http.enabled` and `cp.audit.enabled`, since the filter that would have published is never
   constructed and the one that is swallows its own publishing failures.
   **Start-up MUST NOT refuse on the combination**: there is no cross-field rule tying
-  `courtregister.operations.enabled` to either switch, and no environment discriminator deciding
+  `yotresultsdistribution.operations.enabled` to either switch, and no environment discriminator deciding
   where such a rule would apply. A pod started with either switch off — or with both off — MUST come
   up and serve whatever it was configured to serve. An operator who wants to see what the endpoints
   do with a filter out of the way is entitled to, and a service that refuses to start on a
@@ -687,8 +687,8 @@ command printed.
     its own publishing failures, so a transport pointed at nothing publishes nothing and says so
     only in a log line, and the library's own `validateProps` checks `hosts.isEmpty()` and
     `port > 0` and nothing else.
-  - `courtregister.operations.supersede-max-age` MUST be positive and
-    `courtregister.operations.lock-wait` MUST NOT be negative — an unusable value is unusable
+  - `yotresultsdistribution.operations.supersede-max-age` MUST be positive and
+    `yotresultsdistribution.operations.lock-wait` MUST NOT be negative — an unusable value is unusable
     wherever it is set.
 
   Each refusal MUST name the offending setting and MUST NOT quote the offending value back where it
@@ -703,7 +703,7 @@ command printed.
 ### Key Entities
 
 - **Operator action** — one of seven named things support can do, each with a stable action name of
-  the form `courtregister-operations.<verb>`, an allow rule, an endpoint and an OpenAPI entry.
+  the form `yot-results-distribution-operations.<verb>`, an allow rule, an endpoint and an OpenAPI entry.
   Nothing else is an action.
 - **Caller identity** — the `CJSCPPUID` on the request, resolved to a usersgroups membership. It is
   an identifier, and it is the only thing about the caller that is written down.
@@ -745,7 +745,7 @@ command printed.
   test — without it the application does not start at all, and the failure is a bean-definition
   error nobody would read as a component-scan clash.
 - **SC-007**: After the removal phase, a repository-wide search for `batch/cli`, `CliModeConfig`,
-  `courtregister.cli` and the six command names finds nothing outside this spec, the constitution's
+  `yotresultsdistribution.cli` and the six command names finds nothing outside this spec, the constitution's
   history and the earlier increments' own records.
 - **SC-008**: The built image starts the application when started with no arguments, and the
   container smoke exercises an endpoint rather than a command.
@@ -857,7 +857,7 @@ change is readable.
    `CP_AUDIT_ENABLED=true` beside it (FR-045, deployment gate 5). A pod with the filter on and the
    transport off comes up, serves, and says at WARN that nothing is being published. What was rejected is the rule on top of it:
    start-up refusing the combination of the operations API enabled with either filter off, on a
-   `courtregister.servicebus.namespace` discriminator. It made an operator's own configuration
+   `yotresultsdistribution.servicebus.namespace` discriminator. It made an operator's own configuration
    choice a reason for a pod not to come up, and it made a deployed environment and a laptop two
    different products. An operator who switches a filter off has said what they meant; the pod
    comes up, and the environment's configuration records what they did.
@@ -869,7 +869,7 @@ change is readable.
     service give up a period of registers is a second lever however well authorised. Admitted only
     while an uncached read says OFF; `409 FLAG_ON` when it is on; `409 FLAG_UNREADABLE` fail-closed;
     no override, ever. Plus a `dryRun` that answers the count and changes nothing, a refusal for an
-    instant in the future, an age bound (`courtregister.operations.supersede-max-age`, default
+    instant in the future, an age bound (`yotresultsdistribution.operations.supersede-max-age`, default
     30 days) so that one keystroke cannot give up the estate's whole history of registers, and the
     count carried into the audit event. This is why constitution condition (c) reads "at least as
     strictly as its command was".

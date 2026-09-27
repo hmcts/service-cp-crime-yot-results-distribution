@@ -1,27 +1,27 @@
 {
-  "name": "App Configuration kv: CourtRegisterService flag ON (default)",
-  "scenarioName": "CourtRegisterServiceFlag",
+  "name": "App Configuration kv: YotResultsDistributionService flag ON (default)",
+  "scenarioName": "YotResultsDistributionServiceFlag",
   "requiredScenarioState": "Started",
   "priority": 1,
   "request": {
     "method": "GET",
-    "urlPattern": "/kv/\\.appconfig\\.featureflag(/|%2F)CourtRegisterService(\\?.*)?"
+    "urlPattern": "/kv/\\.appconfig\\.featureflag(/|%2F)YotResultsDistributionService(\\?.*)?"
   },
   "response": {
     "status": 200,
     "headers": {
       "Content-Type": "application/vnd.microsoft.appconfig.kv+json; charset=utf-8",
-      "ETag": "\"courtregister-flag-on\""
+      "ETag": "\"yot-results-distribution-flag-on\""
     },
     "jsonBody": {
-      "key": ".appconfig.featureflag/CourtRegisterService",
+      "key": ".appconfig.featureflag/YotResultsDistributionService",
       "label": "LOCAL",
       "content_type": "application/vnd.microsoft.appconfig.ff+json",
-      "value": "{\"id\":\"CourtRegisterService\",\"description\":\"Local compose stub - the cutover flag, ON\",\"enabled\":true,\"conditions\":{\"client_filters\":[]}}",
+      "value": "{\"id\":\"YotResultsDistributionService\",\"description\":\"Local compose stub - the cutover flag, ON\",\"enabled\":true,\"conditions\":{\"client_filters\":[]}}",
       "tags": {},
       "locked": false,
       "last_modified": "2026-01-01T00:00:00+00:00",
-      "etag": "courtregister-flag-on"
+      "etag": "yot-results-distribution-flag-on"
     }
   }
 }

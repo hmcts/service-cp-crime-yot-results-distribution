@@ -44,7 +44,7 @@ below as an assumption rather than left as a marker.
   `StructuredArguments` lives in `LogEventReportSink` and nowhere else.
 - **A sink failure is caught only to classify.** Each adapter answers with a `DeliveryOutcome`
   carrying a `ReportDeliveryReason` from a closed set; the service counts it on
-  `courtregister_exception_report_deliveries_total{sink,outcome}`, says it at WARN naming the caught
+  `yotresultsdistribution_exception_report_deliveries_total{sink,outcome}`, says it at WARN naming the caught
   failure by **class** and never by message, and carries on to the next sink. Nothing returns a
   success value from a catch and nothing is logged and dropped (Principle VI).
 - **Two different failures, two different disciplines, and both are the repository's own rules
@@ -55,19 +55,19 @@ below as an assumption rather than left as a marker.
   leaves."*
   - **The sweep's failed read is exactly that clause.** It is a reading, taken for two gauges and
     for nothing else. It stops where it happens, the gauges keep their last value rather than
-    dropping to a lie, `courtregister_intake_sweep_failures_total{reason}` moves, one WARN line is
+    dropping to a lie, `yotresultsdistribution_intake_sweep_failures_total{reason}` moves, one WARN line is
     written naming the caught failure by class, and the fixed delay is not cancelled. Nothing
     downstream depends on the reading, so absorbing it costs an interval of staleness and buys a
     schedule that survives a database blip.
   - **The report run is not that clause, and takes the other branch.** A failed **read** is not
     telemetry - it is the report - so it counts
-    `courtregister_exception_report_runs_total{outcome=failed}`, writes the run line, and
+    `yotresultsdistribution_exception_report_runs_total{outcome=failed}`, writes the run line, and
     **rethrows**, which releases the ShedLock lock and makes the failure visible. A failed **sink**
     is Principle VI's *"map to a recorded state"* branch: it is classified into a `DeliveryOutcome`
     with a bounded `ReportDeliveryReason`, counted on
-    `courtregister_exception_report_deliveries_total{sink,outcome}`, and the run's `outcome` is
+    `yotresultsdistribution_exception_report_deliveries_total{sink,outcome}`, and the run's `outcome` is
     `partial` on both the `exception_report_run` line and
-    `courtregister_exception_report_runs_total{outcome}`. `ReportExceptionsCli` exits **2**
+    `yotresultsdistribution_exception_report_runs_total{outcome}`. `ReportExceptionsCli` exits **2**
     ("could not") when any sink it asked failed, so an operator's shell knows without reading the
     line.
   - **Nothing is retried, on either branch.** A report is not a message: it is regenerated in full
@@ -82,12 +82,12 @@ below as an assumption rather than left as a marker.
 ## 2. The scheduled run and the lock
 
 - **Decision**: `ExceptionReportJob` carries
-  `@Scheduled(cron = "${courtregister.report.cron}", zone = "${courtregister.report.zone}",
+  `@Scheduled(cron = "${yotresultsdistribution.report.cron}", zone = "${yotresultsdistribution.report.zone}",
   scheduler = ReportSchedulingConfig.REPORT_SCHEDULER)` and
-  `@SchedulerLock(name = "exception-report", lockAtMostFor = "${courtregister.report.lock-at-most-for}")`
+  `@SchedulerLock(name = "exception-report", lockAtMostFor = "${yotresultsdistribution.report.lock-at-most-for}")`
   on a **`void`** method that opens `RunCorrelation.under(...)` and delegates to a body returning
   the `ExceptionReport`. `IntakeAgeSweep` carries
-  `@Scheduled(fixedDelayString = "${courtregister.intake.gauge-refresh}",
+  `@Scheduled(fixedDelayString = "${yotresultsdistribution.intake.gauge-refresh}",
   scheduler = IntakeSweepConfig.INTAKE_SWEEP_SCHEDULER)` over a `void` method and a body, and
   **no `@SchedulerLock` at all**.
 - **Every scheduled method names its scheduler, and the two existing ones gain the attribute too.**
@@ -158,9 +158,9 @@ below as an assumption rather than left as a marker.
 ## 3. Log Analytics output - structured arguments on the existing stdout stream
 
 - **Decision**: two events **written by the sink**, and one flat run line written by the **job**.
-  `courtregister_exception_report`, once per run, carries **ten** fields: `event`, `run_id`,
+  `yotresultsdistribution_exception_report`, once per run, carries **ten** fields: `event`, `run_id`,
   `window_from`, `window_to`, `snapshot_at` and the five counts `request_failed`, `request_late`,
-  `batch_late`, `batch_failed` and `notification_failed`. And `courtregister_exception`, once
+  `batch_late`, `batch_failed` and `notification_failed`. And `yotresultsdistribution_exception`, once
   per exception, carries `event`, `run_id`, `kind`, and then the applicable subset of the entry's
   thirteen components **including `kind`** - `source`, `request_id`, `hearing_id`, `hearing_day`,
   `batch_id`, `notification_id`, `court_centre_id`, `register_date`, `status`, `attempts`, `reason`,
@@ -259,15 +259,15 @@ below as an assumption rather than left as a marker.
   spec has to weaken: the body carries the summary, the CSV carries the detail.
 - **Both halves write a file, so the port is behind an "either half" condition.** Review gate 7
   found the consequence of not saying so: the LIVE and STUB `PayloadFileStore` beans and the second
-  datasource under them were declared behind `courtregister.generation.enabled`, so a pod with the
+  datasource under them were declared behind `yotresultsdistribution.generation.enabled`, so a pod with the
   generation half off and this output on held no store, no pool, and could not start - the FR-004
   deployment this output exists for. They are in `config/FileServiceConfig` and
   `config/FileServiceDataSourceConfig` behind `config/FileServiceNeeded` now, which answers
-  `courtregister.generation.enabled` **or** `courtregister.report.email.enabled`. An OR is what a
+  `yotresultsdistribution.generation.enabled` **or** `yotresultsdistribution.report.email.enabled`. An OR is what a
   shared downstream needs and is what `@ConditionalOnProperty` cannot express, which is why it is a
   `Condition` class. It is **not** a second cutover lever: neither setting decides which
-  implementation is live, and the one lever is still the `CourtRegisterService` flag the nightly job
-  reads. `PropertiesValidator` follows the same sentence - `courtregister.fileservice.url` is
+  implementation is live, and the one lever is still the `YotResultsDistributionService` flag the nightly job
+  reads. `PropertiesValidator` follows the same sentence - `yotresultsdistribution.fileservice.url` is
   required by whichever half writes a file, and the refusal names the half that asked. Nothing
   generation-only moved: the renderer, the notifier and the flag reader are chosen where they were.
 - **The file-service write is permitted.** The design owner ruled on 2026-09-14 that the framework
@@ -282,14 +282,14 @@ below as an assumption rather than left as a marker.
   `metadata.file_id` is a foreign key onto `content.file_id`: content first, then metadata. The
   content column is `bytea` and takes the CSV's UTF-8 bytes. The metadata row carries the same five
   keys progression spells: `fileName` = `court-register-exceptions_{yyyy-MM-dd}.csv`,
-  `conversionFormat` = `csv`, `templateName` = `courtregister-exception-report`, `numberOfPages` = 1,
+  `conversionFormat` = `csv`, `templateName` = `yot-results-distribution-exception-report`, `numberOfPages` = 1,
   `fileSize` = the byte count.
 - **Ids before calls.** The `fileId` is minted and written into the run's log line **before** the
   file-service write, so an attachment that exists under an id nothing recorded is impossible - the
   same discipline 002 applies to `payload_file_id` before `generate-document`.
 - **Recipients and template are configuration, never code.**
-  `courtregister.report.email.recipients` is comma-separated from `${COURTREGISTER_REPORT_RECIPIENTS:}`
-  and `courtregister.report.email.template-id` from `${CR_REPORT_TEMPLATE_ID:}`, both supplied per
+  `yotresultsdistribution.report.email.recipients` is comma-separated from `${YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS:}`
+  and `yotresultsdistribution.report.email.template-id` from `${CR_REPORT_TEMPLATE_ID:}`, both supplied per
   environment from Key Vault through the CSI driver with workload identity, never as a chart value
   and never with a default in this repository: they are people's addresses.
 - **Personalisation** carries the counts and the window **as strings** (Notify substitutes text),
@@ -303,7 +303,7 @@ below as an assumption rather than left as a marker.
   `register_notification.email_address`, so no address appears in either event, in the CLI table or
   in the CSV.
 - **The template is a cross-team dependency and it gates User Story 4 alone.** The Notify template is
-  owned by the notificationnotify team. Until it exists, `courtregister.report.email.enabled` stays
+  owned by the notificationnotify team. Until it exists, `yotresultsdistribution.report.email.enabled` stays
   false, stories 1, 2, 3 and 5 ship and are complete, and the `--email` flag is refused with a
   bounded reason rather than silently doing nothing.
 - **Alternative rejected**: a body-only e-mail with the exceptions inline. Notify's body has a
@@ -314,15 +314,15 @@ below as an assumption rather than left as a marker.
 ## 5. Configuration and its refusals
 
 - **Decision**: `config/ReportProperties`, a record bound at `@ConfigurationProperties(prefix =
-  "courtregister.report")`, mirroring `GenerationProperties`' style and its `@DefaultValue`s:
+  "yotresultsdistribution.report")`, mirroring `GenerationProperties`' style and its `@DefaultValue`s:
   `enabled=false`, `cron="0 0 7 * * MON-FRI"`, `zone="Europe/London"`,
   `zoneOverrideAcknowledged=false`, `lockAtMostFor=15m`, `requestTerminalWithin=30m`,
   `batchGeneratedWithin` (no default), `notifiedWithin=15m`, `email.enabled=false`,
   `email.templateId`, `email.recipients`. The gauge-refresh interval is **not** here: it binds on
-  `CourtRegisterProperties` as a nested `Intake(gaugeRefresh)` record at
-  `courtregister.intake.gauge-refresh`, with its own `@DefaultValue("10m")`. Every default is
+  `YotResultsDistributionProperties` as a nested `Intake(gaugeRefresh)` record at
+  `yotresultsdistribution.intake.gauge-refresh`, with its own `@DefaultValue("10m")`. Every default is
   written a second time in `application.yaml` with a comment saying what breaks without it,
-  following the `courtregister.generation` block.
+  following the `yotresultsdistribution.generation` block.
 - **There is no `window` setting.** The scheduled run's window is
   `ReportWindow.sinceLastScheduledRun(cron, zone, now)`: from the previous occurrence of the
   report's own cron to now. A Monday 07:00 run therefore reads back to Friday 07:00, and every
@@ -341,7 +341,7 @@ below as an assumption rather than left as a marker.
   an alert argue with a batch state.
 - **Refusals**, all in `PropertiesValidator` following its existing helpers and each naming the
   offending setting: every duration positive (`request-terminal-within`, `batch-generated-within`
-  where it is set explicitly, `notified-within`, `courtregister.intake.gauge-refresh`,
+  where it is set explicitly, `notified-within`, `yotresultsdistribution.intake.gauge-refresh`,
   `lock-at-most-for`); the zone rule **identical** to generation's, `Europe/London` unless
   `zone-override-acknowledged=true` and then a zone the JVM knows; `lock-at-most-for` at least
   `REPORT_RUN_BUDGET` (5m, fixed) plus the **existing** `SCHEDULER_LOCK_MARGIN` (10m), which is what
@@ -361,16 +361,16 @@ below as an assumption rather than left as a marker.
 ## 6. Metrics - the four instruments design section 11 promised
 
 - **Decision**: in `config/ProcessingMetrics`, beside the instruments already there:
-  - gauge `courtregister_oldest_non_terminal_request_age` (seconds), **registered at zero in the
+  - gauge `yotresultsdistribution_oldest_non_terminal_request_age` (seconds), **registered at zero in the
     constructor**;
-  - gauge `courtregister_non_terminal_requests_over_threshold`, likewise;
-  - timer `courtregister_request_duration`, tagged `outcome` from the terminal statuses
+  - gauge `yotresultsdistribution_non_terminal_requests_over_threshold`, likewise;
+  - timer `yotresultsdistribution_request_duration`, tagged `outcome` from the terminal statuses
     (`completed`, `failed`) and by nothing else;
-  - counter `courtregister_exception_report_runs_total{outcome}`, whose `outcome` is
+  - counter `yotresultsdistribution_exception_report_runs_total{outcome}`, whose `outcome` is
     `delivered`, `partial` or `failed` - the same word the `exception_report_run` line carries;
-  - counter `courtregister_exception_report_deliveries_total{sink,outcome}`;
-  - counter `courtregister_exceptions_reported_total{kind}`;
-  - counter **`courtregister_intake_sweep_failures_total{reason}`**, the sweep's absorbed refusal.
+  - counter `yotresultsdistribution_exception_report_deliveries_total{sink,outcome}`;
+  - counter `yotresultsdistribution_exceptions_reported_total{kind}`;
+  - counter **`yotresultsdistribution_intake_sweep_failures_total{reason}`**, the sweep's absorbed refusal.
     A reading that cannot be taken is counted here rather than rethrown, for the reason section 1
     gives: it is the design rules' "one absorbed refusal is telemetry" clause, and this is the
     counter that makes the absorption visible. A path that drops something must move a counter.
@@ -379,8 +379,8 @@ below as an assumption rather than left as a marker.
   constructor.
 - **The two gauges are per JVM, and an alert must say so.** Nothing locks the sweep (section 2), so
   every replica publishes its own reading of the same store. An alert on
-  `courtregister_oldest_non_terminal_request_age` or
-  `courtregister_non_terminal_requests_over_threshold` therefore aggregates across pods with
+  `yotresultsdistribution_oldest_non_terminal_request_age` or
+  `yotresultsdistribution_non_terminal_requests_over_threshold` therefore aggregates across pods with
   `max()`, which is the honest reading: the oldest unfinished request is the oldest any pod can see.
   **The same is true, by accident rather than design, of the four batch-age gauges 002 added**: the
   reconciler refreshes them under its lock, so one pod carries them and the rest publish nothing
@@ -404,7 +404,7 @@ below as an assumption rather than left as a marker.
   timer needs: a superseded runner's completion affects no rows and must not contribute a sample.
 - **The gauges are registered at construction, not on first use** (acceptance scenario 2.1). A gauge
   that appears only after the first incident is not an alerting surface, which is the argument
-  `ProcessingMetrics` already makes for `courtregister_intake_suspended`.
+  `ProcessingMetrics` already makes for `yotresultsdistribution_intake_suspended`.
 - **Labels stay bounded.** `sink` is `log`/`email`, `outcome` is a closed set, `kind` is the **five**
   exception kinds. A request id, hearing id, court centre id or recipient address is never a label -
   that is both a cardinality explosion and, on a register whose every defendant is a youth, a privacy
@@ -461,8 +461,8 @@ below as an assumption rather than left as a marker.
   looking each batch up would be N+1 reads on a morning where a lot went wrong.
 - **Recorded-but-unbatched registers.** The fourth `BATCH_LATE` source is
   `RegisterStore.recordedUnbatchedBefore(Instant)`, given the most recent scheduled generation run,
-  which `domain/LastScheduledRun` computes from `courtregister.generation.cron` read in
-  `courtregister.generation.zone`. A register recorded while the flag was OFF is already excluded,
+  which `domain/LastScheduledRun` computes from `yotresultsdistribution.generation.cron` read in
+  `yotresultsdistribution.generation.zone`. A register recorded while the flag was OFF is already excluded,
   because the shared predicate excludes it by construction, and that is exactly the spec's rule:
   those are the existing review command's concern and not exceptions.
 - **Ages are computed by the database.** Every statement returns
@@ -497,7 +497,7 @@ below as an assumption rather than left as a marker.
   `@Profile("!test")` every database-touching configuration here carries) - no enabled-flag condition
   at all. `SchedulingConfig` keeps the generation `TaskScheduler` and the `RegisterGenerationJob`
   bean under its existing conditions. A new `config/ReportSchedulingConfig`, conditional on
-  `courtregister.report.enabled` and not CLI, declares its own single-thread `TaskScheduler` named
+  `yotresultsdistribution.report.enabled` and not CLI, declares its own single-thread `TaskScheduler` named
   `exception-report-` and the `ExceptionReportJob` bean. A new `config/IntakeSweepConfig`,
   conditional on **not CLI and the non-test profile only**, declares its own single-thread
   `TaskScheduler` named `intake-sweep-` and the `IntakeAgeSweep` bean.
@@ -522,7 +522,7 @@ below as an assumption rather than left as a marker.
   one-consumer public-event subscription.
 - **Two repository beans have to move.** `registerBatchRepository` and
   `registerNotificationRepository` are declared today in `config/GenerationConfig`, which is
-  conditional on `courtregister.generation.enabled`. The report reads both - `BATCH_LATE` and
+  conditional on `yotresultsdistribution.generation.enabled`. The report reads both - `BATCH_LATE` and
   `BATCH_FAILED` from the first, `NOTIFICATION_FAILED` from the second - so with
   `report.enabled=true` and `generation.enabled=false`, the exact FR-004 deployment, the context
   cannot start. Their `@Bean` methods move verbatim to `config/ProcessedLogConfig`, which is
@@ -532,7 +532,7 @@ below as an assumption rather than left as a marker.
   about either repository changes; only where its bean is declared.
 - **Rationale**: FR-004 requires the report to run where the generation half is switched off, and
   today every one of those three declarations sits inside a configuration conditional on
-  `courtregister.generation.enabled`, so an intake-only pod processes no `@Scheduled` at all. Spring
+  `yotresultsdistribution.generation.enabled`, so an intake-only pod processes no `@Scheduled` at all. Spring
   permits one `@EnableScheduling` and one `LockProvider` per context, so they have to move up rather
   than be repeated. A scheduler of the report's own, single-threaded, is what keeps SC-008 true: the
   07:00 run and the fixed-delay sweep cannot land on the thread the 18:00 run or the reconciler is
@@ -572,10 +572,10 @@ below as an assumption rather than left as a marker.
   Anything else is refused as `unreadable-argument` naming `--since` and **never quoting the token
   typed**, because an operator's terminal is pasted into tickets and the argument may hold anything.
 - **`--email`** is refused with a `declined` (exit code 1, the code the five existing commands use
-  for a refusal) when `courtregister.report.email.enabled` is false, and the line says which setting
+  for a refusal) when `yotresultsdistribution.report.email.enabled` is false, and the line says which setting
   it is. Nothing is written in that case.
 - **No flag, and no `--ignore-flag`.** The report reads and writes nothing the cutover decides, so
-  the `CourtRegisterService` flag is not read at all and there is nothing to override. That is not a
+  the `YotResultsDistributionService` flag is not read at all and there is nothing to override. That is not a
   second lever appearing: it is a command that is not on the lever's circuit.
 - **Which sinks the command uses.** It calls `build(window, runId)` and then
   `deliver(report, sinks)` with the sinks **it** chose: the log sink always, and the e-mail sink only

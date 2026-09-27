@@ -55,9 +55,9 @@ Two, and they are recorded here rather than argued for in a commit body:
 
 No other exception of this kind is pre-approved.
 
-**Conventions**: package root `uk.gov.hmcts.cp.courtregister`; production code under
-`src/main/java/uk/gov/hmcts/cp/courtregister/`, tests under
-`src/test/java/uk/gov/hmcts/cp/courtregister/`; progression sources referenced as `PROG` =
+**Conventions**: package root `uk.gov.hmcts.cp.yotresultsdistribution`; production code under
+`src/main/java/uk/gov/hmcts/cp/yotresultsdistribution/`, tests under
+`src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/`; progression sources referenced as `PROG` =
 `cpp-context-progression` at `main` `79edf7cf3d`. `*IT` suites need Docker and run inside
 `./gradlew test`. Conventional Commits on `002-consolidate-progression-leg`; no AI attribution.
 The accepted types are `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `build`, `ci` and `style`
@@ -99,11 +99,11 @@ exceptions of this kind are pre-approved. **Never two committing agents at once.
       + `shedlock-provider-jdbc-template`, test-only `org.apache.activemq:artemis-jakarta-server`;
       `./gradlew dependencies --configuration runtimeClasspath` shows no duplicate JMS API.
 - [x] T002 [P] Add the 002 configuration keys to `src/main/resources/application.yaml` and
-      `application-test.yaml` exactly as the plan's configuration table (`courtregister.output`,
-      `courtregister.generation.*`, `courtregister.feature.*`, `courtregister.fileservice.*`,
-      `courtregister.endpoints.systemdocgenerator|notificationnotify`,
-      `courtregister.email.templates.cr_standard`, `spring.artemis.*`, `spring.jms.*`,
-      `courtregister.publicevents.*`), with the same "LOCAL DEFAULT ONLY" comments the 001 keys carry;
+      `application-test.yaml` exactly as the plan's configuration table (`yotresultsdistribution.output`,
+      `yotresultsdistribution.generation.*`, `yotresultsdistribution.feature.*`, `yotresultsdistribution.fileservice.*`,
+      `yotresultsdistribution.endpoints.systemdocgenerator|notificationnotify`,
+      `yotresultsdistribution.email.templates.cr_standard`, `spring.artemis.*`, `spring.jms.*`,
+      `yotresultsdistribution.publicevents.*`), with the same "LOCAL DEFAULT ONLY" comments the 001 keys carry;
       `./gradlew bootRun` still refuses for the documented reasons (record the message).
 - [x] T003 [P] Extend `docker-compose.yml` with `artemis` (`artemis-jakarta-server` image or the
       estate `hmcts/artemis_ubuntu`, `public.event` multicast address), `fileservice-postgres`
@@ -220,9 +220,9 @@ two days:
       lives here as a binding test); `completion=event` requires broker url; STUB modes refused with a
       namespace; **P9 pin: `blank_email_template_refuses_to_start_in_live_mode`**. Red: context starts.
 - [x] T010 [P] `config/GenerationMetricsTest` - instrument names and tags:
-      `courtregister.batches{outcome}`, `courtregister.generation.request{response_code}`,
-      `courtregister.generation.latency`, `courtregister.generation.reconciled`,
-      `courtregister.generation.skipped{reason}`, `courtregister.notifications{status,response_code}`,
+      `yotresultsdistribution.batches{outcome}`, `yotresultsdistribution.generation.request{response_code}`,
+      `yotresultsdistribution.generation.latency`, `yotresultsdistribution.generation.reconciled`,
+      `yotresultsdistribution.generation.skipped{reason}`, `yotresultsdistribution.notifications{status,response_code}`,
       gauges `oldest_recorded_unbatched_age`, `oldest_generating_age`, `pending_after_deadline`,
       `flag_read_ok`. Red: meter absent.
 - [x] T011 [P] `domain/BatchStateTest` - `BatchStatus` transitions permitted/refused per the
@@ -335,7 +335,7 @@ re-share supersedes; schema-invalid fails SCHEMA_INVALID with no row.
       gains `defendantType` (already a legal field in the frozen schema - confirm with
       `OutboundContractValidationTest`). Green: T021.
 - [x] T024 [US1] `application/DistributionPipeline` - `RegisterStore` replaces `RegisterSubmissionClient`
-      in `record` mode; `config/PipelineConfig` selects by `courtregister.output`; `adapter/progression`
+      in `record` mode; `config/PipelineConfig` selects by `yotresultsdistribution.output`; `adapter/progression`
       retained behind `progression-post`. Green: T020.
 - [x] T024a [US1] V3 partial unique index enforcing one active row per `(hearing_id,
       court_centre_id, register_date)` and the unique-violation retry path in
@@ -353,7 +353,7 @@ re-share supersedes; schema-invalid fails SCHEMA_INVALID with no row.
 
 ## Phase 4: User Story 4 + 7 - the flag is the one lever (Priority: P1)
 
-**Goal**: the nightly job reads `CourtRegisterService` first and does nothing when OFF/unreadable;
+**Goal**: the nightly job reads `YotResultsDistributionService` first and does nothing when OFF/unreadable;
 the CLI respects it; recorded-while-off rows are stamped and excluded.
 
 **Independent Test**: flag OFF ⇒ skipped `flag-off`; unreadable ⇒ `flag-unreadable`; ON ⇒ proceeds;
@@ -411,11 +411,11 @@ GENERATED / FAILED with reason; grace period → reconciler.
       `PayloadStoreUnavailableException`; no other statement issued (statement log). Red: seam throws.
 - [x] T034 [P] [US2] `adapter/systemdocgenerator/SystemDocGeneratorClientTest` (WireMock) - body
       verbatim (`templateIdentifier=OEE_Layout5`, `conversionFormat=pdf`, `payloadFileServiceId`,
-      `sourceCorrelationId=batch_id`, `originatingSource=CourtRegisterService`), media type,
+      `sourceCorrelationId=batch_id`, `originatingSource=YotResultsDistributionService`), media type,
       `CJSCPPUID`; 202 only (200 ⇒ `RENDER_REQUEST_REJECTED`); `retry_taxonomy_matches_the_submission_client`
       (shared `RetryPolicy`); `query` maps the four optional fields. Red: seam throws.
 - [x] T035 [P] [US2] `adapter/publicevents/DocumentEventListenerTest` - parses a framework
-      `JsonEnvelope` body, reads `CPPNAME`, ignores `originatingSource != CourtRegisterService`
+      `JsonEnvelope` body, reads `CPPNAME`, ignores `originatingSource != YotResultsDistributionService`
       (acknowledged, counted), routes `document-available` / `generation-failed` to the sink with
       `sourceCorrelationId` and `payloadFileServiceId`. Red: sink not called.
 - [x] T036 [P] [US2] `adapter/publicevents/DocumentEventListenerIT` (embedded Artemis) - durable
@@ -475,7 +475,7 @@ GENERATED / FAILED with reason; grace period → reconciler.
       the reconciler's schedule and lock sat on the counting `reconcile()`, which returns a primitive
       and which ShedLock's interceptor therefore refuses to lock, so a generating pod's first
       proceeding run died at the reconcile step; and nothing constructed the downstream half at all,
-      so a pod with `courtregister.generation.enabled=true` registered no `@JmsListener` and scheduled
+      so a pod with `yotresultsdistribution.generation.enabled=true` registered no `@JmsListener` and scheduled
       no run. Both were fixed before this suite's recorded run - the wiring at `602474c` under its own
       red run `a24ac4f`, the ShedLock defect at `935a1c3` under its own red run `4b34bd3` - and the
       run recorded in `f562e52` is the green one after them.)
@@ -616,7 +616,7 @@ missing from it rather than judged and allowed.
    is for - `RecipientSet.unionOf`, `NotificationNotifyClient` and `RegisterNotifierService`, each
    throwing `UnsupportedOperationException` with the task that would implement it. `config/
    LiveNotificationConfig` is not: it arrived finished, with both conditions
-   (`courtregister.generation.enabled`, `courtregister.generation.nn-mode` LIVE with
+   (`yotresultsdistribution.generation.enabled`, `yotresultsdistribution.generation.nn-mode` LIVE with
    `matchIfMissing`), the endpoint, the `system-user-id` identity and both timeouts on the request
    factory. No red run preceded it and no case then held any of it down - the client's own suite
    builds a `RestClient` by hand and `GenerationWiringContextTest` asks only that a
@@ -720,10 +720,10 @@ dispatched by `docker/startup.sh`, no HTTP endpoint.
 - [x] T064 [P] [US5] `config/HttpSurfaceTest` (extend) - still zero controllers with generation enabled.
       (`config/CliModeConfigTest` lands with it, because "zero controllers" and "no consumer, no
       schedule, no listener" are one property's job, and it is the suite that boots the same
-      generating pod twice differing by `courtregister.cli` alone. Red at `c3d8ff7`: 14 tests, 3
+      generating pod twice differing by `yotresultsdistribution.cli` alone. Red at `c3d8ff7`: 14 tests, 3
       failed, all three failing assertions - `holds no Service Bus consumer` on "Expecting empty but
       was: [courtRegisterProcessorClient]", `schedules nothing` on "Expecting empty but was:
-      [uk.gov.hmcts.cp.courtregister.batch.RegisterGenerationJob.run, ...]" and `runs no listener
+      [uk.gov.hmcts.cp.yotresultsdistribution.batch.RegisterGenerationJob.run, ...]" and `runs no listener
       container` on "Expecting empty but was: [org.springframework.jms.listener
       .DefaultMessageListenerContainer@61cd3317]". Green at `98c8a10`: CliModeConfigTest 8 tests,
       HttpSurfaceTest 6 tests, 0 failures. The other ten cases of the two suites were green on
@@ -733,8 +733,8 @@ dispatched by `docker/startup.sh`, no HTTP endpoint.
 ### Implementation
 
 - [x] T065 [US5] `batch/cli/CliMain` (+ the five commands) running the context with
-      `courtregister.cli=true` (no listener, no scheduler, generation adapters LIVE). Green: T062, T063.
-      (`98c8a10`, green as quoted under T062 to T064. What `courtregister.cli` turns off is three
+      `yotresultsdistribution.cli=true` (no listener, no scheduler, generation adapters LIVE). Green: T062, T063.
+      (`98c8a10`, green as quoted under T062 to T064. What `yotresultsdistribution.cli` turns off is three
       configurations rather than three beans, through one `Condition` beside the property's own name:
       `ServiceBusConsumerConfig` owns the processor and the only component permitted to start it,
       `SchedulingConfig` owns `@EnableScheduling` as well as the job, `PublicEventsConfig` owns the
@@ -857,18 +857,18 @@ dispatched by `docker/startup.sh`, no HTTP endpoint.
       five names is answered on stderr with `usage: startup.sh <command> [arguments]`, the five
       names, and exit 2. The two are distinguished because a mistyped name reaching the fall-through
       started a second whole application in the pod, dropped the operator's arguments, left
-      `courtregister.cli` false and ended on 1 with none of the five names printed; 2 and not 1 for
+      `yotresultsdistribution.cli` false and ended on 1 with none of the five names printed; 2 and not 1 for
       the reason the no-jar arm already gives, that the command could not be run rather than
       declined. Nothing about what was typed is echoed, as `CliMain`'s own usage does not echo it.
       `./scripts/container-smoke.sh` exit 0 at `441d653`, printing "PASS: readiness reported UP
       within the 60s budget" and "PASS: startup.sh check-flag printed flag=ON and exited 0"; that is
-      also the commit that dropped the smoke's `COURTREGISTER_GENERATION_FLAG_MODE=STUB` override, so
+      also the commit that dropped the smoke's `YOTRESULTSDISTRIBUTION_GENERATION_FLAG_MODE=STUB` override, so
       the reading is taken through the deployed reader. **The recorded smoke run was made with a
       local, uncommitted `docker-compose.override.yml`** dropping the four host port publications
       (5432, 5433, 8161, 61616) unrelated long-running containers on that machine already hold; it is
       named in that commit body and was deleted before it, and nothing in the script reaches a
       dependency from the host. `9cb7303` / `d7c4319` are what let the container read the flag at
-      all: `courtregister.feature.credential`, `workload-identity` by default and `local-test` for
+      all: `yotresultsdistribution.feature.credential`, `workload-identity` by default and `local-test` for
       the local loop, refused by `PropertiesValidator` wherever the endpoint's host ends
       `.azconfig.io` or a Service Bus namespace says the pod is deployed. `441d653` runs the compose
       `app` service generation-enabled against the committed stubs, and `15c1ae2` corrects the
@@ -890,7 +890,7 @@ dispatched by `docker/startup.sh`, no HTTP endpoint.
       the <command> command from /app/", which is what tells a dispatch out of the fat jar apart
       from a second application having been started. The extra stack is one WireMock serving the
       committed App Configuration `kv` mapping, on the `local-test` credential and **not**
-      `COURTREGISTER_GENERATION_FLAG_MODE=STUB`, which the task offered: STUB is unavailable, and
+      `YOTRESULTSDISTRIBUTION_GENERATION_FLAG_MODE=STUB`, which the task offered: STUB is unavailable, and
       empirically rather than by assumption - with generation disabled the image answered
       `generate-register --help` "outcome=failed reason=command-not-wired" exit 2, because
       `CliMain.registryOf` resolved the generation beans as the command was built, and with
@@ -929,8 +929,8 @@ brings up:
   200 and `check-flag` `flag=ON` exit 0.
 
 **"through PENDING to NOTIFIED" is dropped, because that block cannot reach it in principle.** The
-compose `app` sets `COURTREGISTER_PAYLOAD_MODE=STUB` and the stub payload source fetches nothing,
-so a command published to `courtregister.requests` completes `no-defendants` and writes no
+compose `app` sets `YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB` and the stub payload source fetches nothing,
+so a command published to `yotresultsdistribution.requests` completes `no-defendants` and writes no
 `processed_output` row - verified rather than reasoned, `select count(*)` on `processed_output` and
 `register_batch` both 0 after a valid `Hearing_Resulted`. The RECORDED-to-NOTIFIED sequence is
 proved by `e2e/RecordEndToEndIT` and `e2e/GenerationEndToEndIT` under `./gradlew test`, which is
@@ -957,7 +957,7 @@ lines above and in the exceptions block below rather than here.
   shared after the one being released (`ce76e21` / `6c8334a`), the order a day's batches are
   answered in (`fdaf331`), the summary line a day is answered with (`9a96898`), a flag-off refusal
   logged as the decline it is (`2bbda7d` / `8805d47`), `notify-register`'s usage promise
-  (`67a6aa8` / `f1b5c9b`), a `courtregister.feature.endpoint` no App Configuration client can be
+  (`67a6aa8` / `f1b5c9b`), a `yotresultsdistribution.feature.endpoint` no App Configuration client can be
   built from (`507263d` / `c22509c`), a mistyped command name answered with the five names
   (`7e282ca` / `674753b`), the artefact the image is built from made unambiguous (`b544003`), and a
   command's report given stdout to itself (`fe4750d` / `294d93e`), with `58769d2` and `e2ee872`
@@ -1002,7 +1002,7 @@ take the property away. No implementation follows it and its passing run is in t
    finished.** Seven of the eight classes in it are what a seams commit is for - `CliMain.main` and
    `.run`, `Args.parse` and the five command bodies, each throwing
    `UnsupportedOperationException("T065")`. `CliModeConfig` is not: it arrived complete, a
-   `@Configuration` reading `courtregister.cli` through `@Value` and answering `cliMode()`, with
+   `@Configuration` reading `yotresultsdistribution.cli` through `@Value` and answering `cliMode()`, with
    `application.yaml` shipping the key false beside it. No red run preceded either, and nothing in
    that commit could have held them down, because what the property does is turn three
    configurations off and the three conditionals arrived with T065.
@@ -1010,16 +1010,16 @@ take the property away. No implementation follows it and its passing run is in t
    configurations could condition on it, and the name is the thing all three agree on - a throwing
    seam for a property read is not available. The behaviour it carries was then driven red-first
    where it is observable: `c3d8ff7`'s three failing assertions are a context started with
-   `courtregister.cli=true` still holding the consumer, the schedule and the listener, and `98c8a10`
+   `yotresultsdistribution.cli=true` still holding the consumer, the schedule and the listener, and `98c8a10`
    is the green. In that commit `CliModeConfig` stopped being a bean at all - its reading was the
    condition all along - so the finished class this one carried no longer exists in that shape; the
    property's name, its default and the one condition that reads it do.
    **Non-vacuity was shown by mutation instead**: with `CliModeConfig.CLI_PROPERTY` changed to
-   `courtregister.cli-mode`, so the condition reads a name nothing sets, `./gradlew test --tests
+   `yotresultsdistribution.cli-mode`, so the condition reads a name nothing sets, `./gradlew test --tests
    '...config.CliModeConfigTest' -Dtest.noFailFast=true` gives "8 tests completed, 3 failed" -
    `holds no Service Bus consumer, so a command takes no delivery` on "Expecting empty but was:
    [courtRegisterProcessorClient]", `schedules nothing, so a command cannot generate the night
-   twice` on "Expecting empty but was: [uk.gov.hmcts.cp.courtregister.batch.RegisterGenerationJob
+   twice` on "Expecting empty but was: [uk.gov.hmcts.cp.yotresultsdistribution.batch.RegisterGenerationJob
    .run, ...]", and `runs no listener container, so the durable subscription is left alone` on
    "Expecting empty but was: [org.springframework.jms.listener.DefaultMessageListenerContainer]".
    Mutation reverted before this documentation commit.
@@ -1059,7 +1059,7 @@ take the property away. No implementation follows it and its passing run is in t
    command name left `main` on a `NullPointerException` and exit 1 - the code that means declined -
    with none of the five names printed. Red at `3420ce3` ("Expecting code not to raise a throwable
    but caught java.lang.NullPointerException at ...ImmutableCollections$ListN.indexOf ... at
-   uk.gov.hmcts.cp.courtregister.batch.cli.CliMain.dispatch(CliMain.java:196)", then "expected: 1
+   uk.gov.hmcts.cp.yotresultsdistribution.batch.cli.CliMain.dispatch(CliMain.java:196)", then "expected: 1
    but was: -1", 27 tests completed, 2 failed), green at `7ff5592` (51 tests, then 141 over
    `batch.cli.*`, 0 failures, 0 errors). It is a defect in 002's own code rather than a progression
    one, so no `doc/DEFECT-FIXES.md` row moves for it. `2c6d7bb` is a javadoc-only follow-up to the
@@ -1099,14 +1099,14 @@ take the property away. No implementation follows it and its passing run is in t
    that landed as the compile-safe seam in the same commit; (b) two **[A]** characterisations of the
    credential that already worked, labelled as such in their javadoc; and (c) a production message
    change - `LiveFeatureFlagConfig`'s missing-variable refusal now names
-   `courtregister.feature.credential=local-test` before `courtregister.generation.flag-mode=STUB`,
+   `yotresultsdistribution.feature.credential=local-test` before `yotresultsdistribution.generation.flag-mode=STUB`,
    and no case asserted the old wording.
    **Why no red run was recorded**: (a) and (b) state behaviour that already held, and (c) is the
    wording of a refusal whose only assertion is that it names the missing variable.
    **Non-vacuity of the two characterisations was shown by mutation instead**, both reverted before
    the commit and quoted in its body: authorising the `workload-identity` branch with a connection
    string instead kills `the_workload_identity_credential_should_not_reach_a_plain_http_store` -
-   "Expecting actual: Enabled[] to be an instance of uk.gov.hmcts.cp.courtregister.domain
+   "Expecting actual: Enabled[] to be an instance of uk.gov.hmcts.cp.yotresultsdistribution.domain
    .FlagDecision.Unreadable but was instance of ...FlagDecision.Enabled"; disabling the
    missing-variable throw in `LiveFeatureFlagConfig.workloadIdentity` kills
    `the_workload_identity_credential_should_still_refuse_an_incomplete_pod` - "workload-identity
@@ -1184,7 +1184,7 @@ take the property away. No implementation follows it and its passing run is in t
    arranges. **Verification evidence stands in its place, and it is empirical**: with a second jar
    put in `build/libs` by hand, `./gradlew test --tests '*CliDispatchIT' -Dtest.noFailFast=true`
    fails before the image is built - "more than one packaged jar in .../build/libs
-   [service-cp-crime-court-register-0.0.1.jar, service-cp-crime-court-register-0.0.999.jar]" - and
+   [service-cp-crime-yot-results-distribution-0.0.1.jar, service-cp-crime-yot-results-distribution-0.0.999.jar]" - and
    is green again with the extra jar removed. Same shape as exception 5, and the same reason it is
    written down: the preamble grants that exemption to Phase 1 infrastructure and not to Phase 7.
    **What the design owner is being asked** is to accept that empirical evidence in place of a red
@@ -1277,7 +1277,7 @@ gate, `1609e80` / `3fae1a2`.
 not here: the successor guard on both release statements (T065), the summary line and the flag-off
 log sentence (T062), `notify-register`'s usage promise (T063), the entrypoint's answer to a mistyped
 name and stdout carrying the report alone (T067), and one outside Phase 7's own tasks -
-`507263d` / `c22509c`, which refuses a `courtregister.feature.endpoint` no App Configuration client
+`507263d` / `c22509c`, which refuses a `yotresultsdistribution.feature.endpoint` no App Configuration client
 can be built from, under the setting's own name rather than as an Azure `IllegalArgumentException`
 during refresh. Four documentation-only corrections landed with them (`58769d2`, `e2ee872`,
 `fdaf331`'s port contract, and this file), each named in its own commit body.
@@ -1292,8 +1292,8 @@ before `namesARealFlagStore` asks whether it ends `.azconfig.io`; and `requireAF
 additionally requires an http or https scheme. Red at `35d3277` ("137 tests completed, 5 failed",
 each on "Expecting: <Started application [AnnotationConfigApplicationContext@...]> to have failed
 but context started successfully") over three absolute-DNS spellings of a real store -
-`https://courtregister-ste86.azconfig.io./`, `https://COURTREGISTER-STE86.AZCONFIG.IO.` and
-`https://courtregister-ste86.azconfig.io.:443/kv` - and two endpoints naming no host,
+`https://yot-results-distribution-ste86.azconfig.io./`, `https://YOT-RESULTS-DISTRIBUTION-STE86.AZCONFIG.IO.` and
+`https://yot-results-distribution-ste86.azconfig.io.:443/kv` - and two endpoints naming no host,
 `http://foo:bad` and `http://:`, which `java.net.URI` parses as a registry authority with a null
 host. Green at `5bf982f` (`ConfigurationValidationTest` classes=20 tests=137, and `*config.*` with
 `*appconfig.*` classes=75 tests=374, 0 failures and 0 errors, so every generation-enabled context
@@ -1499,7 +1499,7 @@ exist; every requirement they carried does, and the endpoint refusal's wording c
       claim a reading nothing takes. Two shared test-support files changed, each for one reason
       stated in that body: `CapturedLog` gained a public `rendering(event)` and
       `PersonalDataMarkers` gained `GENERATOR_REASON`.
-      **This line said `courtregister_generation_latency` was "declared and recorded by nothing", so
+      **This line said `yotresultsdistribution_generation_latency` was "declared and recorded by nothing", so
       the suite "asserts the unmoved set rather than exempt the meter from the scan". Both halves
       are now false and are corrected here.** The timer is recorded, at `02597f2` / `3463404` on
       T072's line below, so the exemption is gone: the meter case is the plain claim that the drive
@@ -1575,7 +1575,7 @@ exist; every requirement they carried does, and the endpoint refusal's wording c
       the commit. `fileServiceRun` dropped from the readiness `include:` line of `application.yaml`
       fails case 3, the during-a-run case, on the wait for DOWN running out -
       "org.awaitility.core.ConditionTimeoutException: Condition with Lambda expression in
-      uk.gov.hmcts.cp.courtregister.e2e.ReadinessPolicyIT was not fulfilled within 2 minutes." - "8
+      uk.gov.hmcts.cp.yotresultsdistribution.e2e.ReadinessPolicyIT was not fulfilled within 2 minutes." - "8
       tests completed, 4 failed". `servicebus` added to that line, the one thing FR-011 forbids,
       fails case 1, the whole-outage broker case, on the same timeout out of the `during(OUTAGE)`
       wait, "8 tests completed, 3 failed". **The two fail apart**: mutation 1 leaves the broker case
@@ -1731,10 +1731,10 @@ exist; every requirement they carried does, and the endpoint refusal's wording c
       court centres of the same night are still being requested, and the count is not zero by
       construction at all. What stands of the paragraph is the negative half, and it is why the
       fields could not be read off the meters instead: `reconciled` is what a run settles about
-      **earlier** nights, and `courtregister_batches_total{outcome}` is the estate's cumulative
+      **earlier** nights, and `yotresultsdistribution_batches_total{outcome}` is the estate's cumulative
       count across every night rather than an answer about this one, the oldest-generating and
       oldest-generated gauges included. No new meter was needed for `requested` either:
-      `courtregister_generation_request_total{response_code}` already counts every request by what
+      `yotresultsdistribution_generation_request_total{response_code}` already counts every request by what
       answered it, and `requested` is that count for one night on the line an operator reads.
       **`ec92ec5` "test(report): classify every failure reason by whether the render was asked" is a
       new [A] commit of the shape the phase already lists five of**: four cases in
@@ -2054,12 +2054,12 @@ repository edits that page, and T074 carries the handover.
   progresses. `notified` counts the three endings the notifying leg can produce, taken together:
   everybody told, some told with the rest resendable, and nobody to tell at all. **Which** of the
   three a batch reached is not on the line; it is in the row and on
-  `courtregister_batches_total{outcome}`. `snapshot` is what separates a quiet night from a failed
+  `yotresultsdistribution_batches_total{outcome}`. `snapshot` is what separates a quiet night from a failed
   read: `taken` means the four counts stand (and a run that assembled no batch reads `taken` too,
   no statement having been issued and the empty answer being exact); `unread` means the store would
   not answer, the four counts are zeroes the run did not earn, and a WARN naming the class of what
   refused is on the same run. A lost snapshot also **increments
-  `courtregister_generation_unrecorded_total{reason="settled-snapshot"}`** (Phase 9, findings
+  `yotresultsdistribution_generation_unrecorded_total{reason="settled-snapshot"}`** (Phase 9, findings
   15/27), so a night whose settled read failed can be alerted on rather than only found in the log
   index; before that counter the word and the WARN were the whole of the signal.
 - **Two things about the settled half that a reader will otherwise assume wrongly** (Phase 8
@@ -2072,7 +2072,7 @@ repository edits that page, and T074 carries the handover.
   assembly. So `generated` must never be read as "documents for today's registers".
 - **What tonight's batches finally came to is still not on the line**, and cannot be: `reconciled`
   is what a run settles about **earlier** nights, and the end state of tonight's is read from
-  `courtregister_batches_total` by outcome with the oldest-generating and oldest-generated gauges,
+  `yotresultsdistribution_batches_total` by outcome with the oldest-generating and oldest-generated gauges,
   which is where FR-017 itself puts it. The counter is the estate's cumulative total across every
   night rather than an answer about one, so a per-night question is answered by the line's snapshot
   or by the rows, never by the counter alone. The snapshot's scope is the **run** and not a register
@@ -2083,16 +2083,16 @@ repository edits that page, and T074 carries the handover.
 - **A run that stops part way writes the same line with what it had done when it stopped**, and a
   separate ERROR beside it naming the class of what stopped it; the failure is then rethrown, so the
   schedule and the operations command still see it. A line showing small counts alongside such an
-  ERROR is a night that was cut short, not a quiet night. `courtregister_pending_after_deadline`
+  ERROR is a night that was cut short, not a quiet night. `yotresultsdistribution_pending_after_deadline`
   from such a run reads what the run had counted at that point rather than a finished count:
   deliberate, because it is at least about tonight rather than stale from yesterday.
 - **The three gauges the run publishes**, once at the end of every run that got as far as
-  assembling, none of them labelled. `courtregister_oldest_recorded_unbatched_age`, seconds the
+  assembling, none of them labelled. `yotresultsdistribution_oldest_recorded_unbatched_age`, seconds the
   oldest register still waiting to be batched has waited, which is the reading that says a night was
   missed, because a register that is never batched moves no counter.
-  `courtregister_deferred_keys`, court centre days the run passed over, the companion of the age
+  `yotresultsdistribution_deferred_keys`, court centre days the run passed over, the companion of the age
   gauge: that says how long the worst has waited, this says how much of the estate is waiting.
-  `courtregister_pending_after_deadline`, batches the run ended without asking the renderer for,
+  `yotresultsdistribution_pending_after_deadline`, batches the run ended without asking the renderer for,
   which is the reading that says the night is no longer finishing inside its hour - the one failure
   a nightly flow can have repeatedly without anything ever failing. A run that stopped before it
   assembled publishes none of them, so the previous run's reading stands rather than being
@@ -2274,7 +2274,7 @@ left behind] expected: 88.0 but was: -1.0";
 `a_row_that_cannot_be_read_back_should_not_stop_the_recipients_being_told` on "[a reading that
 cannot be taken is not an outcome that was not applied: the mark is written, so the refusal stops
 here rather than reaching a listener that would roll the delivery back] Expecting code not to raise
-a throwable but caught \"uk.gov.hmcts.cp.courtregister.domain.StoreUnavailableException: the store
+a throwable but caught \"uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException: the store
 could not be reached to read a settled batch back / Caused by: java.lang.IllegalStateException: the
 connection pool is empty\"" and on "[and it is not dropped in silence ...] Expecting any elements
 of: [] to match given predicate but none did.";
@@ -2325,7 +2325,7 @@ the privacy sweep missed it, confirmed by reading the code rather than assumed: 
 driven, by `Deliveries.a_delivery_that_could_not_be_read_should_still_be_recorded`, whose exception
 is `new JMSException("the broker could not hand the message over")` - a benign message of the
 suite's own writing, so nothing a marker sweep looks for was ever in reach of the line; and
-`TelemetryPrivacyTest` sweeps the inbound `CourtRegisterMessageListener` and never drives this
+`TelemetryPrivacyTest` sweeps the inbound `YotResultsDistributionMessageListener` and never drives this
 listener at all, so it could not have caught it either. The new case throws
 `PersonalDataMarkers.OPERATOR_TOKEN` on the same statement, which is what makes it bite where the
 sweep did not. **The failing assertion** at `e7c6d9f`, "32 tests completed, 1 failed", read off
@@ -2371,7 +2371,7 @@ of `doc/DEFECT-FIXES.md` moves, on the same footing as the three fixes before it
 
 **Gate finding 2 is closed by a red-first pair**, `02597f2` "test(metrics): time the render round
 trip off the batch's own two stamps" then `3463404` "feat(metrics): publish the generation latency
-series a render round trip earns". `courtregister_generation_latency` was declared and recorded by
+series a render round trip earns". `yotresultsdistribution_generation_latency` was declared and recorded by
 nothing, so a completed run published no series at all; it is now recorded in
 `DocumentOutcomeSinkImpl` after the mark - covering the event-delivered and the reconciler-fetched
 document and refusal alike - and in `GenerationReconciler` for the silence, which settles through
@@ -2381,7 +2381,7 @@ that came back. What the meter measures was read out of its own declaration rath
 outcome arrived", and `CompletedBy`'s two values are what "however" names. **It is narrower than the
 gate's phrase in one place, and the text is what decides it**: a terminal state in
 `batchCompleted`'s sense is a notification state reached later by the notifying leg, which has
-`courtregister_notifications_total` of its own, so the timer stops at the rendering outcome -
+`yotresultsdistribution_notifications_total` of its own, so the timer stops at the rendering outcome -
 GENERATED, or FAILED under a reason a render produced. Both instants come off `register_batch`
 through one new rule, `RegisterBatch.generationRoundTrip()`, because the pod that asked for a render
 is not always the pod that hears the outcome and `markFailed` stamps `failed_at` itself while
@@ -2458,7 +2458,7 @@ means JSON refused as an envelope, which is the fork a diagnosis starts from - a
 envelope's name through `claimed(...)`, which returns one of this class's own two event constants or
 the single code `not-a-subscribed-event` and never its argument. A genuine mismatch is still
 diagnosable from the line alone, and that matters more here than at the field readers because
-**neither path counts a metric**: `courtregister_public_events_ignored_total`'s four reasons are
+**neither path counts a metric**: `yotresultsdistribution_public_events_ignored_total`'s four reasons are
 every one of them counted after the envelope has parsed and the two names have agreed, so the line
 is the whole of what an operator has (the alerting gap that leaves is open item 15). Two failing
 assertions at `893d45a` over "31 tests completed, 2 failed", both read off
@@ -2796,7 +2796,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
    untouched at the gate; the run's own line is covered separately, by
    `RegisterGenerationJobTest.BOUNDED_FIELDS_ONLY`, where `reason` is `[a-z-]+` and every other
    field is `\d+`.
-10. **CLOSED by `02597f2` / `3463404`.** `courtregister_generation_latency` has a series: recorded
+10. **CLOSED by `02597f2` / `3463404`.** `yotresultsdistribution_generation_latency` has a series: recorded
     in `DocumentOutcomeSinkImpl` after the mark, for every outcome the renderer answered however it
     arrived, and in `GenerationReconciler` for the silence it gives up on, both instants read off
     `register_batch` through `RegisterBatch.generationRoundTrip()`. `TelemetryPrivacyTest` no longer
@@ -2855,7 +2855,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     on a context - a context loads `application.yaml`, which sets `cli: false` itself, so a Spring
     test would have pinned the file's value and not the constant. The mutation is recorded: `NOT_CLI`
     flipped to `"true"` fails that one case and nothing else in the suite. The original item follows.
-    The shipped default of `courtregister.cli` when nothing sets it at all is pinned nowhere.
+    The shipped default of `yotresultsdistribution.cli` when nothing sets it at all is pinned nowhere.
     Carried from Phase 7's exception 1 as a follow-up for T075 or Phase 8 and still open: both
     `CliModeConfigTest` and `HttpSurfaceTest` set the property explicitly, so `NOT_CLI` flipped from
     `"false"` to `"true"` leaves both green. It now belongs to T075, which names it.
@@ -2876,12 +2876,12 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     `PROVENANCE.md` calls it "the P4 shape", though P4's fix is the recipient union and not the
     header.
 15. **CLOSED by `d1d9313` / `5b0aea9` (Phase 9).** Both paths now move a bounded reason on
-    `courtregister_public_events_ignored_total` - `unreadable-envelope` and
+    `yotresultsdistribution_public_events_ignored_total` - `unreadable-envelope` and
     `header-envelope-mismatch`, kept as two reasons for the reason this item gives. The original
     item follows.
     Two acknowledged-and-dropped paths on the public-event subscription move no counter at all.
     A body that will not parse and a header that disagrees with its envelope are both dropped
-    silently as far as the metrics go, `courtregister_public_events_ignored_total`'s four reasons
+    silently as far as the metrics go, `yotresultsdistribution_public_events_ignored_total`'s four reasons
     being counted downstream of both. That is why `9b1fb27` had to keep a bounded diagnosis on the
     line, and it is an alerting gap of its own: a bounded reason each - `unreadable-envelope`,
     `header-envelope-mismatch` - would make a broker feeding this subscription rubbish visible on a
@@ -2946,7 +2946,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     what the reading assumes across a live `markGenerated` / `markFailed` - `RegisterStoreIT` is
     where that would go, and it would also settle whether the mixed-clock case is reachable in
     practice. **That still holds too.** And nothing asserts end to end that a settled batch produces
-    the `courtregister_generation_latency_seconds_count` scrape line; `GenerationMetricsTest` pins
+    the `yotresultsdistribution_generation_latency_seconds_count` scrape line; `GenerationMetricsTest` pins
     the scrape name but drives the meter directly. **What is now false**: this item said the reading
     taken before the outcome is only *guarded against*. The reading's position is asserted directly
     from `d150b6c` on, by `a_notifier_that_threw_should_not_lose_the_reading_the_mark_earned` and by
@@ -2979,8 +2979,8 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     registers. The original item follows.
     A registers-waiting gauge would be a third reading of the same fact, and is a decision
     rather than a gap. The registers behind deferred days are on the line as `rows_deferred` but are
-    not gauged; `courtregister_deferred_keys` counts court centres and
-    `courtregister_oldest_recorded_unbatched_age` says how long the worst has waited.
+    not gauged; `yotresultsdistribution_deferred_keys` counts court centres and
+    `yotresultsdistribution_oldest_recorded_unbatched_age` says how long the worst has waited.
 21. **CLOSED by T074**, all three, plus the fourth as a recorded Confluence handover. The original
     item follows.
     Three source-file documentation corrections are owed and could not be made from this stage.
@@ -3032,7 +3032,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     pair and did not get one here, the finding having been about the run report. Phase 9 or the next
     increment.
 24. **DECLINED, and the reasoning recorded (2026-09-10).** The distinction is not lost - it is in
-    the batch row and on `courtregister_batches_total{outcome}`, which is where an alert on
+    the batch row and on `yotresultsdistribution_batches_total{outcome}`, which is where an alert on
     "was anybody missed" belongs. Two things argued against the three fields: they would be three
     *snapshot* numbers rather than a breakdown, which makes the misreading `snapshot=taken|unread`
     exists to prevent easier rather than harder; and the line is already twenty-two fields wide. The
@@ -3043,7 +3043,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     The three notify endings are counted together as `notified`, and prising them apart is three
     more fields or a per-batch line.** Told everybody, told some with the rest resendable, and
     nobody to tell (defect fix P1) are one count on the line; which of the three a batch reached
-    stays in the row and on `courtregister_batches_total{outcome}` and is deliberately not on the
+    stays in the row and on `yotresultsdistribution_batches_total{outcome}` and is deliberately not on the
     line, because a count of batches cannot carry the distinction without becoming three counts.
     If an operator needs them apart **per night**, that is three more fields, or the
     per-settled-batch structured line old item 19's first option described - which is also the only
@@ -3074,7 +3074,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     the identities are the night's assembly. Nobody should read `generated` as "documents for
     today's registers".
 27. **CLOSED by `d1d9313` / `5b0aea9` (Phase 9)**, both shapes, on
-    `courtregister_generation_unrecorded_total` under `settled-snapshot` and `latency-sample`; both
+    `yotresultsdistribution_generation_unrecorded_total` under `settled-snapshot` and `latency-sample`; both
     legs that take the latency reading count it, because the question is how many samples the series
     is missing and not which leg missed them. The original item follows.
     Two more paths move no counter, which is the alerting gap item 15 carries in a third and
@@ -3095,7 +3095,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
     out to have a third answer. `RunDeadlineEndToEndIT` is about the *intake* pipeline's per-delivery
     budget (`PROCESSING_DEADLINE_EXCEEDED`), not the run's; `GenerationEndToEndIT` and
     `GenerationFailureEndToEndIT` are the right subject but start their stack once in `@BeforeAll`
-    with fixed settings, and a `courtregister.generation.run-deadline` small enough to starve an
+    with fixed settings, and a `yotresultsdistribution.generation.run-deadline` small enough to starve an
     attempt would break every sibling case in whichever suite hosted it. So it needs a suite of its
     own, on the pattern `RunDeadlineEndToEndIT` already sets - a whole stack started for one
     assertion.
@@ -3260,7 +3260,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
       in this repository edits the Confluence page, and the page owner pastes both. (a) The
       metrics-section note written out above under T072 - **corrected in place first**, because its
       last bullet said a lost snapshot increments no metric, which stopped being true in this phase;
-      it now names `courtregister_generation_unrecorded_total{reason="settled-snapshot"}`. (b) The
+      it now names `yotresultsdistribution_generation_unrecorded_total{reason="settled-snapshot"}`. (b) The
       store section, and any list of the store's read paths, should name **statement 4c
       `batchesNamed`** beside 4a `batchesFor` and 4b `batchesOn`, with the reason it cannot be
       either: only identity says tonight's batches, 4a reads a key's whole history and 4b a day's,
@@ -3272,7 +3272,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
       check-flag printed flag=ON and exited 0", the second through the deployed reader rather than a
       STUB override), so what this task owes is the re-run on the branch as it now stands, plus the
       one case Phase 7's exception 1 left open and Phase 8 did not close: the shipped default of
-      `courtregister.cli` when nothing sets it at all. The host-side `bootRun` block of
+      `yotresultsdistribution.cli` when nothing sets it at all. The host-side `bootRun` block of
       quickstart.md is the other thing still owed from Phase 7's checkpoint.
       (**All three done, 2026-09-10.** (1) `./scripts/container-smoke.sh` re-run on the branch as
       it stands: both report lines PASS - "readiness reported UP within the 60s budget" and
@@ -3390,7 +3390,7 @@ are decisions rather than defects; 15 to 22 came out of the phase gate's own fiv
 ## Notes
 
 - **MVP** = Phases 1–3: the service records instead of POSTing. It is deployable behind
-  `courtregister.output=record` with generation disabled, which is exactly the PH.02 state.
+  `yotresultsdistribution.output=record` with generation disabled, which is exactly the PH.02 state.
 - The 001 progression adapter and its tests stay green throughout; they are exercised in
   `progression-post` mode by T020.
 - Commit narrative convention: test commits quote the red assertion; implementation commits quote the

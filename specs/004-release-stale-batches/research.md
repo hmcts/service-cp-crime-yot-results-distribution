@@ -92,7 +92,7 @@ to `null` on read (turns a bounded vocabulary into best-effort).
 
 ---
 
-## D4 — `courtregister.generation.completion` is removed, not pinned
+## D4 — `yotresultsdistribution.generation.completion` is removed, not pinned
 
 **Decision**: the setting, both constants and the record component go. `PublicEventsConfig` subscribes
 whenever the generation half is enabled; `PropertiesValidator`'s broker rule drops its
@@ -110,7 +110,7 @@ every night looking busy. Worse than refusing to start.
 
 ## D5 — The 07:00 report's rendering limit gets its own value
 
-**Decision**: `courtregister.report.batch-generated-within` takes `@DefaultValue("10m")`;
+**Decision**: `yotresultsdistribution.report.batch-generated-within` takes `@DefaultValue("10m")`;
 `PropertiesValidator.resolvedBatchGeneratedWithin` and its "a zero grace period makes the unset limit
 refuse" case are deleted.
 
@@ -127,7 +127,7 @@ the borrowing (which would make the destructive pass run on the shortest plausib
 
 ## D6 — The three in-flight age readings move to a sweep of their own
 
-**Decision**: `batch/BatchAgeSweep`, on `courtregister.generation.batch-age-refresh` (`10m`), under no
+**Decision**: `batch/BatchAgeSweep`, on `yotresultsdistribution.generation.batch-age-refresh` (`10m`), under no
 lock, in every non-command JVM that has the generation half, settling nothing, keeping the
 "holds a document nobody was told about" WARN.
 
@@ -148,7 +148,7 @@ whose argument is that the existing visibility suffices).
 
 ## D7 — The refused-transition drop gets a bounded reason **[review]**
 
-**Decision**: `courtregister_public_events_ignored_total{reason="terminal-batch"}`, moved in
+**Decision**: `yotresultsdistribution_public_events_ignored_total{reason="terminal-batch"}`, moved in
 `DocumentOutcomeSinkImpl`'s `else` branch, with a pinning test for a late `document-available` on a
 `NOT_COMPLETED_BY_NEXT_RUN` batch.
 
@@ -274,7 +274,7 @@ be finished yet.
 - `register_batch_completed_by_shape_chk`'s third arm is an equality between "the reason is
   generator-attributed" and "an attribution is present", so the new reason needs no special case —
   only the narrowing that D3 brings.
-- `courtregister.generation.grace-period` and `.completion` are **literals** in `application.yaml`
+- `yotresultsdistribution.generation.grace-period` and `.completion` are **literals** in `application.yaml`
   with no `${...}` placeholder, so this repository defines no environment variable for either. The
   outside-repo item is a check of the deployment branches for a raw override, probably empty.
 - **`docker/sdg-echo/sdg-echo.py` does not implement the query endpoint**, contrary to one review's

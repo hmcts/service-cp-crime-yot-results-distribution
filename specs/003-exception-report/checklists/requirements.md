@@ -38,10 +38,10 @@
 - Validated 2026-09-14 on the first pass; ready for `/speckit-plan`.
 - Re-validated 2026-09-14 after `/speckit-analyze`; the four decisions and the critical relocation
   applied. The decisions: the scheduled window runs from the previous scheduled run rather than a
-  fixed 24 hours (so `courtregister.report.window` is gone); the intake sweep holds no lock and
+  fixed 24 hours (so `yotresultsdistribution.report.window` is gone); the intake sweep holds no lock and
   refreshes per JVM; a fifth exception kind, `BATCH_FAILED`, carrying only its bounded reason; and
   the sweep runs in every non-command JVM from its own `IntakeSweepConfig`, with `gauge-refresh`
-  moved to `courtregister.intake.gauge-refresh`. The critical relocation: `RegisterBatchRepository`
+  moved to `yotresultsdistribution.intake.gauge-refresh`. The critical relocation: `RegisterBatchRepository`
   and `RegisterNotificationRepository` beans move from `GenerationConfig` to `ProcessedLogConfig`,
   without which the report cannot wire on a generation-disabled pod.
 - User Story 4 (e-mail) is deliverable only once the notification template exists; the spec says

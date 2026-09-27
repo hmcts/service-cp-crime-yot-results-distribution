@@ -1,6 +1,6 @@
 {
   "name": "flag switch: PUT /flag/on -> the kv stub answers enabled=true",
-  "scenarioName": "CourtRegisterServiceFlag",
+  "scenarioName": "YotResultsDistributionServiceFlag",
   "newScenarioState": "Started",
   "priority": 1,
   "request": {
@@ -10,6 +10,6 @@
   "response": {
     "status": 200,
     "headers": { "Content-Type": "text/plain" },
-    "body": "CourtRegisterService flag: ON\n"
+    "body": "YotResultsDistributionService flag: ON\n"
   }
 }

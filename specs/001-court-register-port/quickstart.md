@@ -1,4 +1,4 @@
-# Quickstart: Court Register Service
+# Quickstart: YOT Results Distribution Service
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@
 ## One-command end-to-end demo (spec SC-103)
 
 ```bash
-./gradlew test --tests 'uk.gov.hmcts.cp.courtregister.e2e.CourtRegisterEndToEndIT'
+./gradlew test --tests 'uk.gov.hmcts.cp.yotresultsdistribution.e2e.YotResultsDistributionEndToEndIT'
 ```
 
 Boots the full context against the Service Bus emulator and Postgres, publishes a request, and
@@ -30,11 +30,11 @@ docker compose up -d postgres servicebus-emulator
 ./gradlew bootRun
 ```
 
-The queue `courtregister.requests` is declared in `docker/servicebus-emulator/config.json` (the
+The queue `yotresultsdistribution.requests` is declared in `docker/servicebus-emulator/config.json` (the
 same file the tests mount, so local, CI and tests share one queue definition). `bootRun` does not
 inherit compose environment variables; the defaults in `application.yaml` point at the compose
 ports. Payload and reference-data adapters default to `LIVE` — set
-`COURTREGISTER_PAYLOAD_MODE=STUB` and `COURTREGISTER_REFERENCEDATA_MODE=STUB` for a
+`YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB` and `YOTRESULTSDISTRIBUTION_REFERENCEDATA_MODE=STUB` for a
 dependency-free run.
 
 ### Health

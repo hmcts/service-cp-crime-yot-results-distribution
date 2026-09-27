@@ -17,7 +17,7 @@ you authenticate to the gateway and it does the rest. Locally, where there is no
 it yourself.
 
 ```bash
-BASE=https://<internal-host>/courtregister      # the internal route; never exposed outside the estate
+BASE=https://<internal-host>/yotresultsdistribution      # the internal route; never exposed outside the estate
 H='-H Content-Type:application/json'
 ```
 
@@ -175,6 +175,6 @@ and audited is the values file and the deployment review.
 ## What is gone
 
 `./startup.sh generate-register|notify-register|list-batches|supersede-before|check-flag|report-exceptions`
-no longer exist, and neither does the `courtregister.cli` property or the entrypoint's command
+no longer exist, and neither does the `yotresultsdistribution.cli` property or the entrypoint's command
 dispatch. The image starts the application, full stop. If `kubectl exec` is the only way you can
 reach a pod, the operations API is not deployed yet — see the deployment gates in `spec.md`.

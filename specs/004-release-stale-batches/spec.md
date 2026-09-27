@@ -442,7 +442,7 @@ with zero and with a negative value and confirm each refusal names the setting.
   registers counted are those still the day's to render: a register the estate re-shared while the
   pass was giving it back is superseded rather than handed back, nothing will re-batch it, and
   counting it would put a register in the run's diagnostic that is in none of its totals.
-  `contended=` MUST carry the same number as `courtregister_generation_contended_total` moved by
+  `contended=` MUST carry the same number as `yotresultsdistribution_generation_contended_total` moved by
   that run, so the line and the counter say one thing. **The third number is the coordinator's
   decision of 2026-09-20**, taken at Phase 4 and recorded in `plan.md` and `data-model.md`: the
   batches the pass could not give back are work the night left undone — stale still and untouched,
@@ -576,7 +576,7 @@ with zero and with a negative value and confirm each refusal names the setting.
 - **STE and environment values**: *checked, and probably empty.* Both keys are literals in
   `application.yaml` with no `${...}` placeholder, so this repository defines no environment variable
   for either. The only thing to do outside is to confirm that no deployment branch sets a raw
-  `courtregister.generation.grace-period` or `courtregister.generation.completion` override; if none
+  `yotresultsdistribution.generation.grace-period` or `yotresultsdistribution.generation.completion` override; if none
   does — which is what the absence of a placeholder suggests — there is nothing to change.
 - Nothing in this increment requires a change by another team: no consumed contract changes, and a
   contract this service simply stops calling is not a contract change.

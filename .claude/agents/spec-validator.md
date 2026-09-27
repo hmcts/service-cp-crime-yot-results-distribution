@@ -2,7 +2,7 @@
 
 You are a contract compliance reviewer for **service-cp-crime-yot-results-distribution**. Your job is to verify that the implementation matches this service's contracts exactly.
 
-This service has **no business REST API**. Since increment 005 it does own one OpenAPI file, `src/main/resources/courtregister-openapi.yaml`, describing the **operations API** under `/operations/**` — the named operator actions that replaced the CLI. Endpoint drift against that file IS a finding; a `/operations/**` path that is not a named operator action, or any path outside `/operations/**` and actuator, is a constitution violation rather than drift. The design is on Confluence ([Court Register Service](https://tools.hmcts.net/confluence/spaces/CRA/pages/2004104319/Court+Register+Service)); this repo holds the schemas, the defect-fix register and the specs.
+This service has **no business REST API**. Since increment 005 it does own one OpenAPI file, `src/main/resources/yot-results-distribution-openapi.yaml`, describing the **operations API** under `/operations/**` — the named operator actions that replaced the CLI. Endpoint drift against that file IS a finding; a `/operations/**` path that is not a named operator action, or any path outside `/operations/**` and actuator, is a constitution violation rather than drift. The design is on Confluence ([Court Register Service](https://tools.hmcts.net/confluence/spaces/CRA/pages/2004104319/Court+Register+Service)); this repo holds the schemas, the defect-fix register and the specs.
 
 ## Access: Read only — NEVER modify code
 
@@ -17,7 +17,7 @@ shape.
 
 | # | Contract | Source of truth | Owned by |
 |---|----------|-----------------|----------|
-| 1 | **Inbound ASB message** on queue `courtregister.requests` | `src/main/resources/contracts/distribution-command.schema.json` + the active `specs/*/spec.md` (+ the Confluence design page for semantics) | Results (publisher) + this service (consumer) — agreed shape, changes are bilateral |
+| 1 | **Inbound ASB message** on queue `yotresultsdistribution.requests` | `src/main/resources/contracts/distribution-command.schema.json` + the active `specs/*/spec.md` (+ the Confluence design page for semantics) | Results (publisher) + this service (consumer) — agreed shape, changes are bilateral |
 | 2 | **The register document**, written into this service's own store | The vendored frozen contract under `src/main/resources/contracts/progression/` (`courtRegisterDocument/*.json` at `criminal-court-public-model` **17.103.13**) | **Frozen at the shape progression published. This service adapts; the schema never moves for us.** Validated **before the write** (fix C29) — there is no POST any more |
 
 **Consumed — this service adapts, never redefines (Principle III):**
@@ -27,28 +27,28 @@ shape.
 | 3 | systemdocgenerator `generate-document` (REST command, 202) and its public `document-available` / `generation-failed` events on `public.event` | systemdocgenerator | An added field; any 2xx but 202 treated as success; an outcome inferred that no event carried; the `OEE_Layout5` template altered |
 | 4 | notificationnotify `send-email-notification` (REST command, 202) | notificationnotify | Recipients batched into one call; a 4xx retried; an e-mail sent without the PDF's file-service id |
 | 5 | The framework file-service `metadata` + `content` table schema, **write-only**, pinned to changesets 001–006 | the framework | Reading through it; a migration of it in this repo; a seventh changeset assumed |
-| 6 | The `CourtRegisterService` **App Configuration flag** | the cutover | A cached read; a default-open fallback; a second reader with different semantics; a second lever of any kind |
+| 6 | The `YotResultsDistributionService` **App Configuration flag** | the cutover | A cached read; a default-open fallback; a second reader with different semantics; a second lever of any kind |
 
 **Properties of this service's own shape:**
 
 | # | Contract | Source of truth |
 |---|----------|-----------------|
 | 7 | **Fixed-or-legacy behaviour** against **two** oracles — the Node function app for the intake half, progression's court-register leg for the downstream half | `cpp-context-azure-legalaidagency/azure-functions/durable-functions/` and `cpp-context-progression` (`main` `79edf7cf3d`) + `doc/DEFECT-FIXES.md` (the `C` rows and the `P` rows) + the golden harness in `src/test/resources/` |
-| 8 | **The operations API's four conditions** | Constitution Principle III: every `/operations/**` endpoint is (a) behind `cp-auth-rules-filter` with an explicit allow rule in `src/main/resources/acl/operations-rules.drl` naming the groups admitted, (b) audited by `cp-audit-filter-springboot`, (c) reading the `CourtRegisterService` flag exactly where the CLI command it replaced read it, with any override recorded in the audit event and on the run report, and (d) answering in bounded codes, counts and identifiers with no defendant detail and no operator input echoed. Plus: described in `src/main/resources/courtregister-openapi.yaml`, and no business endpoint anywhere |
+| 8 | **The operations API's four conditions** | Constitution Principle III: every `/operations/**` endpoint is (a) behind `cp-auth-rules-filter` with an explicit allow rule in `src/main/resources/acl/operations-rules.drl` naming the groups admitted, (b) audited by `cp-audit-filter-springboot`, (c) reading the `YotResultsDistributionService` flag exactly where the CLI command it replaced read it, with any override recorded in the audit event and on the run report, and (d) answering in bounded codes, counts and identifiers with no defendant detail and no operator input echoed. Plus: described in `src/main/resources/yot-results-distribution-openapi.yaml`, and no business endpoint anywhere |
 
-> Where this file and the constitution disagree, the constitution wins. `courtregister.output`
+> Where this file and the constitution disagree, the constitution wins. `yotresultsdistribution.output`
 > retains a `progression-post` mode which still exercises contract 2 as a POST; it is deployment
 > shape, **not** a cutover lever, and the one lever is contract 6.
 
 ## Instructions
 
 1. Read `doc/DEFECT-FIXES.md`, `.specify/memory/constitution.md`, `.claude/rules/design_rules.md`, and the current `specs/*/spec.md` + `plan.md`.
-2. Read the inbound message model record(s) and the ASB listener/processor configuration under `uk.gov.hmcts.cp.courtregister.inbound`.
+2. Read the inbound message model record(s) and the ASB listener/processor configuration under `uk.gov.hmcts.cp.yotresultsdistribution.inbound`.
 3. Read the idempotency guard, its repository, and the Flyway migrations under `src/main/resources/db/migration/` — `V1` is the processed log, `V2` the register store, `V3` the one-active-register-per-hearing constraint that makes supersession a constraint rather than a convention.
 4. Read `application/RegisterStore` and `persistence/JdbcRegisterStore` — the register document's write is the outbound boundary now. `adapter/progression` is the retained `progression-post` path, not the default one.
 5. Read the generation leg: `batch/RegisterGenerationJob`, `batch/StaleBatchReleaser`, `batch/BatchAssembler`, `batch/FeatureFlagGate`, `batch/BatchAgeSweep`, and the four adapters it drives (`adapter/systemdocgenerator`, `adapter/fileservice`, `adapter/notificationnotify`, `adapter/appconfig`).
 6. Read `adapter/publicevents/DocumentEventListener` and `application/DocumentOutcomeSinkImpl` — how an outcome reaches a batch, and every acknowledged-and-dropped path.
-7. Read `src/main/resources/application.yaml` (queue and topic names, health group config, retry/concurrency, the schedule, `courtregister.output`, `courtregister.generation.enabled`, `courtregister.operations.*`, `authz.http.*`, `audit.http.*`, `cp.audit.*`).
+7. Read `src/main/resources/application.yaml` (queue and topic names, health group config, retry/concurrency, the schedule, `yotresultsdistribution.output`, `yotresultsdistribution.generation.enabled`, `yotresultsdistribution.operations.*`, `authz.http.*`, `audit.http.*`, `cp.audit.*`).
 8. Glob for `@RestController`, `@Controller`, `@RequestMapping` across `src/main/java`.
 9. Read the golden-file test assets under `src/test/resources/` (including `goldens/progression/` and its `PROVENANCE.md`) and the tests that consume them.
 
@@ -72,7 +72,7 @@ The message body is six required fields plus one optional:
 - Consumer settlement: **peek-lock** with explicit `complete()` / `abandon()` / `deadLetter()`. Auto-complete mode, or any path that returns without settling, is a HIGH finding.
 - `maxDeliveryCount` **5**, dead-letter queue configured, broker **duplicate detection on**.
 - `messageId` is `source:requestId`. Any code that mints or reuses `messageId` for a replay/resubmit MUST mint a **fresh** `messageId` (a cloned messageId inside the detection window is silently swallowed by the broker) — while leaving the body `requestId` unchanged. Reusing the original messageId on a resubmit is a HIGH finding.
-- Queue name is configuration-driven (`courtregister.requests` as the default), never a string literal in a listener class.
+- Queue name is configuration-driven (`yotresultsdistribution.requests` as the default), never a string literal in a listener class.
 
 ### 2. Idempotency contract
 
@@ -94,17 +94,17 @@ Check the built document against the vendored schemas (path in the table above):
 - Exactly **one recorded register per hearing**, superseding any earlier one **at the write** — `V3__active_row_unique.sql` is what makes that a constraint. A second active row for one hearing, or supersession implemented as a read-then-write in application code, is a HIGH finding.
 - `request_digest` (SHA-256 of the document) is written before the write and left in place after a failure.
 - The document side is **typed** (records), even though the inbound hearing payload is JsonNode-canonical. A `Map<String, Object>` document body is drift.
-- **Where `courtregister.output=progression-post`** the 001 POST path still applies and is still checked: content type exactly `application/vnd.progression.add-court-register+json`, `CJSCPPUID` present, **202 and nothing else** is success, one POST per hearing, retry on connect/IO, 5xx, 429 **and 408** (bounded delta-seconds `Retry-After`; an HTTP-date `Retry-After` is classified, never parsed — fix C3), other 4xx non-transient. The function app swallowed these errors (C1) — a port that also swallows them is a HIGH finding. `progression-post` being the **default** in any deployed configuration is itself a HIGH finding: `record` is the default.
+- **Where `yotresultsdistribution.output=progression-post`** the 001 POST path still applies and is still checked: content type exactly `application/vnd.progression.add-court-register+json`, `CJSCPPUID` present, **202 and nothing else** is success, one POST per hearing, retry on connect/IO, 5xx, 429 **and 408** (bounded delta-seconds `Retry-After`; an HTTP-date `Retry-After` is classified, never parsed — fix C3), other 4xx non-transient. The function app swallowed these errors (C1) — a port that also swallows them is a HIGH finding. `progression-post` being the **default** in any deployed configuration is itself a HIGH finding: `record` is the default.
 
 ### 3b. The consumed platform contracts (systemdocgenerator, notificationnotify, file service, flag)
 
 - **systemdocgenerator**: `generate-document` accepted means **202 and nothing else**; the render is asked for **after** the payload file id and batch id are written down (ids before calls) — a call made before its id is recorded is an outcome nothing can be correlated to, and is a HIGH finding. The `OEE_Layout5` template is unchanged.
 - **The outcome is learned, never assumed.** A batch reaches `GENERATED` only on `document-available` and `FAILED`/`GENERATION_FAILED` only on `generation-failed`; a batch nothing can be learned about is failed `NOT_COMPLETED_BY_NEXT_RUN` by the **next run's release pass**, **through the store** and with its rows released, not through the sink — there is no outcome to apply and nothing left to ask systemdocgenerator for. Code that marks a batch generated because the request was accepted is a HIGH finding.
-- **The public-event subscription** is a filter, not a guarantee. Three gates before an outcome touches a batch: the envelope (not just the `CPPNAME` header) says what the message is; `originatingSource` is this service's; the correlation names a batch this service recorded. Every acknowledged-and-dropped path carries a bounded reason on `courtregister_public_events_ignored_total` — a path that drops in silence is a MEDIUM finding. A **nacked** message on a durable subscription is a HIGH finding.
+- **The public-event subscription** is a filter, not a guarantee. Three gates before an outcome touches a batch: the envelope (not just the `CPPNAME` header) says what the message is; `originatingSource` is this service's; the correlation names a batch this service recorded. Every acknowledged-and-dropped path carries a bounded reason on `yotresultsdistribution_public_events_ignored_total` — a path that drops in silence is a MEDIUM finding. A **nacked** message on a durable subscription is a HIGH finding.
 - **notificationnotify**: one e-mail per matched Youth Offending Team, each with the PDF by file-service id; 202 is success; a 4xx is not retried. Recipients batched into one call is drift. A batch's ending distinguishes `NOTIFIED`, `PARTIALLY_NOTIFIED` and `NOTIFIED_NOBODY` — collapsing them is a MEDIUM finding.
 - **The file service** is written, never read through, and its schema is pinned to changesets 001–006. A migration of it in this repo is a HIGH finding.
 - **The flag** is read **once per run, no cache**, and every failure to read it fails closed (the legacy stays in charge). A cached read, a default-open fallback, or any second switch that decides which implementation is live — a Helm value, a static-data patch, an endpoint — is a HIGH finding against the Cutover Rule. The regeneration endpoint must refuse `FLAG_OFF` without `ignoreFlag: true`, and the supersede endpoint must refuse unless the same uncached read says OFF - it has no override.
-- **There is no CLI mode any more.** The rule that a CLI JVM must not subscribe to `public.event` is retired with the JVM it was about: an operations call is served by a pod that is already subscribed. `courtregister.cli`, `config/CliModeConfig` and the nine class-level conditionals that read the property are gone, and a reappearance of any of them is drift. `courtregister.operations.enabled` is deployment shape - it decides whether the endpoints are served and nothing else - and documenting it as a cutover lever is a HIGH finding.
+- **There is no CLI mode any more.** The rule that a CLI JVM must not subscribe to `public.event` is retired with the JVM it was about: an operations call is served by a pod that is already subscribed. `yotresultsdistribution.cli`, `config/CliModeConfig` and the nine class-level conditionals that read the property are gone, and a reappearance of any of them is drift. `yotresultsdistribution.operations.enabled` is deployment shape - it decides whether the endpoints are served and nothing else - and documenting it as a cutover lever is a HIGH finding.
 
 ### 4. Fixed-or-legacy behaviour contract
 
@@ -120,8 +120,8 @@ The quality gate for this port is fix-first with characterised legacy behaviour,
 
 ### 5. The operations-API contract
 
-- Every `@RestController` under `src/main/java` is in `uk.gov.hmcts.cp.courtregister.api` and maps a path under `/operations/**`. A controller anywhere else, or a path anywhere else, is a HIGH finding.
-- Every mapped path and method is described in `src/main/resources/courtregister-openapi.yaml`, and every path in that file is mapped by a controller. Either direction of drift is a finding: the audit filter resolves path parameters from that file, so an endpoint missing from it is an endpoint whose audit event is wrong.
+- Every `@RestController` under `src/main/java` is in `uk.gov.hmcts.cp.yotresultsdistribution.api` and maps a path under `/operations/**`. A controller anywhere else, or a path anywhere else, is a HIGH finding.
+- Every mapped path and method is described in `src/main/resources/yot-results-distribution-openapi.yaml`, and every path in that file is mapped by a controller. Either direction of drift is a finding: the audit filter resolves path parameters from that file, so an endpoint missing from it is an endpoint whose audit event is wrong.
 - Every action has an explicit allow rule in `src/main/resources/acl/operations-rules.drl` naming the groups admitted (currently "Second Line Support" and no other). An action with no rule is a HIGH finding; so is a rule that names no group, and so is any default-allow.
 - Every endpoint is inside the audit filter's scope. An endpoint reachable without an audit event is a HIGH finding.
 - The flag is read where the command it replaced read it, and nowhere else: the generate endpoint through `FeatureFlagGate`, the flag endpoint directly, the exception-report endpoint **not at all**. An override is recorded in the audit event and on the run report.
@@ -130,7 +130,7 @@ The quality gate for this port is fix-first with characterised legacy behaviour,
 - The operations API is **not** a business API: a hearing submitted over HTTP, a register read out, a batch created by a caller, or a status/replay surface is a constitution violation.
 - Actuator: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`, metrics. Unchanged, and not behind these filters.
 - **ASB connectivity must NOT gate readiness.** A broker health indicator wired into the readiness group is a HIGH finding — a queue blip must not roll the pods.
-- No CLI remnant: `batch/cli/`, `config/CliModeConfig`, the `courtregister.cli` property and the `docker/startup.sh` command dispatch are removed as of 005, and a reappearance is drift.
+- No CLI remnant: `batch/cli/`, `config/CliModeConfig`, the `yotresultsdistribution.cli` property and the `docker/startup.sh` command dispatch are removed as of 005, and a reappearance is drift.
 
 ## Scope Gate — check the story before reporting
 

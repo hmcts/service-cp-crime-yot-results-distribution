@@ -1,15 +1,15 @@
 spring:
   application:
-    name: service-cp-crime-court-register
+    name: service-cp-crime-yot-results-distribution
 
   # The processed-log store. Every value here is a LOCAL development default matching the `postgres`
   # service in docker-compose.yml; deployed environments override them from Key Vault through the
   # Secrets Store CSI driver, which reaches these keys by the usual relaxed-binding environment
   # variables (SPRING_DATASOURCE_URL and friends).
   datasource:
-    url: jdbc:postgresql://localhost:5432/courtregister
-    username: courtregister
-    password: courtregister
+    url: jdbc:postgresql://localhost:5432/yotresultsdistribution
+    username: yotresultsdistribution
+    password: yotresultsdistribution
     hikari:
       # Lazy pool initialisation: no connection is opened during context refresh, so the application
       # starts even with the store down. It has to — actuator must be up to report readiness DOWN
@@ -55,12 +55,12 @@ spring:
 server:
   port: ${SERVER_PORT:8082}
 
-courtregister:
+yotresultsdistribution:
   # record | progression-post. `record` writes the register into this service's own store and is what
   # an environment that says nothing gets. `progression-post` is the 001 behaviour - POST to the
   # progression command API - kept only as a fallback sequencing option while progression's leg is
   # still deployed. It is a BUILD-TIME fallback, not the cutover switch: the one lever that decides
-  # which implementation generates is the App Configuration flag `CourtRegisterService`
+  # which implementation generates is the App Configuration flag `YotResultsDistributionService`
   # (constitution Principle III), and nothing here may become a second one.
   output: record
 
@@ -78,10 +78,10 @@ courtregister:
     # minutes rather than the hours a scheduled report would give: a stuck intake is visible within
     # one refresh rather than at 07:00 the next morning.
     #
-    # ITS OWN KEY, on the intake record, and NOT under courtregister.report: the sweep belongs to the
+    # ITS OWN KEY, on the intake record, and NOT under yotresultsdistribution.report: the sweep belongs to the
     # intake half and runs in every JVM that is not a command, whichever of the other two halves this
     # deployment switched on. A pod with both of them off binds neither of their records, so a value
-    # borrowed from courtregister.generation.batch-age-refresh would be a value it could not read.
+    # borrowed from yotresultsdistribution.generation.batch-age-refresh would be a value it could not read.
     # Written here as well as on the record because @Scheduled(fixedDelayString = ...) resolves it
     # through the placeholder resolver, which cannot see a record's @DefaultValue.
     gauge-refresh: 10m
@@ -92,7 +92,7 @@ courtregister:
     # this; exactly one of the two may be set, and startup fails fast otherwise.
     connection-string: "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
     # namespace: set in deployed environments only, for workload identity.
-    queue-name: courtregister.requests
+    queue-name: yotresultsdistribution.requests
     # Two concurrent deliveries, matching the Durable Functions throttle this service replaces.
     max-concurrent-calls: 2
     # Mirrors the broker queue's own setting. Used to recognise the final permitted delivery, so it
@@ -130,7 +130,7 @@ courtregister:
     # start without it rather than dead-letter every hearing it is given, one 403 at a time. Named
     # here rather than left to relaxed binding: a variable a comment documents and no key reads is
     # a deployment that sets it correctly and still fails to start.
-    system-user-id: ${COURT_REGISTER_SYSTEM_USER_ID:}
+    system-user-id: ${YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID:}
     # Retry policy for the POST (defect fixes C1/C3), and the SAME three keys the payload fallback
     # and the reference-data read carry: one RetryPolicy object serves all four clients (notificationnotify included), so
     # max-attempts / initial-backoff / max-backoff mean the same thing wherever they appear.
@@ -151,7 +151,7 @@ courtregister:
     # Bounded so the whole run fits: the payload fetch, the now-subscriptions read and this
     # submission are spent inside ONE claim, and startup refuses a set of timeouts whose sum plus a
     # fixed 30s margin for the guard's writes and the transformation reaches
-    # courtregister.claim.processing-deadline.
+    # yotresultsdistribution.claim.processing-deadline.
     read-timeout: 10s
     # headers: an optional map of extra static headers for the POST, bound but empty by default.
 
@@ -168,12 +168,12 @@ courtregister:
   results:
     # The results context QUERY API — the payload fallback the cache misses to
     # (hearingDetails/internal). Fallback ONLY: the register is not POSTed here (that is
-    # courtregister.progression above). LOCAL DEFAULT ONLY; deployed environments set
+    # yotresultsdistribution.progression above). LOCAL DEFAULT ONLY; deployed environments set
     # RESULTS_BASE_URL to the internal mesh host.
     base-url: ${RESULTS_BASE_URL:http://localhost:8080}
     # The CJSCPPUID identity for the fallback query, same sourcing rules as progression's. REQUIRED
     # in LIVE payload mode: an anonymous query is refused every time.
-    system-user-id: ${COURT_REGISTER_SYSTEM_USER_ID:}
+    system-user-id: ${YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID:}
 
   referencedata:
     # LIVE | STUB. LIVE is the reference-data query-API adapter and is what an environment that says
@@ -197,9 +197,9 @@ courtregister:
     # asked for a second; REFERENCEDATA_SYSTEM_USER_ID exists for the day reference data authorises
     # a different one. REQUIRED in LIVE mode: an anonymous query is refused every time, so the
     # service refuses to start rather than park every hearing that produced a register.
-    system-user-id: ${REFERENCEDATA_SYSTEM_USER_ID:${COURT_REGISTER_SYSTEM_USER_ID:}}
+    system-user-id: ${REFERENCEDATA_SYSTEM_USER_ID:${YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID:}}
     # headers: an optional map of further static headers for the read, bound but empty by default —
-    # the same key courtregister.progression carries and for the same reason. CJSCPPUID is
+    # the same key yotresultsdistribution.progression carries and for the same reason. CJSCPPUID is
     # documented and reference data's authorisation scheme is not: its access-control rules require
     # the caller to be in a named user group, so whatever the mesh turns out to need can be supplied
     # without a code change and nothing is invented here meanwhile. A header configured under a
@@ -236,7 +236,7 @@ courtregister:
   payload:
     # LIVE | STUB. LIVE is the cache-with-query-fallback adapter and is what an environment that
     # says nothing gets: a service that has to be told to fetch payloads is a service that will one
-    # day be deployed not fetching them. It requires courtregister.results.system-user-id,
+    # day be deployed not fetching them. It requires yotresultsdistribution.results.system-user-id,
     # without which
     # its fallback cannot authorise. STUB is for local runs and for the container suites whose
     # subject is settlement and the processed log rather than the payload; startup refuses it
@@ -276,10 +276,10 @@ courtregister:
     # The master switch for the whole downstream half: the nightly job, the public-event listener,
     # the file-service datasource and the validators that guard them. LOCAL DEFAULT ONLY - it is
     # false here so a developer's run and the plain context-load tests need no broker, no second
-    # database and no App Configuration; deployed environments set COURTREGISTER_GENERATION_ENABLED
+    # database and no App Configuration; deployed environments set YOTRESULTSDISTRIBUTION_GENERATION_ENABLED
     # to true. Turning it on turns on the startup refusals with it: the file-service datasource, the
     # flag configuration, the SDG/NN endpoints and the e-mail template id all become required.
-    enabled: ${COURTREGISTER_GENERATION_ENABLED:false}
+    enabled: ${YOTRESULTSDISTRIBUTION_GENERATION_ENABLED:false}
     # 18:00, Monday to Friday. Six fields, Spring's cron dialect (second first).
     cron: "0 0 18 * * MON-FRI"
     # The zone the cron above is read in, and the requirement is 18:00 WALL CLOCK in BST and GMT
@@ -311,7 +311,7 @@ courtregister:
     # How often the three batch-age readings - the oldest batch awaiting a render, the oldest that
     # never reached the renderer, and the oldest holding an unnotified document - are refreshed
     # between runs. Written here as well as on the record for the reason
-    # courtregister.intake.gauge-refresh is: @Scheduled(fixedDelayString = ...) resolves it through
+    # yotresultsdistribution.intake.gauge-refresh is: @Scheduled(fixedDelayString = ...) resolves it through
     # the placeholder resolver, which cannot see a record's @DefaultValue. Refused at startup if it
     # is not positive, because a Micrometer gauge never decays and a reading nobody takes again is
     # three gauges holding whatever they last said.
@@ -342,11 +342,11 @@ courtregister:
     # row's settlement and before the batch's own, so what this has to cover is ONE RECIPIENT'S
     # RETRY CYCLE and not a whole batch of them. Startup refuses any value below
     #
-    #     2 x (courtregister.endpoints.max-attempts
-    #             x (courtregister.endpoints.connect-timeout
-    #                   + courtregister.endpoints.read-timeout)
-    #          + (courtregister.endpoints.max-attempts - 1)
-    #             x courtregister.endpoints.max-backoff)
+    #     2 x (yotresultsdistribution.endpoints.max-attempts
+    #             x (yotresultsdistribution.endpoints.connect-timeout
+    #                   + yotresultsdistribution.endpoints.read-timeout)
+    #          + (yotresultsdistribution.endpoints.max-attempts - 1)
+    #             x yotresultsdistribution.endpoints.max-backoff)
     #
     # - the longest a single POST cycle can take, doubled as margin (PropertiesValidator
     # .NOTIFICATION_LEASE_MARGIN). The connect timeout is charged because an attempt that hangs on
@@ -367,7 +367,7 @@ courtregister:
     # The setting key, in App Configuration's feature-flag form. It is the SAME key the legacy JS
     # client reads, which is what makes the flag one lever rather than three: changing it here
     # without changing it there would leave two implementations disagreeing about the cutover.
-    key: .appconfig.featureflag/CourtRegisterService
+    key: .appconfig.featureflag/YotResultsDistributionService
     # The App Configuration label, which is how one store serves every stack. Empty locally; the
     # deployment supplies its stack's label. A wrong label reads a different stack's flag.
     label: ${STACK_LABEL:}
@@ -385,7 +385,7 @@ courtregister:
     # check instead. Startup REFUSES it wherever the endpoint names a real .azconfig.io store or a
     # Service Bus namespace says the pod is deployed - a published pair no store authorises is a
     # run skipped every night on a flag nobody could read.
-    credential: ${COURTREGISTER_FEATURE_CREDENTIAL:workload-identity}
+    credential: ${YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL:workload-identity}
 
   fileservice:
     # The framework file service's own Postgres - one shared database per stack - written to
@@ -417,7 +417,7 @@ courtregister:
     # outward half sends - generation enabled, or the report's e-mail output on - because
     # notificationnotify refuses a command carrying no CJSCPPUID, and a pod that set the endpoint
     # and forgot this one starts clean and fails every send.
-    system-user-id: ${COURT_REGISTER_SYSTEM_USER_ID:}
+    system-user-id: ${YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID:}
     # The transport the two clients share, at the estate's own defaults. Both timeouts are set
     # deliberately: a render request with no read timeout can outlive the run deadline that was
     # supposed to bound it, and a night that never returns from one POST is a night that generates
@@ -445,10 +445,10 @@ courtregister:
     # The shared durable subscription's name on the broker, and - with no client id - the whole of
     # its identity: every replica attaches to this one name and the broker load-balances the
     # outcomes across them. Changing it abandons the existing subscription and its backlog.
-    subscription: courtregister-service.sdg
+    subscription: yotresultsdistribution-service.sdg
     # The JMS selector, applied by the BROKER, so only the two systemdocgenerator outcome events
     # ever reach this service off a topic the whole estate publishes to. It is the coarse filter
-    # only: the listener still keeps just the events whose originatingSource is CourtRegisterService
+    # only: the listener still keeps just the events whose originatingSource is YotResultsDistributionService
     # and correlates them to a batch by sourceCorrelationId, which is what keeps progression's
     # still-deployed listener and this one out of each other's documents. Changing it, like
     # changing the name, abandons the existing shared subscription and its backlog: under JMS 2.0 a
@@ -458,12 +458,12 @@ courtregister:
   report:
     # The master switch for the morning exception report: the 07:00 job and its own scheduler. LOCAL
     # DEFAULT ONLY - false here so a developer's run and the plain context-load tests write nobody a
-    # report; deployed environments set COURTREGISTER_REPORT_ENABLED to true.
+    # report; deployed environments set YOTRESULTSDISTRIBUTION_REPORT_ENABLED to true.
     #
     # NOT A CUTOVER LEVER. The report reads and writes nothing the cutover decides and never reads
-    # the CourtRegisterService flag; it runs on a pod whose generation half is switched off, which is
+    # the YotResultsDistributionService flag; it runs on a pod whose generation half is switched off, which is
     # what makes it its own switch rather than a second reading of somebody else's.
-    enabled: ${COURTREGISTER_REPORT_ENABLED:false}
+    enabled: ${YOTRESULTSDISTRIBUTION_REPORT_ENABLED:false}
     # 07:00, Monday to Friday. Six fields, Spring's cron dialect (second first). It is also the
     # window: the run reads back to the PREVIOUS occurrence of this cron, so a Monday run reads back
     # to Friday and every FAILED request, batch and notification lands in exactly one report. Change
@@ -487,7 +487,7 @@ courtregister:
     # being sent the same morning twice by two replicas.
     lock-at-most-for: 15m
     # The intake threshold. A request still RECEIVED or RETRYING for longer than this is reported
-    # late and counted on courtregister_non_terminal_requests_over_threshold. Per environment and
+    # late and counted on yotresultsdistribution_non_terminal_requests_over_threshold. Per environment and
     # changeable without a release: a stack whose broker is slower wants a wider one, and the next
     # run reads whatever it says.
     request-terminal-within: 30m
@@ -521,13 +521,13 @@ courtregister:
     # shrank with the list would make the worst morning of the year read as a quieter one. A zero is
     # refused at startup: a report that carries no late entry is indistinguishable from a morning
     # with nothing wrong on it.
-    max-entries: ${COURTREGISTER_REPORT_MAX_ENTRIES:5000}
+    max-entries: ${YOTRESULTSDISTRIBUTION_REPORT_MAX_ENTRIES:5000}
     email:
       # The e-mail output, switchable independently of the Log Analytics output: a stack whose
       # notificationnotify template has not been provided yet still writes the events, and support
       # reads the report either way. False until that template exists - and the moment it is true,
       # the two settings below become required at startup.
-      enabled: ${COURTREGISTER_REPORT_EMAIL_ENABLED:false}
+      enabled: ${YOTRESULTSDISTRIBUTION_REPORT_EMAIL_ENABLED:false}
       # The notificationnotify template the report is sent under, by UUID. REQUIRED and validated
       # for shape at startup once the output above is enabled, not at send time - the same argument
       # fix P9 makes for the register's own template, one morning earlier. A binding, never a value:
@@ -539,7 +539,7 @@ courtregister:
       # parse as an address - a list with a stray separator in it is refused every recipient of every
       # morning by notificationnotify otherwise, and the refusal names the setting without quoting
       # the address back.
-      recipients: ${COURTREGISTER_REPORT_RECIPIENTS:}
+      recipients: ${YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS:}
 
   # The operations API's own settings. The defaults are `config/OperationsProperties`'s and are
   # restated here for the reason every other block of this service's settings is: a deployment can
@@ -547,10 +547,10 @@ courtregister:
   operations:
     # DEPLOYMENT SHAPE, NOT A CUTOVER LEVER (FR-044). It decides whether the seven `/operations/**`
     # endpoints are served, and nothing else. The one lever that decides which implementation is
-    # live is the App Configuration flag `CourtRegisterService`, and this must never become a
+    # live is the App Configuration flag `YotResultsDistributionService`, and this must never become a
     # second one - a pod with the endpoints off still records, batches, renders and notifies exactly
     # as it did.
-    enabled: ${COURTREGISTER_OPERATIONS_ENABLED:true}
+    enabled: ${YOTRESULTSDISTRIBUTION_OPERATIONS_ENABLED:true}
 
     # How far back `POST /operations/registers/supersede` may reach. The command it replaces was
     # unbounded, because it was reachable only by somebody already inside the namespace with a
@@ -558,13 +558,13 @@ courtregister:
     # keystroke from giving up the estate's whole history of registers. Refused at startup if it is
     # not positive: a bound of zero admits no instant at all and reads to an operator as though
     # their own argument were wrong.
-    supersede-max-age: ${COURTREGISTER_SUPERSEDE_MAX_AGE:30d}
+    supersede-max-age: ${YOTRESULTSDISTRIBUTION_SUPERSEDE_MAX_AGE:30d}
 
     # How long a background regeneration waits for the register-generation lock before recording
     # SCHEDULE_RUNNING as its own outcome. ZERO IS THE DEFAULT AND IS ONE NON-BLOCKING ATTEMPT,
     # which is the only kind that cannot sit on a thread the schedule wants. Refused at startup if
     # it is negative.
-    lock-wait: ${COURTREGISTER_OPERATIONS_LOCK_WAIT:0s}
+    lock-wait: ${YOTRESULTSDISTRIBUTION_OPERATIONS_LOCK_WAIT:0s}
 
 # Application Insights is configured by the Java agent (lib/applicationinsights.json).
 # The per-environment connection string is supplied as APPLICATIONINSIGHTS_CONNECTION_STRING,
@@ -592,7 +592,7 @@ courtregister:
 #
 # They are ordinary configuration, not a start-up condition. An operator may turn either off -
 # `AUTHZ_HTTP_ENABLED=false`, `HTTP_AUDIT_ENABLED=false` - and the pod comes up: there is no
-# cross-field refusal against `courtregister.operations.enabled` and no rule that reads the
+# cross-field refusal against `yotresultsdistribution.operations.enabled` and no rule that reads the
 # environment to decide where one would apply. What keeps them on in a deployed environment is this
 # default and the values file, not a pod that refuses to start. The two places that turn them off
 # deliberately are `docker-compose.yml` (a laptop has no usersgroups and no audit broker) and
@@ -656,7 +656,7 @@ audit:
     # else's paths. `api/OpenApiContractTest` runs the real glob against the real classpath and
     # asserts exactly one match; `PropertiesValidator` refuses an unset value where both audit
     # switches are on, which is where the parser is actually built.
-    openapi-rest-spec: ${HTTP_AUDIT_OPENAPI_SPEC:courtregister-openapi.yaml}
+    openapi-rest-spec: ${HTTP_AUDIT_OPENAPI_SPEC:yot-results-distribution-openapi.yaml}
 
     # EXPLICIT, BECAUSE THE LIBRARY DEFAULT IS TRUE. Left alone, every response this surface writes
     # goes onto the audit topic: the batch listing's masked addresses and court centre ids, the

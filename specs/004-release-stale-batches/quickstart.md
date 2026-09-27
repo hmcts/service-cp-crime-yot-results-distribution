@@ -38,7 +38,7 @@ services:
 without it publishes on both and collides anyway.
 
 **Confirmed on this compose file's own volume**, not reasoned about. On a
-`service-cp-crime-court-register_postgres-data` carrying one batch failed `GENERATION_TIMED_OUT` and
+`service-cp-crime-yot-results-distribution_postgres-data` carrying one batch failed `GENERATION_TIMED_OUT` and
 completed by `RECONCILER`, `V7` stops on
 
 ```
@@ -88,18 +88,18 @@ WireMock's mappings need one change and one deletion:
 The 002 command line, with two changes:
 
 ```diff
-- COURTREGISTER_GENERATION_GRACE_PERIOD=10m
-+ COURTREGISTER_GENERATION_STALE_AFTER=30m
+- YOTRESULTSDISTRIBUTION_GENERATION_GRACE_PERIOD=10m
++ YOTRESULTSDISTRIBUTION_GENERATION_STALE_AFTER=30m
 ```
 
-and no `COURTREGISTER_GENERATION_COMPLETION` of any kind: the setting is gone, and a run with the
+and no `YOTRESULTSDISTRIBUTION_GENERATION_COMPLETION` of any kind: the setting is gone, and a run with the
 generation half enabled subscribes to `public.event` unconditionally.
 
 ## 1. Make a batch that will never hear anything
 
 **Record two registers — by hand, and this is not a shortcut.** The compose stack runs
-`COURTREGISTER_PAYLOAD_MODE=STUB`, and the stub payload source fetches nothing: a command published
-to `courtregister.requests` completes `no-defendants` and writes no register at all. 002's
+`YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB`, and the stub payload source fetches nothing: a command published
+to `yotresultsdistribution.requests` completes `no-defendants` and writes no register at all. 002's
 quickstart says so in as many words. `LIVE` is the only mode that yields one and it needs the
 results payload cache, reference data and a CJSCPPUID identity, none of which this stack has — so
 the rows are seeded straight into the store, which is what every generation suite does too
@@ -169,13 +169,13 @@ from outside.
 The three readings are still moving, though, which is FR-011:
 
 ```bash
-for m in courtregister_oldest_generating_age \
-         courtregister_oldest_pending_age \
-         courtregister_oldest_generated_age; do
+for m in yotresultsdistribution_oldest_generating_age \
+         yotresultsdistribution_oldest_pending_age \
+         yotresultsdistribution_oldest_generated_age; do
   curl -s "localhost:8082/actuator/metrics/$m" | jq -c '.measurements'
 done
 # the first is a value in seconds, climbing; the other two are nought while nothing is in those
-# states. Refreshed every courtregister.generation.batch-age-refresh (10m) and NOT on read, so a
+# states. Refreshed every yotresultsdistribution.generation.batch-age-refresh (10m) and NOT on read, so a
 # reading taken just after a refresh lags the batch's real age by up to that interval.
 ```
 
@@ -213,7 +213,7 @@ is **not** what to run here — the on-demand command does not run the release p
 starting the service with the cron brought forward:
 
 ```bash
-COURTREGISTER_GENERATION_CRON='0 */2 * * * *' ...   # every two minutes, local only
+YOTRESULTSDISTRIBUTION_GENERATION_CRON='0 */2 * * * *' ...   # every two minutes, local only
 ```
 
 What the run line says:
@@ -263,19 +263,19 @@ curl -s 'localhost:8089/__admin/requests?limit=50' \
 and the publisher is a dozen lines: copy `publish()` and `document_available_from()` out of
 `docker/sdg-echo/sdg-echo.py`, substitute the old batch's two ids, and run it on the compose network
 so `artemis` resolves — the frame and the envelope must be that file's, because the listener needs
-the `CPPNAME` header, the `_metadata.name` and `originatingSource = CourtRegisterService` before it
+the `CPPNAME` header, the `_metadata.name` and `originatingSource = YotResultsDistributionService` before it
 will look at the message at all.
 
 ```bash
-docker run --rm --network service-cp-crime-court-register_default \
+docker run --rm --network service-cp-crime-yot-results-distribution_default \
   -v "$PWD/publish-document-available.py:/p.py:ro" python:3.13-alpine \
-  python /p.py '<old batch payload file id>' '<old batch id>' CourtRegisterService
+  python /p.py '<old batch payload file id>' '<old batch id>' YotResultsDistributionService
 ```
 
 The listener acknowledges it and drops it:
 
 ```bash
-curl -s 'localhost:8082/actuator/metrics/courtregister_public_events_ignored_total?tag=reason:terminal-batch' \
+curl -s 'localhost:8082/actuator/metrics/yotresultsdistribution_public_events_ignored_total?tag=reason:terminal-batch' \
   | jq -c '.measurements'
 # [{"statistic":"COUNT","value":1.0}] - "terminal-batch" is the reason this increment adds,
 # because before it this drop was a WARN and moved no counter at all
@@ -316,15 +316,15 @@ Against `./gradlew bootRun`, or against the built image with
 `docker compose run --rm -e <VAR>=<value> app`, which is what proves the deployed artefact:
 
 ```bash
-COURTREGISTER_GENERATION_STALE_AFTER=0s
+YOTRESULTSDISTRIBUTION_GENERATION_STALE_AFTER=0s
 # refuses at PropertiesValidator, exit 1:
-#   courtregister.generation.stale-after (PT0S) must be positive — a timeout that never expires
+#   yotresultsdistribution.generation.stale-after (PT0S) must be positive — a timeout that never expires
 #   is a run that never ends
 
-COURTREGISTER_GENERATION_BATCH_AGE_REFRESH=-1m
-# refuses the same way, naming courtregister.generation.batch-age-refresh (PT-1M)
+YOTRESULTSDISTRIBUTION_GENERATION_BATCH_AGE_REFRESH=-1m
+# refuses the same way, naming yotresultsdistribution.generation.batch-age-refresh (PT-1M)
 
-COURTREGISTER_GENERATION_COMPLETION=poll-only
+YOTRESULTSDISTRIBUTION_GENERATION_COMPLETION=poll-only
 # starts ("Started Application in ... seconds"), and the string `completion` appears nowhere in
 # the start-up log: the key is gone. A deployment that still sets it is setting nothing, which is
 # why the STE values are on the outside-this-repo list.
@@ -346,7 +346,7 @@ And the other side of it, which used to be invisible:
 ```kql
 // outcomes arriving for batches that had already ended
 ContainerLogV2
-| where LogMessage has "courtregister_public_events_ignored_total"
+| where LogMessage has "yotresultsdistribution_public_events_ignored_total"
 | where LogMessage has "terminal-batch"
 ```
 
