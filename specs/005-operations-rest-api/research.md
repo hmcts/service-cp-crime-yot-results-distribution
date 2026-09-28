@@ -59,29 +59,29 @@ return plain `application/json`, so without help every request would fall to (4)
 /operations/batches/generate"` — which matches no rule and is therefore denied.
 
 Priority (3) is caller-supplied and therefore spoofable: a caller authorised for
-`list-batches` could send `CPP-ACTION: courtregister-operations.generate-register`. The reference
+`list-batches` could send `CPP-ACTION: yot-results-distribution-operations.generate-register`. The reference
 implementation closes exactly this hole with `filters/ActionHeaderFilter` at
 `Ordered.HIGHEST_PRECEDENCE`, which maps path+method to an action name and wraps the request so
 `getHeader("CPP-ACTION")` returns the **server's** value whatever the caller sent. We copy that
 shape: a path-and-method → action map for our seven endpoints, unrecognised paths passed through
 untouched.
 
-Rejected alternative: vendor media types (`application/vnd.courtregister.<action>+json`). It would
+Rejected alternative: vendor media types (`application/vnd.yotresultsdistribution.<action>+json`). It would
 work and needs no filter, but it makes every call from `curl` carry a hand-typed media type, changes
 the endpoints' content negotiation, and makes the OpenAPI document describe a media type nothing
 else in this repository uses. The filter is 60 lines and is the estate's own answer.
 
-**Action names**: `courtregister-operations.<verb>`, one per endpoint:
+**Action names**: `yot-results-distribution-operations.<verb>`, one per endpoint:
 
 | Endpoint | Action name |
 |---|---|
-| `GET /operations/flag` | `courtregister-operations.check-flag` |
-| `GET /operations/batches` | `courtregister-operations.list-batches` |
-| `GET /operations/registers/recorded-while-off` | `courtregister-operations.list-recorded-while-off` |
-| `POST /operations/batches/generate` | `courtregister-operations.generate-register` |
-| `POST /operations/batches/{batchId}/notify` | `courtregister-operations.notify-register` |
-| `POST /operations/registers/supersede` | `courtregister-operations.supersede-before` |
-| `POST /operations/exception-reports` | `courtregister-operations.report-exceptions` |
+| `GET /operations/flag` | `yot-results-distribution-operations.check-flag` |
+| `GET /operations/batches` | `yot-results-distribution-operations.list-batches` |
+| `GET /operations/registers/recorded-while-off` | `yot-results-distribution-operations.list-recorded-while-off` |
+| `POST /operations/batches/generate` | `yot-results-distribution-operations.generate-register` |
+| `POST /operations/batches/{batchId}/notify` | `yot-results-distribution-operations.notify-register` |
+| `POST /operations/registers/supersede` | `yot-results-distribution-operations.supersede-before` |
+| `POST /operations/exception-reports` | `yot-results-distribution-operations.report-exceptions` |
 
 ## R3. The drools rule shape, copied from the reference implementation
 
@@ -105,7 +105,7 @@ global uk.gov.moj.cpp.authz.http.providers.UserAndGroupProvider userAndGroupProv
 rule "Allow - check-flag"
 when
   $o: Outcome()
-  $a: Action(name == "courtregister-operations.check-flag")
+  $a: Action(name == "yot-results-distribution-operations.check-flag")
   eval(userAndGroupProvider.isMemberOfAnyOfTheSuppliedGroups($a, "Second Line Support"))
 then
   $o.setSuccess(true);
@@ -226,7 +226,7 @@ auditing switched off**.
 ```
 
 `@AutoConfiguration` classes are not subject to `@ComponentScan` filters, so the auto-configuration
-still runs in full. Moving `Application` down to `uk.gov.hmcts.cp.courtregister` would also work and
+still runs in full. Moving `Application` down to `uk.gov.hmcts.cp.yotresultsdistribution` would also work and
 was rejected: it is a bigger change to a class every test context boots, and the estate convention
 is the filter.
 
@@ -319,7 +319,7 @@ the lock is considered. The run's outcome is observable two ways, both of which 
 and `GET /operations/batches?date=D`.
 
 **Coordination with increment 004**: 004's pre-batching pass fails and releases batches older than
-`courtregister.generation.stale-after`. An operator run that spans 18:00 must not be failed under
+`yotresultsdistribution.generation.stale-after`. An operator run that spans 18:00 must not be failed under
 it, so 004's pass skips operator-initiated batches younger than the run deadline plus a margin. This
 is recorded here and in the plan's coordination contract; it is **004's change to make**, not 005's,
 and 005 must not edit `RegisterGenerationJob` or `GenerationReconciler` to do it.

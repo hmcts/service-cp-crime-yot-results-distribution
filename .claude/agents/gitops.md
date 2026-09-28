@@ -26,7 +26,7 @@ The current story is **001 "court-register-port"**, and by explicit user decisio
 Every commit message follows Conventional Commits:
 
 ```
-feat(inbound): consume courtregister.requests with peek-lock settlement
+feat(inbound): consume yotresultsdistribution.requests with peek-lock settlement
 fix(idempotency): treat (source,requestId) as composite key, not requestId alone
 test(pipeline): add golden-file twin for SetCourtRegister three-dates fixture
 chore(build): pin tomcat-embed-core to 11.0.24
@@ -93,7 +93,7 @@ The template Dockerfile is already correct — preserve its shape:
 - Container port `4550`; ACR `crmdvrepo01.azurecr.io/hmcts/` (nonlive).
 - Secrets via Key Vault CSI driver + workload identity — never in Helm values, never a Service Bus connection string in a ConfigMap.
 - **Readiness must not depend on Azure Service Bus.** Probe `/actuator/health/readiness` with a health group that excludes broker connectivity; a queue blip must not roll the pods.
-- Scaling on queue depth (KEDA `ScaledObject` on `courtregister.requests`) is a **known gap** — the `springboot-app` chart has no ScaledObject template today (HPA only). Flag it as a platform dependency; do not hand-roll a chart fork.
+- Scaling on queue depth (KEDA `ScaledObject` on `yotresultsdistribution.requests`) is a **known gap** — the `springboot-app` chart has no ScaledObject template today (HPA only). Flag it as a platform dependency; do not hand-roll a chart fork.
 - Queue + DLQ provisioning, workload identity and Redis network access are **platform tickets**, not repo changes.
 
 ## Security Checklist

@@ -9,7 +9,7 @@ progression context (batching, the nightly PDF through systemdocgenerator, the e
 notificationnotify), and it fails silently at several points on both halves.
 
 This service replaces **both halves** with one Spring Boot pipeline on AKS. It consumes hearing
-commands from the Azure Service Bus queue `courtregister.requests`, builds the register from the
+commands from the Azure Service Bus queue `yotresultsdistribution.requests`, builds the register from the
 Redis claim-check payload (with the results-query fallback), matches subscriptions, validates the
 document against the frozen register contract and **records** it in its own store; a service-owned
 job at **18:00 Europe/London, Monday to Friday** batches the recorded rows, writes the PDF payload
@@ -19,7 +19,7 @@ notificationnotify e-mail per Youth Offending Team with the PDF attached. Every 
 batch has a recorded terminal state; nothing is swallowed.
 
 The whole flow is switched between the legacy implementation and this service by **one Azure App
-Configuration feature flag, `CourtRegisterService`**, read by the results producer, by the legacy
+Configuration feature flag, `YotResultsDistributionService`**, read by the results producer, by the legacy
 function-app triggers and by this service's nightly job. Flag on: the producer publishes, the legacy
 stands down, this service generates. Flag off: the reverse, and progression's still-scheduled job
 generates again. Every failure to read the flag leaves the legacy in charge.
@@ -35,7 +35,7 @@ conclusion before cutover.
 | Team      | Resulting Assistant                                   |
 | Programme | Crime Common Platform (CPP) — Modern by Default (MbD) |
 | Stack     | Spring Boot 4.1, Java 25, Gradle                      |
-| Package   | `uk.gov.hmcts.cp.courtregister`                       |
+| Package   | `uk.gov.hmcts.cp.yotresultsdistribution`                       |
 | Ports     | 8082 local / 4550 Kubernetes                          |
 
 ## Design
@@ -53,7 +53,7 @@ This repository carries no design narrative of its own. What it does carry:
 | **Defect-fix register** | [doc/DEFECT-FIXES.md](doc/DEFECT-FIXES.md) | Every catalogued legacy defect (function-app `C` rows and progression-leg `P` rows), its fix, its pinning test and its sign-off state — the quality gate the constitution enforces |
 | Engineering constitution | [.specify/memory/constitution.md](.specify/memory/constitution.md) | The non-negotiable principles (fix-first, TDD, message-contract first, ports and adapters, nothing swallowed, privacy, estate conventions) |
 | Specifications | [specs/](specs/) | Spec Kit increments: `001-court-register-port` (complete) and `002-consolidate-progression-leg` (in progress) — spec, plan, research, data model, tasks, checklists |
-| Inbound contract | [src/main/resources/contracts/distribution-command.schema.json](src/main/resources/contracts/distribution-command.schema.json) | The `courtregister.requests` message, `additionalProperties: false` |
+| Inbound contract | [src/main/resources/contracts/distribution-command.schema.json](src/main/resources/contracts/distribution-command.schema.json) | The `yotresultsdistribution.requests` message, `additionalProperties: false` |
 | Register contract | [src/main/resources/contracts/progression/](src/main/resources/contracts/progression/) | The `courtRegisterDocument/*` schemas frozen at `criminal-court-public-model` 17.103.13, with provenance — enforced at the write into the register store |
 | Working conventions | [CLAUDE.md](CLAUDE.md) | Build loop, contract rule, fix-first rule, build and test commands |
 
@@ -81,9 +81,9 @@ This repository carries no design narrative of its own. What it does carry:
   request, every request still in flight past its threshold, every batch late at one of its three
   stages, every failed batch and every refused notification over the window that opens at the
   previous scheduled run. It reads the store and nothing else, is gated by the cutover flag nowhere,
-  and runs whatever `courtregister.generation.enabled` says. Two sinks: the Log Analytics one, which
-  writes one `courtregister_exception` event per exception and one ten-field
-  `courtregister_exception_report` summary per run, and the e-mail one, which renders the list as a
+  and runs whatever `yotresultsdistribution.generation.enabled` says. Two sinks: the Log Analytics one, which
+  writes one `yotresultsdistribution_exception` event per exception and one ten-field
+  `yotresultsdistribution_exception_report` summary per run, and the e-mail one, which renders the list as a
   CSV into the framework file service and asks notificationnotify to attach it — one send per
   support address. `IntakeAgeSweep` refreshes the two intake gauges on its own fixed delay in every
   JVM and under no lock, which with the request-duration timer and the report's own
@@ -102,7 +102,7 @@ This repository carries no design narrative of its own. What it does carry:
   so the same run re-batches them and the court centre gets its document that night instead of the
   next one. One fenced statement per batch, so nothing about one batch can end a night; a batch
   every attempt at lost the day's active-register key is reported contended and reached again by
-  the next run. The cutoff is `courtregister.generation.stale-after` for the schedule's own
+  the next run. The cutoff is `yotresultsdistribution.generation.stale-after` for the schedule's own
   batches and the longer of that and the run lock for a batch an operator asked for, which holds no
   run lock and has the whole requesting deadline to work in. The grace-period reconciler and
   systemdocgenerator's query endpoint are retired with it — there is nothing left to ask, so
@@ -125,7 +125,7 @@ This service exposes **no business REST API**: no hearing is submitted to it ove
 is read out of it, no batch is created by a caller. Its HTTP surface is Spring Boot Actuator and,
 since increment 005, seven named operator actions under `/operations/**` — the actions that were a
 CLI in the image until then, reached by `kubectl exec`. They are described in
-`src/main/resources/courtregister-openapi.yaml`, which this repository owns and versions.
+`src/main/resources/yot-results-distribution-openapi.yaml`, which this repository owns and versions.
 
 ### Who may call, and how identity reaches the pod
 
@@ -179,12 +179,12 @@ classify.
 | Pull the exception report | `POST /operations/exception-reports` | `{since?, email?}` | `200` `{runId, window, entries[], counts, truncated, delivered, outcome, durationMs}` | `400 unreadable-argument` (`since`); `409 email-output-disabled`; `409 email-output-not-wired`; `500 report-not-built`; `500 report-not-delivered` |
 
 `501 command-not-wired` is not a refusal about the request: it is a pod deployed **without** the
-generating half (`courtregister.generation.enabled=false`) saying it does not hold the machinery,
+generating half (`yotresultsdistribution.generation.enabled=false`) saying it does not hold the machinery,
 which is exactly what the command it replaced answered there.
 
 ### The flag, per endpoint
 
-There is **one** cutover lever, the App Configuration flag `CourtRegisterService`, and no endpoint
+There is **one** cutover lever, the App Configuration flag `YotResultsDistributionService`, and no endpoint
 is a second one. Each reads it where the command it replaced read it, or more strictly — never more
 loosely:
 
@@ -198,7 +198,7 @@ loosely:
 - **`POST /operations/registers/supersede`** reads it **although its command did not**, and is
   admitted only while it says **OFF** — `409 FLAG_ON` otherwise, `409 flag-unreadable` when it
   cannot be read, and no override at all. It also takes a `dryRun` and refuses an instant older than
-  `courtregister.operations.supersede-max-age` or in the future. An unconditional HTTP mutation that
+  `yotresultsdistribution.operations.supersede-max-age` or in the future. An unconditional HTTP mutation that
   gives a period of registers up is a second lever however well authorised.
 - **`POST /operations/exception-reports`** reads it **nowhere**, as `report-exceptions` did not: a
   pod that renders nothing still says what is wrong with what it recorded.
@@ -209,7 +209,7 @@ loosely:
 Deployed, against the internal route, with the identity the gateway injects:
 
 ```bash
-BASE=https://<internal-host>/courtregister     # internal only; never exposed outside the estate
+BASE=https://<internal-host>/yotresultsdistribution     # internal only; never exposed outside the estate
 H='-H Content-Type:application/json'
 ```
 
@@ -279,7 +279,7 @@ broken entry point is exactly the shape of failure the script exists to catch.
 | `HTTP_AUDIT_ENABLED` | **`true`** | `cp-audit-filter-springboot`. On its own it builds nothing — see below. |
 | `CP_AUDIT_ENABLED` | `false` | The audit **transport**. Every `audit.http.*` bean sits inside the auto-configuration this gates, so a values file without it serves the API unaudited, and the pod says so at WARN on start-up. Deployment gate 5. |
 | `CP_AUDIT_INITIAL_CONNECT_ATTEMPTS` | `2` | How many times the audit JMS connection is attempted before the call is refused `503`. The library ships ten over a rising interval, which is **two minutes of a held servlet thread** before the caller is told — because the request event is published on the caller's own thread, before the action. Two attempts says the same thing in about two seconds; it changes how long a refusal takes, not what is refused. |
-| `courtregister.operations.enabled` | `true` | Whether the seven paths are served at all. Deployment shape, **not** a cutover lever. |
+| `yotresultsdistribution.operations.enabled` | `true` | Whether the seven paths are served at all. Deployment shape, **not** a cutover lever. |
 
 The first two are switched off only by local and test configuration — `docker-compose.yml` and
 `application-test.yaml`, each saying why where it does it. Start-up **never refuses** on the
@@ -326,8 +326,8 @@ Local dependencies:
 
 ```bash
 docker compose up -d postgres servicebus-emulator
-COURTREGISTER_PAYLOAD_MODE=STUB COURTREGISTER_REFERENCEDATA_MODE=STUB \
-  COURT_REGISTER_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 ./gradlew bootRun
+YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB YOTRESULTSDISTRIBUTION_REFERENCEDATA_MODE=STUB \
+  YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 ./gradlew bootRun
 ```
 
 Both adapter modes default to `LIVE` — a service that has to be told to fetch payloads is one that
@@ -338,7 +338,7 @@ disabled by default in a bare `bootRun`; enabling it demands the file-service da
 broker and the systemdocgenerator and notificationnotify endpoints, for the same reason. The `app`
 service does enable it, against the committed stubs - `wiremock` for systemdocgenerator,
 notificationnotify and Azure App Configuration, `fileservice-postgres` for the payload store,
-`artemis` for `public.event` - with `courtregister.feature.credential=local-test`, which is what
+`artemis` for `public.event` - with `yotresultsdistribution.feature.credential=local-test`, which is what
 lets the real flag reader read a plain-HTTP stub at all; startup refuses that credential wherever
 the endpoint names a real store or the pod is deployed. See
 `specs/002-consolidate-progression-leg/quickstart.md` for the whole local loop.

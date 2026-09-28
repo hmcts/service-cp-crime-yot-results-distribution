@@ -44,8 +44,8 @@
   - *"Success criteria are measurable"* — SC-101/SC-103's readiness budget is measured by
     `scripts/container-smoke.sh` against the packaged image (PASS within the 60s budget, re-run at
     T075), not asserted in prose.
-  - *"Scope is clearly bounded"* — the boundary held. The one lever stayed one: `courtregister.output`
-    and `courtregister.generation.enabled` are deployment shape, `courtregister.cli` decides who
+  - *"Scope is clearly bounded"* — the boundary held. The one lever stayed one: `yotresultsdistribution.output`
+    and `yotresultsdistribution.generation.enabled` are deployment shape, `yotresultsdistribution.cli` decides who
     starts, and none of the three decides which implementation is live. FR-016's "no HTTP endpoint"
     held too, asserted on every context shape including the CLI one.
   - *"Requirements are testable and unambiguous"* — FR-002's registered-deviation requirement is now

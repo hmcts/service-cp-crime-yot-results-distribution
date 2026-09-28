@@ -1,7 +1,7 @@
 {
   "connectionString": "${APPLICATIONINSIGHTS_CONNECTION_STRING}",
   "role": {
-    "name": "service-cp-crime-court-register"
+    "name": "service-cp-crime-yot-results-distribution"
   },
   "sampling": {
     "overrides": [

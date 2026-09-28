@@ -13,8 +13,8 @@ What it does is **stop calling one endpoint of a contract it does not own**.
 | systemdocgenerator `GET document/{payloadFileId}` (the query API) | systemdocgenerator | Called by the grace-period reconciler, once per overdue batch | **No longer called at all.** The client method, its answer parsing and the `DocumentStatus` record that modelled its body are deleted |
 | notificationnotify `send-email-notification` (REST command, 202) | notificationnotify | | **Unchanged** |
 | The framework file service `metadata` + `content` tables (write-only, changesets 001-006) | the framework | | **Unchanged** |
-| The `CourtRegisterService` App Configuration flag | the cutover | Read once per run by the nightly job | **Unchanged.** The release pass is inside the run, behind the same single read, and is not a second reader |
-| The inbound `courtregister.requests` message (`distribution-command.schema.json`) | this service, with `cpp-context-results` | | **Unchanged** |
+| The `YotResultsDistributionService` App Configuration flag | the cutover | Read once per run by the nightly job | **Unchanged.** The release pass is inside the run, behind the same single read, and is not a second reader |
+| The inbound `yotresultsdistribution.requests` message (`distribution-command.schema.json`) | this service, with `cpp-context-results` | | **Unchanged** |
 | The register document (`courtRegisterDocument/*`, `criminal-court-public-model` 17.103.13) | this service | | **Unchanged** |
 
 **Ceasing to call an endpoint is not a contract change.** Nobody else's shape moves, nothing this

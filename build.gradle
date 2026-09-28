@@ -69,7 +69,7 @@ dependencies {
   // Spring Boot 4 brings jakarta.jms + artemis-jakarta-client transitively; version via the BOM.
   implementation 'org.springframework.boot:spring-boot-starter-artemis'
 
-  // --- Feature flag: the single 'CourtRegisterService' cutover lever, read per job run ---
+  // --- Feature flag: the single 'YotResultsDistributionService' cutover lever, read per job run ---
   // Version from the azure-sdk-bom platform imported above, so no com.azure artefact is pinned here.
   implementation 'com.azure:azure-data-appconfiguration'
 

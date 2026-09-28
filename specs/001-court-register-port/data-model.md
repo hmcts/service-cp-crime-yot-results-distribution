@@ -1,4 +1,4 @@
-# Data Model: Court Register Service
+# Data Model: YOT Results Distribution Service
 
 The processed-log design is the informant service's; this file records only what is court-register
 specific and cites the rest (IR-REPO `specs/CRA-220-informant-register-initial-poc/data-model.md`
@@ -72,7 +72,7 @@ this flow's:
 — e.g. an unparseable ordered date, C13). Guarded C19/C20 skips and C27 drops are deliberately
 **not** failures: the run completes, and the anomaly is recorded as a bounded reason-code count in
 `processed_output.anomaly_summary` plus the metric
-`courtregister_transformation_anomalies_total{reason}`.
+`yotresultsdistribution_transformation_anomalies_total{reason}`.
 Transient: `PAYLOAD_UNAVAILABLE` (cache+fallback miss, C32), `REFERENCE_DATA_UNAVAILABLE`,
 `SUBMISSION_TRANSIENT`.
 

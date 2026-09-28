@@ -14,7 +14,7 @@ Contract → Failing test → Write → Code Review (agent) → QA (agent) → C
      `src/main/resources/contracts/progression/` and enforced at the write into the register store
      (in 001 these were progression's `add-court-register` command; progression no longer receives
      it, and the schemas stay frozen); and
-  3. the **operations API** — `src/main/resources/courtregister-openapi.yaml`, owned here since increment 005 and
+  3. the **operations API** — `src/main/resources/yot-results-distribution-openapi.yaml`, owned here since increment 005 and
      versioned with the repo. It describes every `/operations/**` endpoint, its body, its success
      shape and every bounded `reason` it refuses under; a contract test asserts the controllers
      against it, and `cp-audit-filter-springboot` reads it at runtime to resolve path parameters, so
@@ -39,7 +39,7 @@ Loop repeats until ALL agents return PASS / COMPLIANT.
 | New / modified test class or golden fixture     | Whitespace / import only       |
 | Message-contract or schema change               | CLAUDE.md and rule updates     |
 | New / modified `/operations/**` endpoint        |                                |
-| `courtregister-openapi.yaml` or `acl/*.drl` change |                                |
+| `yot-results-distribution-openapi.yaml` or `acl/*.drl` change |                                |
 | Flyway migration                                | README changes                 |
 | ASB consumer / settlement configuration         |                                |
 | Dockerfile changes                              |                                |
@@ -126,7 +126,7 @@ A change ships only when all applicable gates are green:
     `additionalProperties: false`)
   - **the operations API against its four conditions** (constitution Principle III), in place of the
     old "absence of REST" check: every `/operations/**` endpoint is described in
-    `src/main/resources/courtregister-openapi.yaml` and matches its controller; every action has an explicit allow
+    `src/main/resources/yot-results-distribution-openapi.yaml` and matches its controller; every action has an explicit allow
     rule in `src/main/resources/acl/operations-rules.drl` naming the groups admitted, and no action
     is reachable without one; every endpoint is inside the audit filter's scope; the flag is read at
     exactly the point the CLI command it replaced read it and an override is recorded in the audit

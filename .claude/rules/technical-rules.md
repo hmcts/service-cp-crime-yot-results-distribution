@@ -99,7 +99,7 @@ private RedisHearingPayloadAdapter adapter;
 | Application svc  | `*Pipeline` / `*Service` | `DistributionPipeline`     |
 | Port (interface) | capability noun    | `HearingPayloadSource`, `RegisterSubmissionClient` |
 | Adapter          | `*Adapter`         | `RedisHearingPayloadAdapter`, `StubRegisterSubmissionAdapter` |
-| Message listener | `*MessageListener` | `CourtRegisterMessageListener` |
+| Message listener | `*MessageListener` | `YotResultsDistributionMessageListener` |
 | Operations controller | `*Controller` | `BatchesController`, `FlagController` |
 | Request record (API) | `*Request`     | `GenerateRegisterRequest` |
 | Response record (API)| `*Response`    | `BatchListingResponse` |
@@ -123,7 +123,7 @@ private RedisHearingPayloadAdapter adapter;
 - **Operations API**: `@WebMvcTest` slice tests per controller, with the application service mocked
   and the identity client stubbed — one case that the caller without "Second Line Support" is
   refused, one that the caller with it is served, and one per refusal the endpoint can answer with.
-  A contract test asserts the controllers against `src/main/resources/courtregister-openapi.yaml`. No test asserts
+  A contract test asserts the controllers against `src/main/resources/yot-results-distribution-openapi.yaml`. No test asserts
   a response body that echoes the caller's own characters back. A success record may carry this
   service's own parse of an identifier or instant (FR-025); the case that covers such a field
   sends a non-canonical but parseable spelling and expects the canonical rendering, so what is

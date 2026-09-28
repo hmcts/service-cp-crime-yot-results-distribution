@@ -14,40 +14,40 @@ docker compose up -d postgres servicebus-emulator artemis fileservice-postgres w
 ## Turn the report on
 
 Five environment variables on the `app` service, added to the block 002 wrote. **Four of them
-belong to the report** - `COURTREGISTER_REPORT_ENABLED`, `COURTREGISTER_REPORT_EMAIL_ENABLED`,
-`CR_REPORT_TEMPLATE_ID` and `COURTREGISTER_REPORT_RECIPIENTS`. The fifth,
-`COURTREGISTER_INTAKE_GAUGE_REFRESH`, belongs to the **intake half** and is shown here because this
+belong to the report** - `YOTRESULTSDISTRIBUTION_REPORT_ENABLED`, `YOTRESULTSDISTRIBUTION_REPORT_EMAIL_ENABLED`,
+`CR_REPORT_TEMPLATE_ID` and `YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS`. The fifth,
+`YOTRESULTSDISTRIBUTION_INTAKE_GAUGE_REFRESH`, belongs to the **intake half** and is shown here because this
 is where a local run meets it. They land in two commits, not one: the report switch and the
 gauge-refresh interval with the scheduling phase's compose task, the three e-mail variables with the
 e-mail phase's wiring task, because a template id and a recipient list on a service whose e-mail
 sink does not exist yet is configuration nothing reads.
 
 ```yaml
-      # The 07:00 Europe/London weekday report. Independent of COURTREGISTER_GENERATION_ENABLED:
+      # The 07:00 Europe/London weekday report. Independent of YOTRESULTSDISTRIBUTION_GENERATION_ENABLED:
       # the report is a read of this service's own store and must keep running on a pod that
       # generates nothing, which is what makes an intake-only deployment alertable. Its window
       # needs no setting: a run reports from the previous scheduled run to now, so Monday reads
       # back to Friday and nothing falls between two windows.
-      COURTREGISTER_REPORT_ENABLED: "true"
+      YOTRESULTSDISTRIBUTION_REPORT_ENABLED: "true"
       # The intake gauges refresh on this interval in every service JVM that is not a command,
       # whether or not the report or the generation half is enabled, and under no lock: a gauge
       # describes the JVM that publishes it, so alerts aggregate across pods with max(). Ten
       # minutes by default.
-      COURTREGISTER_INTAKE_GAUGE_REFRESH: 10m
+      YOTRESULTSDISTRIBUTION_INTAKE_GAUGE_REFRESH: 10m
       # The e-mail output, switched separately from the Log Analytics output. On locally so the
       # WireMock notificationnotify stub is exercised; off in every environment until the
       # notificationnotify team provides the template.
-      COURTREGISTER_REPORT_EMAIL_ENABLED: "true"
+      YOTRESULTSDISTRIBUTION_REPORT_EMAIL_ENABLED: "true"
       # Local-only dummies. Never a real template id and never a real address: in a deployed
       # environment both arrive from Key Vault through the CSI driver.
       CR_REPORT_TEMPLATE_ID: 22222222-2222-2222-2222-222222222222
-      COURTREGISTER_REPORT_RECIPIENTS: support@example.invalid
+      YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS: support@example.invalid
 ```
 
 Startup refuses, naming the setting, if the e-mail output is on with no template or no recipient, if
 any threshold, the gauge-refresh interval or the lock is zero or negative, if `lock-at-most-for` is
 below the fixed run budget plus `PropertiesValidator.SCHEDULER_LOCK_MARGIN`, or if the zone is not
-`Europe/London` without `courtregister.report.zone-override-acknowledged=true`. Those are the errors
+`Europe/London` without `yotresultsdistribution.report.zone-override-acknowledged=true`. Those are the errors
 that otherwise turn up at 07:00 the next morning. There is no window setting to get wrong: the
 window is the schedule.
 
@@ -55,10 +55,10 @@ To run it on the host instead of in the container, add the same settings to the 
 002's quickstart gives (the gauge-refresh interval can be left at its `10m` default):
 
 ```bash
-COURTREGISTER_REPORT_ENABLED=true \
-COURTREGISTER_REPORT_EMAIL_ENABLED=true \
+YOTRESULTSDISTRIBUTION_REPORT_ENABLED=true \
+YOTRESULTSDISTRIBUTION_REPORT_EMAIL_ENABLED=true \
 CR_REPORT_TEMPLATE_ID=22222222-2222-2222-2222-222222222222 \
-COURTREGISTER_REPORT_RECIPIENTS=support@example.invalid \
+YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS=support@example.invalid \
 ... ./gradlew bootRun
 ```
 
@@ -92,7 +92,7 @@ counts request_failed=0 request_late=1 batch_late=0 batch_failed=1 notification_
 event=exception_report_run run_id=... window_from=... window_to=... entries=3 delivered_log=ok delivered_email=ok outcome=delivered duration_ms=412
 ```
 
-The keys are the **event field names**, spelled exactly as `courtregister_exception` spells them -
+The keys are the **event field names**, spelled exactly as `yotresultsdistribution_exception` spells them -
 `request_id`, `batch_id`, `notification_id`, `court_centre_id`, `register_date`, `age_seconds` - so
 an operator reading the table and a saved query reading the index are naming the same things. A
 field name that differs between the two is a field somebody greps for and does not find.
@@ -101,7 +101,7 @@ The **last line is always written**, and it is the command's equivalent of the 0
 `exception_report_run` line: the same `delivered_log`, `delivered_email` and `outcome` words, written
 after every sink has returned - the same `ReportRunOutcome.from` and the same `DeliveryWord`, not a
 copy of each. `delivered_email` is `skipped` without `--email` and `disabled` where there is no
-e-mail sink on the context at all, which is what `courtregister.report.email.enabled=false`
+e-mail sink on the context at all, which is what `yotresultsdistribution.report.email.enabled=false`
 produces, because "nobody asked" and "nobody could" are different facts.
 
 No line carries a recipient address, masked or otherwise: no read this feature makes selects one.
@@ -110,14 +110,14 @@ A failed send is named by its notification id, its batch and its response code. 
 systemdocgenerator's own words about the document are another system's free text.
 
 Exit codes are the five existing commands': **0** did it, **1** declined, **2** could not. `--email`
-against a deployment where `courtregister.report.email.enabled` is false is a **decline** (1), and
+against a deployment where `yotresultsdistribution.report.email.enabled` is false is a **decline** (1), and
 the line names the setting; nothing is written in that case. An option the command does not accept
 is also a decline (1), with the usage line. A sink the command **asked** and that **failed** is a
 **2**: the report was built and one of its two audiences did not get it, which is exactly the
 `outcome=partial` the last line says, and a shell should not have to read a line to learn it.
 
 **The local stack records no registers**, for the reason 002's quickstart gives: `app` runs with
-`COURTREGISTER_PAYLOAD_MODE=STUB`, so a command published to `courtregister.requests` completes
+`YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB`, so a command published to `yotresultsdistribution.requests` completes
 `no-defendants` and writes no output row. So `BATCH_LATE` and `BATCH_FAILED` cannot be produced locally
 without seeding the store by hand. The kinds together are proved by
 `e2e/ExceptionReportEndToEndIT` under
@@ -128,7 +128,7 @@ exit codes.
 To see `REQUEST_LATE` locally without a hearing, insert a non-terminal row directly:
 
 ```bash
-docker compose exec postgres psql -U courtregister -d courtregister -c "
+docker compose exec postgres psql -U yotresultsdistribution -d yotresultsdistribution -c "
   UPDATE processed_request SET status='RETRYING', created_at = now() - interval '40 minutes'
    WHERE request_id = '<some request id>';"
 docker compose exec app /startup.sh report-exceptions --since 2h
@@ -141,17 +141,17 @@ The report's two are keyed by their `event` field:
 
 ```bash
 # every exception from every run
-docker compose logs app | jq 'select(.event=="courtregister_exception")'
+docker compose logs app | jq 'select(.event=="yotresultsdistribution_exception")'
 
 # just this morning's summary
-docker compose logs app | jq 'select(.event=="courtregister_exception_report")'
+docker compose logs app | jq 'select(.event=="yotresultsdistribution_exception_report")'
 
 # one run, end to end, including the run's own non-event lines
 docker compose logs app | jq 'select(.run_id=="<the run id from the summary>")'
 
 # the late requests only, as a table
 docker compose logs app \
-  | jq -r 'select(.event=="courtregister_exception" and .kind=="REQUEST_LATE")
+  | jq -r 'select(.event=="yotresultsdistribution_exception" and .kind=="REQUEST_LATE")
            | [.request_id, .status, .attempts, .age_seconds] | @tsv'
 ```
 
@@ -168,7 +168,7 @@ JSON line, so every field above is addressable without `parse()`:
 // this morning's exceptions, newest run first
 ContainerLogV2
 | where TimeGenerated > ago(1d)
-| where LogMessage.event == "courtregister_exception"
+| where LogMessage.event == "yotresultsdistribution_exception"
 | project TimeGenerated,
           runId        = tostring(LogMessage.run_id),
           kind         = tostring(LogMessage.kind),
@@ -187,7 +187,7 @@ ContainerLogV2
 // did the report run, and what did it find - the summary event, twelve fields since 004
 ContainerLogV2
 | where TimeGenerated > ago(7d)
-| where LogMessage.event == "courtregister_exception_report"
+| where LogMessage.event == "yotresultsdistribution_exception_report"
 | project TimeGenerated,
           runId            = tostring(LogMessage.run_id),
           windowFrom       = todatetime(LogMessage.window_from),
@@ -200,7 +200,7 @@ ContainerLogV2
           notificationFailed = toint(LogMessage.notification_failed),
           // increment 004's sixth kind, and informational: a batch a run gave up on whose
           // registers went out the same night. Counted here so the counts still add up to the
-          // courtregister_exception events a query finds
+          // yotresultsdistribution_exception events a query finds
           batchReleased      = toint(LogMessage.batch_released),
           // dropped LATE entries only - the cap never drops a failure, so a shortfall on
           // request_failed, batch_failed or notification_failed is a sink that broke
@@ -240,10 +240,10 @@ counts in it.
 The gauges are on the actuator's Prometheus endpoint rather than in the log:
 
 ```bash
-curl -s localhost:8082/actuator/prometheus | grep courtregister_oldest_non_terminal_request_age
-curl -s localhost:8082/actuator/prometheus | grep courtregister_non_terminal_requests_over_threshold
-curl -s localhost:8082/actuator/prometheus | grep courtregister_request_duration
-curl -s localhost:8082/actuator/prometheus | grep courtregister_exception
+curl -s localhost:8082/actuator/prometheus | grep yotresultsdistribution_oldest_non_terminal_request_age
+curl -s localhost:8082/actuator/prometheus | grep yotresultsdistribution_non_terminal_requests_over_threshold
+curl -s localhost:8082/actuator/prometheus | grep yotresultsdistribution_request_duration
+curl -s localhost:8082/actuator/prometheus | grep yotresultsdistribution_exception
 ```
 
 Both gauges read `0` on a pod that has never seen a message, and that is deliberate: a gauge that

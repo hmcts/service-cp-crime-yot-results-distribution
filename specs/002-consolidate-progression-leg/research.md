@@ -12,7 +12,7 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
   Postgres (`metadata(metadata jsonb, file_id)`, `content(file_id, content bytea, deleted)`) through a
   second, write-only `DataSource`, with a service-minted `file_id` persisted on `register_batch`
   first. Then `POST generate-document {templateIdentifier: OEE_Layout5, conversionFormat: pdf,
-  payloadFileServiceId, sourceCorrelationId: batch_id, originatingSource: CourtRegisterService}`.
+  payloadFileServiceId, sourceCorrelationId: batch_id, originatingSource: YotResultsDistributionService}`.
 - **Rationale**: `generate-document` requires `payloadFileServiceId` (schema in
   `contracts/systemdocgenerator/`), a file already in the file service, which is **one shared
   database per stack** (`cpp-aks-deploy/ansible/group_vars/common.yaml.j2:26-31`, `DS.fileservice`).
@@ -33,7 +33,7 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
 - **Decision**: durable JMS subscription to `public.event` with selector
   `CPPNAME IN ('public.systemdocgenerator.events.document-available',
   'public.systemdocgenerator.events.generation-failed')`, filtered on
-  `originatingSource == CourtRegisterService`, correlated on `sourceCorrelationId` (= `batch_id`)
+  `originatingSource == YotResultsDistributionService`, correlated on `sourceCorrelationId` (= `batch_id`)
   with `payloadFileServiceId` as the cross-check. A batch still GENERATING past the grace period is
   reconciled once via `GET systemdocgenerator-query-api/…/document/{payloadFileId}` and otherwise
   fails `GENERATION_TIMED_OUT`. Both paths call the same `DocumentOutcomeSink`.
@@ -55,7 +55,7 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
 ## 3. The flag from Boot — `azure-data-appconfiguration` with workload identity, per-run, fail-closed
 
 - **Decision**: `AppConfigurationFlagReader` uses `ConfigurationClient.getConfigurationSetting(
-  ".appconfig.featureflag/CourtRegisterService", <stack label>)` with `WorkloadIdentityCredential`,
+  ".appconfig.featureflag/YotResultsDistributionService", <stack label>)` with `WorkloadIdentityCredential`,
   parses the feature-flag JSON's `enabled`, 2 s timeout, no cache, returns `ON | OFF |
   UNREADABLE(reason)` and never throws. The job reads it once at run start; OFF/UNREADABLE ⇒ run
   skipped and counted. The CLI reads it too (`--ignore-flag` to bypass, echoed in output).
@@ -65,14 +65,14 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
   the producer; "unreadable ⇒ legacy generates" is the only safe default when three readers disagree.
 - **Alternatives**: `spring-cloud-azure-feature-management` — rejected: it caches/refreshes by
   design and adds a starter for one boolean; a Helm value — rejected: a second lever (constitution III).
-- **Platform ask**: `App Configuration Data Reader` for the `courtregister:` identity (design §8).
+- **Platform ask**: `App Configuration Data Reader` for the `yotresultsdistribution:` identity (design §8).
 
 ## 4. Scheduling — `@Scheduled` in `Europe/London` with ShedLock
 
 - **Decision**: `@Scheduled(cron = "0 0 18 * * MON-FRI", zone = "Europe/London")` on
   `RegisterGenerationJob`, `@SchedulerLock(name = "register-generation", lockAtMostFor = run deadline
   + margin)` with `shedlock-provider-jdbc-template` on the service's Postgres (`shedlock` table in
-  V2). `courtregister.generation.zone` is validated at startup to equal `Europe/London` unless
+  V2). `yotresultsdistribution.generation.zone` is validated at startup to equal `Europe/London` unless
   `zone-override-acknowledged=true`.
 - **Rationale**: the requirement is 18:00 wall-clock in BST and GMT alike. The legacy fires in the
   systemscheduling JVM's default zone because Quartz's trigger is built without `inTimeZone`
@@ -196,7 +196,7 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
 ## 13. CLI in the image
 
 - **Decision**: `CliMain` (picocli-free, plain args) dispatched by `docker/startup.sh` when `$1` is a
-  known command, running the Spring context with `courtregister.cli=true` (no listener, no
+  known command, running the Spring context with `yotresultsdistribution.cli=true` (no listener, no
   scheduler) against the same configuration. Commands: `generate-register --date D [--court-house
   H] [--batch B] [--ignore-flag] [--recorded-before T]`, `notify-register --batch B`,
   `list-batches --date D | --recorded-while-off`, `supersede-before --shared-before T`, `check-flag`.
@@ -217,4 +217,4 @@ Service*, rev 2.1) is the authority; this file records what the plan derived fro
 Inbound transport, idempotency guard, the transformation chain up to `OutboundContractValidator`,
 the payload and reference-data adapters, health policy for the broker and the store, the retry
 policy object, the differential audit's document corpus. The 001 progression adapter is retained
-behind `courtregister.output=progression-post` and its tests keep running.
+behind `yotresultsdistribution.output=progression-post` and its tests keep running.

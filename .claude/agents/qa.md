@@ -66,10 +66,10 @@ As the transformation pipeline lands (phases 4–6 of `specs/001-court-register-
 - **Readiness stays UP when Azure Service Bus is unreachable** — an explicit test; a broker blip must never roll the pods
 ### Operations API tests (since increment 005)
 - **`@WebMvcTest` slice test per controller**, the application service mocked and the identity client stubbed. Per endpoint: a caller **without** "Second Line Support" is refused; a caller **with** it is served; each refusal the endpoint can answer with (409 with its bounded reason, 400 for an argument that will not read, 500 for a failure) is a case of its own
-- A **contract test** asserting the controllers against `src/main/resources/courtregister-openapi.yaml` — every mapped path and method described, every described path mapped
+- A **contract test** asserting the controllers against `src/main/resources/yot-results-distribution-openapi.yaml` — every mapped path and method described, every described path mapped
 - A test that the audit filter is engaged for `/operations/**`, through its publisher seam
 - **No test may assert a response body echoing the caller's own characters back** — that is the rule the endpoints exist under, and a test that expects an echo has pinned a Principle VII violation. A success record's parsed field (`batchId`, `date`, `sharedBefore`) is not an echo: FR-025 admits this service's own canonical rendering of what it parsed, and the case covering one must send a **non-canonical but parseable** spelling and expect the canonical answer, which is what distinguishes the two. A case that sends the canonical spelling and expects the same characters proves neither and is a finding.
-- There is still **no business REST API**: flag any controller outside `uk.gov.hmcts.cp.courtregister.api`, any path outside `/operations/**`, and any endpoint that submits a hearing, reads a register out or creates a batch
+- There is still **no business REST API**: flag any controller outside `uk.gov.hmcts.cp.yotresultsdistribution.api`, any path outside `/operations/**`, and any endpoint that submits a hearing, reads a register out or creates a batch
 
 ### Edge Cases to Always Cover
 - Null / missing input fields on the inbound message

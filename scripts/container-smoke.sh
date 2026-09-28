@@ -24,7 +24,7 @@ readonly FLAG_URL="http://localhost:8082/operations/flag"
 # namespaced under it, so the teardown's `down --volumes` can only ever destroy what this script
 # made. Without it the script would share the default project with a developer's own
 # `docker compose up`, and a smoke run would silently delete their database volume.
-readonly PROJECT_NAME="courtregister-smoke"
+readonly PROJECT_NAME="yot-results-distribution-smoke"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -131,11 +131,11 @@ log "PASS: readiness reported UP within the ${READINESS_BUDGET_SECONDS}s budget"
 # rules.
 #
 # The reading is taken through the REAL reader, with no mode override at all. It used to need
-# `COURTREGISTER_GENERATION_FLAG_MODE=STUB`, because the live reader authorises its App Configuration
+# `YOTRESULTSDISTRIBUTION_GENERATION_FLAG_MODE=STUB`, because the live reader authorises its App Configuration
 # read on the pod's workload identity - AZURE_CLIENT_ID, the tenant and the projected federated token
 # - and a compose container holds none of the three; a bearer credential is refused a plain-HTTP URL
 # by the SDK before a socket is opened, so pointing it at the WireMock stub was not an option either.
-# `courtregister.feature.credential=local-test`, which docker-compose.yml sets on `app`, swaps that
+# `yotresultsdistribution.feature.credential=local-test`, which docker-compose.yml sets on `app`, swaps that
 # identity for a published pair the stub does not check and leaves everything else deployed. So what
 # this step asserts is the whole path an operator uses: the endpoint, the deployed reader, the
 # deployed SDK client, the key in the path, the label in the query and the fail-closed reading of

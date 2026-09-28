@@ -24,7 +24,7 @@ REST paths, media types and ACLs (from the RAML / drl files in the same clones, 
   parameter.
 - Artemis topic `public.event`; JMS string property `CPPNAME` = event name; body = framework
   `JsonEnvelope` (`_metadata` + payload).
-- App Configuration key `.appconfig.featureflag/CourtRegisterService`, label = stack.
+- App Configuration key `.appconfig.featureflag/YotResultsDistributionService`, label = stack.
 
 Unchanged from 001 and still authoritative: the inbound `distribution-command.schema.json` and the
 frozen register document under `src/main/resources/contracts/progression/` (v17.103.13).

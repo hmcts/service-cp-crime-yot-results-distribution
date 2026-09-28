@@ -1,0 +1,795 @@
+### The operations API, owned by this repository and versioned with it.
+#
+# The third contract this service owns (constitution Principle III, workflow.md). It describes the
+# seven `/operations/**` endpoints an operator reaches - their requests, their success shapes and
+# every bounded `reason` each can refuse under - and nothing else: actuator is not part of this
+# surface and is not described here.
+#
+# TWO READERS, AND BOTH MATTER.
+#   * `api/OpenApiContractTest` asserts it against the controllers in BOTH directions: a path mapped
+#     and not described, and a path described and not mapped, are each a failure.
+#   * `cp-audit-filter-springboot` reads it at runtime to resolve path parameters, and it finds it by
+#     a SUFFIX glob - `classpath*:**/*${audit.http.openapi-rest-spec}`, first match wins. That is why
+#     this file is called `yot-results-distribution-openapi.yaml` and not `openapi.yaml`: the shorter name would
+#     also match any `*openapi.yaml` a dependency ships, and the parser is handed whichever the glob
+#     returns first. A path this document omits gets `Map.of()` from the filter and is published with
+#     its path parameters silently missing, which is the other half of why the contract test runs
+#     both ways.
+openapi: 3.0.3
+
+info:
+  title: Court Register operations API
+  version: 1.0.0
+  description: >-
+    The named operator actions that replaced the operations CLI in increment 005. Every endpoint is
+    behind cp-auth-rules-filter, admitting the group "Second Line Support" and no other, with the
+    caller's identity taken from the CJSCPPUID header; every endpoint is audited by
+    cp-audit-filter-springboot. No response carries defendant detail, an unmasked recipient address,
+    a payload, a register document, an exception message, or any value the caller supplied.
+
+servers:
+  - url: /
+    description: The pod itself, reached only through the internal gateway.
+
+tags:
+  - name: flag
+    description: The one cutover lever, read.
+  - name: batches
+    description: What a register date was batched into, and the two actions over it.
+  - name: registers
+    description: What was recorded, and the period this service gives up on a rollback.
+  - name: reports
+    description: The exception report, on demand.
+
+paths:
+
+  /operations/flag:
+    get:
+      tags: [flag]
+      operationId: checkFlag
+      summary: What the YotResultsDistributionService flag says
+      description: >-
+        Reads the flag - that is its purpose. All three readings answer 200, UNREADABLE included:
+        the endpoint answered the question it exists to answer, and a 503 here would make the
+        gateway read this service as down and may cost the caller the body that says why.
+      responses:
+        "200":
+          description: The reading.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlagResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "503":
+          $ref: "#/components/responses/NotAudited"
+
+  /operations/batches:
+    get:
+      tags: [batches]
+      operationId: listBatches
+      summary: The batches of one register date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: The register date, as an ISO local date.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: That date's batches, each with its masked recipients.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchListingResponse"
+        "400":
+          $ref: "#/components/responses/Refused"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "501":
+          $ref: "#/components/responses/NotWired"
+        "503":
+          $ref: "#/components/responses/Refused"
+
+  /operations/batches/generate:
+    post:
+      tags: [batches]
+      operationId: generateRegister
+      summary: Regenerate a register date
+      description: >-
+        Asynchronous. It validates the request, reads the cutover flag through the same gate the
+        18:00 run reads it through, records a run id and answers 202; the work runs on the
+        generation scheduler's single thread holding the register-generation lock. What the run did
+        is read from the run report line - run_id, trigger=operator, reason=overridden where the
+        flag was overridden - and from GET /operations/batches. SCHEDULE_RUNNING and
+        generation-failed are recorded as the background run's outcome and are never a status here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRegisterRequest"
+      responses:
+        "202":
+          description: Accepted; the run id the run line is correlated by.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateRegisterResponse"
+        "400":
+          $ref: "#/components/responses/Refused"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "409":
+          $ref: "#/components/responses/Refused"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "501":
+          $ref: "#/components/responses/NotWired"
+        "503":
+          $ref: "#/components/responses/NotAudited"
+
+  /operations/batches/{batchId}/notify:
+    post:
+      tags: [batches]
+      operationId: notifyBatch
+      summary: Re-request the recipients of one batch no e-mail has been accepted for
+      description: >-
+        Synchronous, and only the owed recipients. Two concurrent calls are arbitrated by the claim
+        RegisterNotifierService already takes; nothing new arbitrates them.
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          description: The batch, as a UUID.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The batch settled, with the tally.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotifyBatchResponse"
+        "400":
+          $ref: "#/components/responses/Refused"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "404":
+          $ref: "#/components/responses/Refused"
+        "409":
+          $ref: "#/components/responses/Refused"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "501":
+          $ref: "#/components/responses/NotWired"
+        "502":
+          $ref: "#/components/responses/Refused"
+        "503":
+          $ref: "#/components/responses/Refused"
+        "504":
+          $ref: "#/components/responses/Refused"
+
+  /operations/registers/recorded-while-off:
+    get:
+      tags: [registers]
+      operationId: listRecordedWhileOff
+      summary: The registers recorded while the flag was off
+      responses:
+        "200":
+          description: The records, in identifiers only.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordedWhileOffResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "503":
+          $ref: "#/components/responses/Refused"
+
+  /operations/registers/supersede:
+    post:
+      tags: [registers]
+      operationId: supersedeBefore
+      summary: Give up the registers recorded before an instant
+      description: >-
+        Synchronous, and stricter than the command it replaces. Admitted only while an uncached read
+        of the cutover flag says OFF - a rollback while this service is the live implementation is
+        not a rollback - with no override, ever. The instant is never defaulted, may not be in the
+        future, and may not be older than yotresultsdistribution.operations.supersede-max-age.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupersedeRequest"
+      responses:
+        "200":
+          description: The count superseded, and the instant it was taken from.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupersedeResponse"
+        "400":
+          $ref: "#/components/responses/Refused"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "409":
+          $ref: "#/components/responses/Refused"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "503":
+          $ref: "#/components/responses/Refused"
+
+  /operations/exception-reports:
+    post:
+      tags: [reports]
+      operationId: reportExceptions
+      summary: The exception report for a window
+      description: >-
+        Synchronous: the report is built and every sink asked for has been delivered to before it
+        answers. It reads the cutover flag nowhere, as its command did not. With no `since` the
+        window runs from the previous scheduled report, computed from the report schedule exactly as
+        the command computed it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExceptionReportRequest"
+      responses:
+        "200":
+          description: The report, and what each sink did with it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExceptionReportResponse"
+        "400":
+          $ref: "#/components/responses/Refused"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Unauthorised"
+        "409":
+          $ref: "#/components/responses/Refused"
+        "415":
+          $ref: "#/components/responses/UnsupportedContentType"
+        "500":
+          $ref: "#/components/responses/Refused"
+        "503":
+          $ref: "#/components/responses/NotAudited"
+
+components:
+
+  responses:
+
+    Refused:
+      description: >-
+        A refusal or a failure, as an RFC 9457 ProblemDetail carrying a bounded reason. Never an
+        exception message, never a store's or a far end's own words, never a value the caller sent.
+        Every path carries a 500, because every path can meet a failure nobody classified: that one
+        is `reason: UNEXPECTED`, answered by the advice's single fallback so that the outcome
+        reaches the wire and the audit event rather than the container.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+    NotAudited:
+      description: >-
+        The call's request event could not be published to the audit context, so it was refused
+        rather than made. Being audited is a condition of this surface existing at all
+        (constitution Principle III(b)), and the request event is published before the action -
+        which is the only moment there is still something to refuse. Carries
+        `reason: AUDIT_UNAVAILABLE`. The endpoints that also answer 503 for a store that will not
+        answer carry both codes under the one status; the code is what tells them apart.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+    UnsupportedContentType:
+      description: >-
+        The request declared a body in a format no endpoint here takes. Refused by
+        api/OperationsContentTypeFilter, which sits between the two estate filters: outside
+        cp-audit-filter-springboot, because it hands a `multipart/*` request down the chain without
+        publishing either of its events and an endpoint reachable unaudited is an endpoint that may
+        not exist (constitution Principle III(b)), and inside cp-auth-rules-filter, so an
+        unauthenticated caller is answered 401 rather than this. Carries
+        `reason: UNSUPPORTED_CONTENT_TYPE`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+    NotWired:
+      description: >-
+        This pod does not hold the generation half, so the action has no beans to reach. Exactly
+        what the CLI answered on such a pod; a 404 would read as a mistyped URL and a 500 as a
+        bean-definition error reaching an operator.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+
+    Unauthenticated:
+      description: >-
+        No CJSCPPUID identity on the request. Produced by cp-auth-rules-filter through sendError, so
+        the body is api/OperationsErrorAttributes' - the same shape, without passing the advice.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FilterRefusal"
+
+    Unauthorised:
+      description: >-
+        The caller is not in "Second Line Support", or the identity service could not be asked, or
+        the action has no allow rule. All three are the same answer on purpose: fail-closed is the
+        only safe direction for an authorisation decision.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FilterRefusal"
+
+  schemas:
+
+    Reason:
+      type: string
+      description: >-
+        The closed set of bounded codes every refusal and every failure on this surface carries. The
+        codes the six commands already printed keep their own hyphenated characters, so a runbook
+        step that greps one keeps working; the rules increment 005 adds are named in the data
+        model's own convention. api/OpenApiContractTest asserts this list against
+        domain/OperationsReason, so neither can gain a member the other has not.
+      enum:
+        - flag-off
+        - flag-unreadable
+        - overridden
+        - missing-argument
+        - unreadable-argument
+        - settled
+        - already-notifying
+        - claim-lost
+        - incomplete
+        - generation-failed
+        - resend-failed
+        - listing-failed
+        - supersession-failed
+        - report-not-built
+        - report-not-delivered
+        - email-output-disabled
+        - email-output-not-wired
+        - key-in-flight
+        - outside-the-bound
+        - command-not-wired
+        - SCHEDULE_RUNNING
+        - FLAG_ON
+        - OVERRIDE_REQUIRES_BATCH
+        - SUPERSEDE_INSTANT_IN_FUTURE
+        - SUPERSEDE_INSTANT_TOO_OLD
+        - UNKNOWN_BATCH
+        - STORE_UNAVAILABLE
+        - DOWNSTREAM_REFUSED
+        - DOWNSTREAM_UNAVAILABLE
+        - UNSUPPORTED_CONTENT_TYPE
+        - UNEXPECTED
+        - AUDIT_UNAVAILABLE
+
+    ProblemDetail:
+      type: object
+      description: >-
+        RFC 9457. `detail` is never populated and `instance` is empty on purpose: Spring fills a null
+        instance with the request URI, which on the notify path is the batch id the caller typed.
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+          description: The status' own reason phrase, from a closed set.
+        status:
+          type: integer
+          format: int32
+        instance:
+          type: string
+          description: Always empty. The request URI is a value the caller supplied.
+        reason:
+          $ref: "#/components/schemas/Reason"
+        argument:
+          type: string
+          description: >-
+            On a 400 about one argument: this service's own name for it, never the value that was
+            sent.
+          enum: [date, batchId, recordedBefore, sharedBefore, since, ignoreFlag]
+        batchId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+        date:
+          type: string
+          format: date
+        released:
+          type: integer
+          format: int32
+          description: The partial tally of a run that stopped part way, where there was one.
+        registers:
+          type: integer
+          format: int32
+        batches:
+          type: integer
+          format: int32
+        requested:
+          type: integer
+          format: int32
+        deferred:
+          type: integer
+          format: int32
+        accepted:
+          type: integer
+          format: int32
+          description: >-
+            On a notify that tried and could not finish (claim-lost, incomplete): how many
+            recipients had been accepted when it stopped.
+        failed:
+          type: integer
+          format: int32
+          description: The other half of that tally.
+        state:
+          allOf:
+            - $ref: "#/components/schemas/BatchStatus"
+          description: The batch as it stood when the notify stopped.
+        delivered:
+          type: object
+          additionalProperties:
+            type: string
+          description: What each sink did, on a report that was built and not delivered.
+      required: [status, title, reason]
+
+    FilterRefusal:
+      type: object
+      description: >-
+        What cp-auth-rules-filter's sendError produces, rendered by api/OperationsErrorAttributes:
+        the status, a bounded reason and nothing else. No path, no trace, no message - the default
+        body echoes the path, which for an unmapped path is a string the caller typed.
+      properties:
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        reason:
+          type: string
+      required: [status]
+
+    FlagResponse:
+      type: object
+      properties:
+        flag:
+          type: string
+          enum: [ON, OFF, UNREADABLE]
+        reason:
+          type: string
+          description: >-
+            Present only with UNREADABLE - the reading's own bounded code.
+      required: [flag]
+
+    BatchListingResponse:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        batches:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchSummary"
+      required: [date, batches]
+
+    BatchSummary:
+      type: object
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        courtHouse:
+          type: string
+          nullable: true
+          description: Absent where the batch names no venue; the command printed a dash.
+        state:
+          $ref: "#/components/schemas/BatchStatus"
+        records:
+          type: integer
+          format: int32
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipientOutcome"
+      required: [batchId, state, records, recipients]
+
+    RecipientOutcome:
+      type: object
+      properties:
+        address:
+          type: string
+          description: >-
+            Masked by the same rule list-batches masked by: the first character of a local part
+            longer than one, then three asterisks, then everything from the last at-sign. The
+            unmasked address appears nowhere - not here, not in a log line, not in the audit event.
+        outcome:
+          type: string
+          enum: [PENDING, ACCEPTED, FAILED]
+      required: [address, outcome]
+
+    BatchStatus:
+      type: string
+      enum:
+        - PENDING
+        - GENERATING
+        - GENERATED
+        - NOTIFIED
+        - PARTIALLY_NOTIFIED
+        - NOTIFIED_NOBODY
+        - FAILED
+
+    GenerateRegisterRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Closed, for the reason the inbound queue message's contract is closed: an unknown field is
+        producer drift, and tolerating it hides the drift until it matters.
+      properties:
+        date:
+          type: string
+          format: date
+          description: The register date. Required, and never defaulted.
+        courtHouse:
+          type: string
+          description: One court house of that date.
+        batchId:
+          type: string
+          format: uuid
+          description: One batch of that date.
+        recordedBefore:
+          type: string
+          format: date-time
+          description: Only the registers recorded before this instant.
+        ignoreFlag:
+          type: boolean
+          default: false
+          description: >-
+            The break-glass, and only with an explicit batchId. Overriding the cutover flag is for
+            one batch at a time: re-driving a whole day under override is one call per failed batch,
+            deliberately. Recorded in the audit event with the caller's identity and on the run
+            report line.
+      required: [date]
+
+    GenerateRegisterResponse:
+      type: object
+      properties:
+        runId:
+          type: string
+        date:
+          type: string
+          format: date
+          description: This service's own parse of the date, not the characters the caller typed.
+        overridden:
+          type: boolean
+      required: [runId, date, overridden]
+
+    NotifyBatchResponse:
+      type: object
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        accepted:
+          type: integer
+          format: int32
+        failed:
+          type: integer
+          format: int32
+        state:
+          $ref: "#/components/schemas/BatchStatus"
+        disposition:
+          type: string
+          enum: [settled]
+          description: >-
+            Only SETTLED is a 200. The other three dispositions are statuses - already-notifying is
+            409, claim-lost and incomplete are 500.
+      required: [batchId, accepted, failed, state, disposition]
+
+    RecordedWhileOffResponse:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecordedRegister"
+      required: [records]
+
+    RecordedRegister:
+      type: object
+      properties:
+        recordId:
+          type: string
+          format: uuid
+        hearingId:
+          type: string
+          format: uuid
+        registerDate:
+          type: string
+          format: date
+        flag:
+          type: string
+          enum: [ON, OFF]
+      required: [recordId, hearingId, registerDate, flag]
+
+    SupersedeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        sharedBefore:
+          type: string
+          format: date-time
+          description: >-
+            Required, and never defaulted: an absent one is a refusal rather than a period chosen
+            for the operator.
+        dryRun:
+          type: boolean
+          default: false
+          description: Answers the count that would be superseded and supersedes nothing.
+      required: [sharedBefore]
+
+    SupersedeResponse:
+      type: object
+      properties:
+        superseded:
+          type: integer
+          format: int32
+          description: Also carried into the audit event.
+        sharedBefore:
+          type: string
+          format: date-time
+        dryRun:
+          type: boolean
+      required: [superseded, sharedBefore, dryRun]
+
+    ExceptionReportRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        since:
+          type: string
+          description: >-
+            An ISO instant, an ISO-8601 duration, or <n>d / <n>h / <n>m / <n>s. Absent means "since
+            the previous scheduled report", computed from the report schedule exactly as the command
+            computed it.
+        email:
+          type: boolean
+          default: false
+          description: Also deliver through the e-mail sink.
+
+    ExceptionReportResponse:
+      type: object
+      properties:
+        runId:
+          type: string
+        window:
+          $ref: "#/components/schemas/ReportWindow"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExceptionEntry"
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int32
+        truncated:
+          type: integer
+          format: int32
+        delivered:
+          type: object
+          additionalProperties:
+            type: string
+          description: What each sink did, said separately and never dressed up as a success.
+        outcome:
+          type: string
+        durationMs:
+          type: integer
+          format: int64
+      required: [runId, window, entries, counts, truncated, delivered, outcome, durationMs]
+
+    ReportWindow:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+      required: [from, to]
+
+    ExceptionEntry:
+      type: object
+      description: >-
+        Identifiers, bounded codes and counts. A field the kind does not carry is omitted rather
+        than rendered as a null a reader has to interpret.
+      properties:
+        kind:
+          type: string
+          enum:
+            - REQUEST_FAILED
+            - REQUEST_LATE
+            - BATCH_LATE
+            - BATCH_FAILED
+            - NOTIFICATION_FAILED
+            - BATCH_RELEASED
+        source:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+        hearingId:
+          type: string
+          format: uuid
+        hearingDay:
+          type: string
+          format: date
+        batchId:
+          type: string
+          format: uuid
+        notificationId:
+          type: string
+          format: uuid
+        courtCentreId:
+          type: string
+          format: uuid
+        registerDate:
+          type: string
+          format: date
+        status:
+          type: string
+        attempts:
+          type: integer
+          format: int32
+        reason:
+          type: string
+        ageSeconds:
+          type: integer
+          format: int64
+      required: [kind, ageSeconds]

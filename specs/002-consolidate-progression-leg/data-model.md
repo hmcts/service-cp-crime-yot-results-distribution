@@ -174,7 +174,7 @@ period, so it reads the whole shared table and its answer counts the whole table
 | `court_house` | `text` | |
 | `register_date` | `date NOT NULL` | |
 | `file_name` | `text NOT NULL` | First record's `fileName` (as progression) |
-| `payload_file_id` | `uuid` | Minted **before** the file-service insert; sent as `payloadFileServiceId`. On the way back it is a **cross-check and never a lookup**: `DocumentOutcomeSink` finds the batch by `sourceCorrelationId` alone and requires the event's `payloadFileServiceId` to equal this column, counting an event where they disagree on `courtregister_public_events_ignored_total{reason=payload-mismatch}` and applying it nowhere. An outcome whose correlation names no batch is counted `{reason=unknown-correlation}` and is **not** looked up by payload instead: an event that has lost or crossed its correlation would otherwise complete a batch it was never about. `RegisterBatchRepository` therefore offers no read by payload at all: the reconciler's sweep reads the payload id off the batch row it is already holding, so nothing needs one |
+| `payload_file_id` | `uuid` | Minted **before** the file-service insert; sent as `payloadFileServiceId`. On the way back it is a **cross-check and never a lookup**: `DocumentOutcomeSink` finds the batch by `sourceCorrelationId` alone and requires the event's `payloadFileServiceId` to equal this column, counting an event where they disagree on `yotresultsdistribution_public_events_ignored_total{reason=payload-mismatch}` and applying it nowhere. An outcome whose correlation names no batch is counted `{reason=unknown-correlation}` and is **not** looked up by payload instead: an event that has lost or crossed its correlation would otherwise complete a batch it was never about. `RegisterBatchRepository` therefore offers no read by payload at all: the reconciler's sweep reads the payload id off the batch row it is already holding, so nothing needs one |
 | `document_file_id` | `uuid` | From `document-available` (`documentFileServiceId`) or the query API |
 | `status` | `text NOT NULL` | `PENDING` → `GENERATING` → `GENERATED` → `NOTIFIED` \| `PARTIALLY_NOTIFIED` \| `NOTIFIED_NOBODY` \| `FAILED` |
 | `failure_reason` | `text` | `PAYLOAD_STORE_UNAVAILABLE` \| `RENDER_REQUEST_FAILED` \| `RENDER_REQUEST_REJECTED` \| `GENERATION_FAILED` \| `GENERATION_TIMED_OUT` \| `ASSEMBLY_FAILED` |
@@ -255,18 +255,18 @@ rows as they stood, which is the winner's work part-done: a caller branches on t
 on those counts.
 
 **The lease is the notifying leg's own, and it is renewed (revised 2026-09-07).** It was
-`courtregister.generation.grace-period` - ten minutes, on the argument that how long a notifier is
+`yotresultsdistribution.generation.grace-period` - ten minutes, on the argument that how long a notifier is
 given to finish is how long the safety net waits before it looks. That is wrong twice over. The two
 questions are different: how long a batch may hold a document before the reconciler looks is no bound
 at all on telling that batch's recipients, whose cost is the number of Youth Offending Teams the
 batch is addressed to times whatever notificationnotify makes of each of them - a batch with twelve
-subscribers, each costing up to `courtregister.endpoints.max-attempts` POSTs with a connect timeout, a
+subscribers, each costing up to `yotresultsdistribution.endpoints.max-attempts` POSTs with a connect timeout, a
 read timeout and a back-off wait apiece, can outlast ten minutes without anything having gone wrong. And ownership was
 never rechecked: once the lease lapsed a second notifier could take the claim while the first was
 still posting and settling under a token the row no longer carried, which is the state the claim
 exists to prevent.
 
-So the lease is **`courtregister.notification.claim-lease`** (default `15m`), and
+So the lease is **`yotresultsdistribution.notification.claim-lease`** (default `15m`), and
 `RegisterBatchRepository.renewNotificationClaim(batchId, token)` -
 `UPDATE register_batch SET notifying_since = now() WHERE batch_id = :batchId AND notifier_token =
 :token` - is asked **before every POST, the retries of one recipient included, before each row's
@@ -288,7 +288,7 @@ NOTIFICATION_LEASE_MARGIN (2) x (max-attempts x (connect-timeout + read-timeout)
                                  + (max-attempts - 1) x max-backoff)
 ```
 
-read off the shared `courtregister.endpoints.*` transport - `2 x (3 x (5s + 10s) + 2 x 2s)` = **98s**
+read off the shared `yotresultsdistribution.endpoints.*` transport - `2 x (3 x (5s + 10s) + 2 x 2s)` = **98s**
 at the shipped values, which is what makes the shipped `15m` generous. The connect timeout is charged
 because an attempt that hangs on the connect and then on the read is the longest single thing this
 leg does, and the waits are the gaps **between** attempts, of which there is one fewer than there are
@@ -303,7 +303,7 @@ and settles nothing further**: no further POST, because the notifier that now ho
 the same owed set from the same records; no row settlement and no batch settlement, because either
 would be written over that notifier's work. It answers `NotificationDisposition.CLAIM_LOST` with the
 rows and the state as they stood, counted on
-`courtregister_notifications_ignored_total{reason=claim-lost}` - apart from `already-notifying`,
+`yotresultsdistribution_notifications_ignored_total{reason=claim-lost}` - apart from `already-notifying`,
 which is contention rather than loss: a notifier that never got the claim, whereas this one held it
 and began the cycle. **How much of the cycle it got through is not fixed.** The renewal is asked in
 front of every POST, so the one that is refused can be the renewal before the very first POST - a
@@ -368,8 +368,8 @@ systemdocgenerator renders under, so counting a failure would name a day's first
 `-supplementary-1` and leave nothing for it to be a supplement to.
 
 A supplementary batch's **file name** is the first row's `fileName` with `-supplementary-<index>`
-inserted before the extension - `courtregister_2026-08-20.json` becomes
-`courtregister_2026-08-20-supplementary-1.json`. `BatchAssembler` (T043) builds it; the schema only
+inserted before the extension - `yotresultsdistribution_2026-08-20.json` becomes
+`yotresultsdistribution_2026-08-20-supplementary-1.json`. `BatchAssembler` (T043) builds it; the schema only
 records the index it is built from.
 
 The alternatives Q27 weighed were a second unrelated live batch for the key, which records nothing
@@ -416,7 +416,7 @@ both write the same number, so one run's POSTs are simply lost.
 `RegisterNotificationRepository.update` therefore answers `NotificationSettlement` - `APPLIED`,
 `ATTEMPTS_ONLY`, or `ABSENT` for a row the store does not hold - rather than a changed-row count,
 which could not tell the last two apart because both changed nothing.
-`RegisterNotifierService` counts each on `courtregister_notifications_ignored_total`:
+`RegisterNotifierService` counts each on `yotresultsdistribution_notifications_ignored_total`:
 `{reason=late-failure-ignored}` where this run's own attempt failed against an accepted row,
 `{reason=late-acceptance-ignored}` where it was accepted against one - two 202s for one recipient is
 a Youth Offending Team holding two copies of a register about children, and filing it under the
@@ -453,7 +453,7 @@ callback for a batch that is already GENERATED, so no event redelivery revisits 
 derives the owed set from the records again, **mints the missing row**, posts under it and settles
 the batch on a tally that then accounts for every recipient
 (`RegisterNotifierServiceTest.AVanishedRowEndsTheCycle`). The reconciler is not that call: its third
-read over GENERATED batches names them and publishes `courtregister_oldest_generated_age` from them,
+read over GENERATED batches names them and publishes `yotresultsdistribution_oldest_generated_age` from them,
 and settles nothing.
 
 **The batch is re-read before it is settled**, inside the same claim. The row a run started from is
@@ -490,7 +490,7 @@ operator's question. Pinned by `RegisterNotifierServiceTest.RecoveringAnUnsettle
 .reading_the_resendable_recipients_should_answer_with_every_row_never_accepted`.
 
 **A transient refusal is retried before the row is settled.** A 408, 429 or 5xx, or a transport
-failure, is asked again up to `courtregister.endpoints.max-attempts` under the same
+failure, is asked again up to `yotresultsdistribution.endpoints.max-attempts` under the same
 `notification_id` with the shared `RetryPolicy`'s back-off, and only then FAILED with the last
 status; a NON_TRANSIENT refusal is settled on the first attempt (research §11,
 `RegisterNotifierServiceTest.RetryingWhatMayAnswerDifferently`). No deadline is measured against
@@ -546,7 +546,7 @@ PENDING ──payload stored + 202──▶ GENERATING ──document-available�
                                                             | GENERATION_TIMED_OUT
                                                             | RENDER_REQUEST_FAILED)
 PARTIALLY_NOTIFIED ──notify-register --batch (resend the rows never ACCEPTED)──▶ NOTIFIED
-GENERATED ──grace period, rows unsettled──▶ (reported on courtregister_oldest_generated_age)
+GENERATED ──grace period, rows unsettled──▶ (reported on yotresultsdistribution_oldest_generated_age)
           ──notify-register --batch | notify(batchId) again──▶ NOTIFIED | PARTIALLY_NOTIFIED
 FAILED ──generate-register --batch (new batch_id)──▶ PENDING
 ```
@@ -555,7 +555,7 @@ FAILED ──generate-register --batch (new batch_id)──▶ PENDING
 `markGenerated` in one step of one code path, so a store that went away in between - or a listener
 session that rolled the delivery back after that mark had committed - leaves the batch holding its
 document with rows nothing settled. `generatingSince` reads GENERATING and `pendingSince` reads
-PENDING, so until `courtregister_oldest_generated_age` existed the one state that leaves a Youth
+PENDING, so until `yotresultsdistribution_oldest_generated_age` existed the one state that leaves a Youth
 Offending Team untold was the one state no gauge moved for - P1's failure mode by another route. The
 reconciler takes that reading from a third read (`RegisterBatchRepository.generatedSince`, statement
 5) and settles nothing there: the document exists, so the batch is owed its e-mails and both
@@ -565,7 +565,7 @@ document away.
 **A notifying arrow is not drawn for a cycle that could not account for a row.** The `ABSENT` answer
 above leaves the batch unmarked: a run that posted under a row the store no longer holds gives the
 claim back without reaching `markNotified` at all, so GENERATED stays GENERATED (on
-`courtregister_oldest_generated_age`) and PARTIALLY_NOTIFIED stays PARTIALLY_NOTIFIED, and both are
+`yotresultsdistribution_oldest_generated_age`) and PARTIALLY_NOTIFIED stays PARTIALLY_NOTIFIED, and both are
 states either entry point can pick up again. The resend that follows mints the missing row, posts
 under it and settles the batch on a tally that accounts for every recipient. Nor is one drawn for
 `CLAIM_LOST`: the notifier that took the batch over is the one whose tally settles it.
@@ -588,8 +588,8 @@ the request did reach the renderer and the renderer is what has not come back: F
 with the same empty answer is failed. No record of the payload at all is the only shape that shows
 the request never arrived: FAILED **`RENDER_REQUEST_FAILED`** with `completed_by` NULL - this
 service's own verdict about a request it cannot show was ever accepted. Their age is published on
-`courtregister_oldest_pending_age`, the fifth gauge; the batch parked at GENERATED is on
-`courtregister_oldest_generated_age`, the seventh.
+`yotresultsdistribution_oldest_pending_age`, the fifth gauge; the batch parked at GENERATED is on
+`yotresultsdistribution_oldest_generated_age`, the seventh.
 
 `PENDING → GENERATED` is therefore a drawn arrow rather than a batch skipping GENERATING: the render
 really was accepted and the mark that says so is what was lost, and refusing the move would throw

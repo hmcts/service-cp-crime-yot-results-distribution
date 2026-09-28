@@ -24,6 +24,6 @@ Also unchanged and still authoritative, from 001: the inbound
 under `src/main/resources/contracts/progression/` (`criminal-court-public-model` 17.103.13). This
 increment reads neither and writes neither.
 
-One platform contract is deliberately **not** touched: the `CourtRegisterService` App Configuration
+One platform contract is deliberately **not** touched: the `YotResultsDistributionService` App Configuration
 flag. The report reads it nowhere and is gated by it nowhere, so this increment adds no second
 reader and no second lever (constitution Cutover Rule).

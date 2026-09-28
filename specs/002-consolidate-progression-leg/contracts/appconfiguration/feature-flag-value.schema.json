@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://hmcts.gov.uk/cp/courtregister/contracts/appconfiguration/feature-flag-value.schema.json",
-  "title": "Azure App Configuration feature-flag value, as read by courtregister-service",
-  "description": "The JSON value of the configuration setting '.appconfig.featureflag/CourtRegisterService' (content type application/vnd.microsoft.appconfig.ff+json). The service reads 'enabled' only; anything else is carried by the platform and ignored here. A value that does not parse to this shape is UNREADABLE, never ON.",
+  "$id": "https://hmcts.gov.uk/cp/yotresultsdistribution/contracts/appconfiguration/feature-flag-value.schema.json",
+  "title": "Azure App Configuration feature-flag value, as read by yotresultsdistribution-service",
+  "description": "The JSON value of the configuration setting '.appconfig.featureflag/YotResultsDistributionService' (content type application/vnd.microsoft.appconfig.ff+json). The service reads 'enabled' only; anything else is carried by the platform and ignored here. A value that does not parse to this shape is UNREADABLE, never ON.",
   "type": "object",
   "properties": {
     "id": { "type": "string" },

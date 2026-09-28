@@ -8,7 +8,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 
 /**
- * Boot entry point for the court-register service.
+ * Boot entry point for the YOT results distribution service.
  *
  * <p><strong>The audit exclusion is load-bearing.</strong> {@code cp-audit-filter-springboot}'s
  * package root is {@code uk.gov.hmcts.cp.filter.audit}, which is inside the tree this class's

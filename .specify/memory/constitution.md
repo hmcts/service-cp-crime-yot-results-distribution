@@ -4,7 +4,7 @@ SYNC IMPACT REPORT
 Version change: 5.0.2 → 5.0.3
 Bump rationale: PATCH - the owned OpenAPI document is named (2026-09-21). The
                 principle called it `src/main/resources/openapi.yaml`; the file
-                that landed is `src/main/resources/courtregister-openapi.yaml`,
+                that landed is `src/main/resources/yot-results-distribution-openapi.yaml`,
                 and the difference is load-bearing rather than cosmetic.
                 `cp-audit-filter-springboot` finds the document by a SUFFIX glob
                 over the whole classpath - `classpath*:**/*` plus the value of
@@ -135,7 +135,7 @@ Previous amendment (4.1.0 → 5.0.0):
 Version change: 4.1.0 → 5.0.0
 Bump rationale: MAJOR - Principle III's conditions (a) and (b) are redefined
                 (2026-09-20, design owner). 4.1.0 made them start-up refusals:
-                a pod that set `courtregister.servicebus.namespace` MUST refuse
+                a pod that set `yotresultsdistribution.servicebus.namespace` MUST refuse
                 to start with the operations API enabled and either
                 `authz.http.enabled` or the audit path off. 5.0.0 says the pod
                 starts. The two switches are ordinary configuration an operator
@@ -151,7 +151,7 @@ Bump rationale: MAJOR - Principle III's conditions (a) and (b) are redefined
                 reader of 4.1.0 would get that wrong. The local-loop exemption
                 4.1.0 added is REMOVED rather than widened, because what it was
                 an exemption from no longer exists; so is the
-                `courtregister.servicebus.namespace` discriminator, which made
+                `yotresultsdistribution.servicebus.namespace` discriminator, which made
                 a laptop and a deployed pod two different products.
 
                 Why the conditions survive the relaxation: a deployment that
@@ -192,7 +192,7 @@ Bump rationale: MINOR - conditions (a) and (b) of Principle III's operations
                 local exemption (2026-09-20). 4.0.0 wrote both as obligations
                 on "every endpoint" with no scope, and increment 005's FR-045
                 and FR-053 enforce them as start-up refusals on a **deployed**
-                pod only - on the `courtregister.servicebus.namespace`
+                pod only - on the `yotresultsdistribution.servicebus.namespace`
                 discriminator this service already draws deployment on - while
                 the local loop documented in the increment's quickstart serves
                 the endpoints with both filters off.
@@ -259,7 +259,7 @@ Bump rationale: MAJOR - Principle III is redefined (2026-09-19, design owner).
                 `cp-auth-rules-filter` with an explicit allow rule naming the
                 groups admitted, MUST be audited by
                 `cp-audit-filter-springboot`, MUST be gated by the
-                `CourtRegisterService` flag at least as strictly as the CLI
+                `YotResultsDistributionService` flag at least as strictly as the CLI
                 command it replaces was (with any override recorded in the
                 audit event and on the run report), and MUST answer under
                 Principle VII -
@@ -357,8 +357,8 @@ Bump rationale: MINOR - increment 003 adds an obligation without changing a
                 now do that it did not have to before:
 
                 The morning report's output is **structured events**, not prose.
-                `courtregister_exception` carries one exception per line and
-                `courtregister_exception_report` one summary per run, each field
+                `yotresultsdistribution_exception` carries one exception per line and
+                `yotresultsdistribution_exception_report` one summary per run, each field
                 reaching the encoder as a field rather than rendered into the
                 message text - because Log Analytics has to read `kind`,
                 `request_id` and `batch_id` as columns, and a value inside a
@@ -472,7 +472,7 @@ Bump rationale: MAJOR — Principle III is redefined (2026-09-05). The
                 generate-document command and its document-available /
                 generation-failed public events, notificationnotify's
                 send-email-notification command, the framework file-service
-                table schema (write-only), and the CourtRegisterService App
+                table schema (write-only), and the YotResultsDistributionService App
                 Configuration flag. The Technology Stack section's "contains
                 no scheduler, no PDF generation, no GOV.UK Notify code" and
                 "progression's leg is out of scope" statements are reversed.
@@ -520,7 +520,7 @@ Templates / guidance reviewed:
       `.claude/rules/` is loaded into each session, so a stale duplicate was
       being read as authority, not merely sitting on disk. The twelve facts
       that lived only there are now in CLAUDE.md: the release name
-      `courtregister-service`, the CI/CD chain (GitHub Actions → ADO
+      `yotresultsdistribution-service`, the CI/CD chain (GitHub Actions → ADO
       Pipeline 460 → `crmdvrepo01.azurecr.io` → Flux, `springboot-app`
       chart), the Key Vault CSI + workload identity secrets rule, the
       template provenance and the never-Maven/never-Initializr/never-
@@ -600,7 +600,7 @@ Bump rationale: MAJOR — Principle I is rewritten from parity-first to
                 practice of porting catalogued defects bug-for-bug. This
                 constitution was adopted from service-cp-crime-informant-
                 register at its 1.0.2 and re-ratified for
-                service-cp-crime-court-register (2026-08-31, user decision):
+                service-cp-crime-yot-results-distribution (2026-08-31, user decision):
                 the court-register port fixes all 34 catalogued legacy
                 defects (C1–C34) outright and documents every fix in
                 doc/DEFECT-FIXES.md. The legacy pipeline remains the oracle
@@ -617,14 +617,14 @@ Modified principles (this amendment):
     test that would fail against the legacy behaviour and passes against the
     fix, and that test is named in the fix's DEFECT-FIXES row.
   - III. Message-Contract First — re-targeted at this service's contracts
-    (inbound courtregister.requests; outbound progression-owned
+    (inbound yotresultsdistribution.requests; outbound progression-owned
     add-court-register, 202-only). New clause: a fix that changes the shape
     of an outbound component is a cross-team event requiring progression-team
     notification before ship.
   - IV–VII — re-targeted at the court register flow (single fragment,
     youth defendants only, PDF produced downstream in progression); the
     requirements themselves are unchanged.
-  - VIII. Estate Conventions — package root uk.gov.hmcts.cp.courtregister;
+  - VIII. Estate Conventions — package root uk.gov.hmcts.cp.yotresultsdistribution;
     branch policy is plain main with no ticket prefixes (user decision,
     2026-08-31); everything else unchanged.
   - Technology Stack & Deployment, Development Workflow & Quality Gates,
@@ -637,11 +637,11 @@ History:
     filters are enabled by DEFAULT in this service's configuration and in every
     deployed values file, and switching either off is a deliberate
     configuration act of the operator. The start-up refusal 4.1.0 introduced,
-    its `courtregister.servicebus.namespace` discriminator and the local-loop
+    its `yotresultsdistribution.servicebus.namespace` discriminator and the local-loop
     exemption it needed are all removed; the pod always starts.
   - 4.1.0 (2026-09-20) Principle III's conditions (a) and (b) gain the
     environment they are enforced in - a start-up refusal wherever the service
-    is deployed, on the `courtregister.servicebus.namespace` discriminator -
+    is deployed, on the `yotresultsdistribution.servicebus.namespace` discriminator -
     and the local loop is recorded as the one exemption, at the constitution
     rather than in a spec.
   - 4.0.0 (2026-09-19) Principle III redefined: the "no REST at all, operations
@@ -662,7 +662,7 @@ History:
     (C35 onward) with the same obligations as C1–C34.
   - 2.0.1 (2026-08-31) Delivery scope stated as 31-in-service plus three
     externally-owned remediations (C18/C28/C34), after the P0 review.
-  - 2.0.0 (2026-08-31) Re-ratified for service-cp-crime-court-register.
+  - 2.0.0 (2026-08-31) Re-ratified for service-cp-crime-yot-results-distribution.
     Principle I inverted to fix-first with the 34-entry defect-fix register;
     all sections re-targeted at the court-register flow. Lineage: adopted
     from service-cp-crime-informant-register constitution 1.0.2.
@@ -697,7 +697,7 @@ Templates requiring updates:
 Follow-up TODOs: None. All placeholders resolved.
 -->
 
-# service-cp-crime-court-register Constitution
+# service-cp-crime-yot-results-distribution Constitution
 
 This service is a Spring Boot replacement, on AKS, of the whole court-register
 flow: the Node.js function app (the `CourtRegister*` pipeline in
@@ -827,7 +827,7 @@ what an operator could already do and nothing else.
 
 Its contracts are:
 
-- **Inbound** — the message on `courtregister.requests`:
+- **Inbound** — the message on `yotresultsdistribution.requests`:
   `{ source, requestId, hearingId, hearingDay, sharedTime, eventType,
   userId? }` (`userId` optional; absent, never null). Agreed jointly with
   `cpp-context-results` (the publisher); changes are a cross-team event.
@@ -840,7 +840,7 @@ Its contracts are:
   and what any future consumer of the store will read. Changing it is a
   contract change under this principle even though no other context now
   receives it.
-- **The operations API** — `src/main/resources/courtregister-openapi.yaml`, the third
+- **The operations API** — `src/main/resources/yot-results-distribution-openapi.yaml`, the third
   contract this service **owns** and versions with the repo. It describes every
   `/operations/**` endpoint, its request body, its success shape and every
   bounded `reason` it can refuse under. It is a contract in the full sense of
@@ -860,7 +860,7 @@ Its contracts are:
   - the framework file-service `metadata` + `content` table schema
     (write-only, pinned to liquibase changesets 001–006), used to place the
     PDF payload where systemdocgenerator reads it;
-  - the Azure App Configuration feature flag `CourtRegisterService`, read
+  - the Azure App Configuration feature flag `YotResultsDistributionService`, read
     fail-closed, the same flag the results producer and the legacy triggers
     read — **the one lever** that decides which implementation is live.
 
@@ -883,7 +883,7 @@ Rules:
   rendered PDF it carries the sign-off-before-cutover marker.
 - **One lever.** No configuration value, static-data patch or endpoint MUST
   ever be introduced that decides, independently of the
-  `CourtRegisterService` flag, whether this service or the legacy generates
+  `YotResultsDistributionService` flag, whether this service or the legacy generates
   registers. Every failure to read the flag MUST leave the legacy in charge.
   An operations endpoint that merely lets a person do, over HTTP and under
   their own name, what a `kubectl exec` command already did is **not** a second
@@ -922,7 +922,7 @@ Rules:
     act of the operator, recorded in that environment's configuration — never a
     code default, never inferred from the environment.
   - **(c) Flag-gated at least as strictly as its command was.** An endpoint
-    reads the `CourtRegisterService` flag where the CLI command it replaces
+    reads the `YotResultsDistributionService` flag where the CLI command it replaces
     read it, and MUST NOT read it more permissively or omit the read the
     command made. It MAY be gated **more** strictly than its command, and MUST
     be where being reachable over HTTP turns an unconditional mutation into a
@@ -951,7 +951,7 @@ Rules:
   unaudited pod that said nothing would look exactly like an audited one. The
   service MUST NOT refuse to start on the combination of the operations API
   being enabled and either filter being off, and MUST NOT decide such a rule
-  from a discriminator such as `courtregister.servicebus.namespace`: a pod
+  from a discriminator such as `yotresultsdistribution.servicebus.namespace`: a pod
   configured that way comes up and serves what it was configured to serve. An
   operator who turns a filter off has said what they meant, their environment's
   configuration records it, and a service that will not start on a choice its
@@ -1152,7 +1152,7 @@ to debug it; personal data in a log index is an incident.
   no inline form, in the named ruleset/suppressions file), narrow, and carry a
   reason.
 - **Package root**: `uk.gov.hmcts.cp`; this service's code lives under
-  `uk.gov.hmcts.cp.courtregister`.
+  `uk.gov.hmcts.cp.yotresultsdistribution`.
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`,
   `refactor:`, `test:`, `build:`, `ci:`, `style:`). `build` covers dependency
   and local-tooling changes (dependabot raises them as `build(deps)`), `ci` the
@@ -1180,7 +1180,7 @@ them read it the same way they read everything else.
 - **Java**: 25. **Framework**: Spring Boot 4.1, from
   `hmcts/service-hmcts-crime-springboot-template`.
 - **Ports**: local `8082`; Kubernetes `4550`.
-- **Messaging**: Azure Service Bus queue `courtregister.requests` + its
+- **Messaging**: Azure Service Bus queue `yotresultsdistribution.requests` + its
   dead-letter queue, consumed via `azure-messaging-servicebus`
   `ServiceBusProcessorClient`.
   - Peek-lock, explicit settlement, **`maxDeliveryCount` 5**.
@@ -1212,17 +1212,17 @@ them read it the same way they read everything else.
 - **Outbound (per command)**: the document is validated against the vendored
   `courtRegisterDocument/*` schemas (fix C29) and **recorded** in
   `processed_output` with completion reason `recorded`. The 001 POST to
-  progression is retained only behind `courtregister.output=progression-post`
+  progression is retained only behind `yotresultsdistribution.output=progression-post`
   for the documented fallback sequencing; the default is `record`.
 - **Outbound (per batch)**: a service-owned job at **18:00 Europe/London,
   Mon–Fri** (explicit zone, validated at startup; **ShedLock** so one run
-  proceeds across instances) reads the `CourtRegisterService` flag once, no
+  proceeds across instances) reads the `YotResultsDistributionService` flag once, no
   cache, and skips when OFF or unreadable; otherwise it groups active
   records by (court centre, register date), maps each batch to the PDF
   payload progression's `CourtRegisterPdfPayloadGenerator` produced
   (bug-for-bug, `####` → newline kept), inserts the payload into the shared
   file-service database (write-only role), POSTs `generate-document`
-  (`OEE_Layout5`, `originatingSource = CourtRegisterService`,
+  (`OEE_Layout5`, `originatingSource = YotResultsDistributionService`,
   `sourceCorrelationId = batch_id`; 202 only), and awaits the outcome.
 - **Events**: a durable JMS subscription to the Artemis `public.event` topic
   with a `CPPNAME` selector for `document-available` / `generation-failed`,
@@ -1241,7 +1241,7 @@ them read it the same way they read everything else.
   readiness input only while a run is in progress.
 - **Feature flag**: `com.azure:azure-data-appconfiguration` + workload
   identity (`App Configuration Data Reader`), key
-  `.appconfig.featureflag/CourtRegisterService`, label = stack, 2 s timeout.
+  `.appconfig.featureflag/YotResultsDistributionService`, label = stack, 2 s timeout.
 - **HTTP surface**: Spring Boot Actuator — health, readiness/liveness,
   metrics — **and** the operations API under `/operations/**`. No business
   endpoints (Principle III). Since increment 005 the seven operator actions are
@@ -1252,8 +1252,8 @@ them read it the same way they read everything else.
   (drools rules under `src/main/resources/acl/`, identity from `CJSCPPUID`,
   "Second Line Support" only) and `cp-audit-filter-springboot` (every request
   and response published to the audit context), and is described in
-  `src/main/resources/courtregister-openapi.yaml`. The CLI (`batch/cli/`, the
-  `courtregister.cli` property and the `docker/startup.sh` dispatch) is
+  `src/main/resources/yot-results-distribution-openapi.yaml`. The CLI (`batch/cli/`, the
+  `yotresultsdistribution.cli` property and the `docker/startup.sh` dispatch) is
   **removed**: the image starts the application, full stop.
 - **Test stack**: JUnit Jupiter 6 (the Boot 4.1 test starter) + Mockito
   (unit); golden-file/fixture tests for the ported transformation;
@@ -1311,7 +1311,7 @@ them read it the same way they read everything else.
   request-duration timer and the report's own counters, which complete the four
   instruments; and `report-exceptions`, the sixth operations command. It is not
   on the cutover lever's circuit: it reads the flag nowhere and runs whatever
-  `courtregister.generation.enabled` says. **No `doc/DEFECT-FIXES.md` row is
+  `yotresultsdistribution.generation.enabled` says. **No `doc/DEFECT-FIXES.md` row is
   added or amended** — there is no legacy oracle for a capability that was never
   built, and a new capability is not a deviation from one (Principle I). The
   e-mail output ships switched off in every environment until the
@@ -1331,7 +1331,7 @@ them read it the same way they read everything else.
   or amended.**
 - **005 "operations-rest-api" — current.** The six operations commands become
   seven `/operations/**` endpoints and the CLI is removed. The REST layer is an
-  inbound adapter in `uk.gov.hmcts.cp.courtregister.api` that calls the same
+  inbound adapter in `uk.gov.hmcts.cp.yotresultsdistribution.api` that calls the same
   application services the CLI classes called, moving no logic and adding no
   capability: the same arguments, the same refusals, the same output fields as
   JSON, and the CLI's three exit codes mapped onto status codes (0 → 2xx;

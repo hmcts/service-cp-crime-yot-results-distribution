@@ -18,7 +18,7 @@
 # top-level `_metadata` (whose `name` is the field the listener reads) alongside the payload fields
 # - so the loop closes with no real SDG.
 #
-# `app` runs the generation half against those stubs - `COURTREGISTER_GENERATION_ENABLED=true`, the
+# `app` runs the generation half against those stubs - `YOTRESULTSDISTRIBUTION_GENERATION_ENABLED=true`, the
 # file-service datasource on `fileservice-postgres`, systemdocgenerator, notificationnotify and App
 # Configuration on `wiremock`, the broker on `artemis` - so `docker compose exec app ./startup.sh
 # generate-register|list-batches|check-flag` works as quickstart.md writes it.
@@ -37,18 +37,18 @@ services:
       - "8082:8082"
     environment:
       SERVER_PORT: 8082
-      # Maps to courtregister.servicebus.* @ConfigurationProperties.
-      COURTREGISTER_SERVICEBUS_CONNECTIONSTRING: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
-      COURTREGISTER_SERVICEBUS_QUEUENAME: courtregister.requests
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/courtregister
-      SPRING_DATASOURCE_USERNAME: courtregister
-      SPRING_DATASOURCE_PASSWORD: courtregister
+      # Maps to yotresultsdistribution.servicebus.* @ConfigurationProperties.
+      YOTRESULTSDISTRIBUTION_SERVICEBUS_CONNECTIONSTRING: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      YOTRESULTSDISTRIBUTION_SERVICEBUS_QUEUENAME: yotresultsdistribution.requests
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/yotresultsdistribution
+      SPRING_DATASOURCE_USERNAME: yotresultsdistribution
+      SPRING_DATASOURCE_PASSWORD: yotresultsdistribution
       # A local run is the walking-skeleton shape: the stub adapters, which is what STUB mode
       # exists for. LIVE — the default an environment that says nothing gets — refuses to start
       # without upstream endpoints and a CJSCPPUID identity, deliberately, so a deployed pod
       # cannot boot half-configured. Local compose has neither results nor reference data to call.
-      COURTREGISTER_PAYLOAD_MODE: STUB
-      COURTREGISTER_REFERENCEDATA_MODE: STUB
+      YOTRESULTSDISTRIBUTION_PAYLOAD_MODE: STUB
+      YOTRESULTSDISTRIBUTION_REFERENCEDATA_MODE: STUB
       # The two estate filters, off for the local loop. `application.yaml` defaults BOTH ON
       # (constitution 5.0.0), and this is one of the two places that deliberately turns them off:
       # a laptop has no usersgroups for `cp-auth-rules-filter` to resolve a caller's groups
@@ -60,19 +60,19 @@ services:
       HTTP_AUDIT_ENABLED: "false"
       # Local-only dummy: the submission gateway refuses to construct without an identity, and a
       # local run POSTs nothing. Never a real user id.
-      COURT_REGISTER_SYSTEM_USER_ID: 00000000-0000-0000-0000-000000000000
+      YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID: 00000000-0000-0000-0000-000000000000
       # The generation half, on, against the stubs below. Enabling it makes every setting under it
       # required at startup - the file-service datasource, the flag endpoint and label, the two
       # downstream endpoints, the e-mail template id and the broker - which is the whole reason
       # they are all named here rather than left to be discovered at 18:00.
-      COURTREGISTER_GENERATION_ENABLED: "true"
+      YOTRESULTSDISTRIBUTION_GENERATION_ENABLED: "true"
       # The REAL App Configuration reader, pointed at the WireMock `kv` stub. local-test and not
       # STUB: what runs here is the deployed reader, the deployed SDK client and the deployed
       # fail-closed parsing, with only the identity swapped for a published pair the stub does not
       # check - the SDK sends a credential's token over TLS alone, so a pod's own identity cannot
       # read a plain-HTTP stand-in at all. Startup refuses this value against a real
       # .azconfig.io store or on a pod with a Service Bus namespace.
-      COURTREGISTER_FEATURE_CREDENTIAL: local-test
+      YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL: local-test
       APPCONFIG_ENDPOINT: http://wiremock:8080
       # The label the committed mappings answer under (docker/wiremock/README.md).
       STACK_LABEL: LOCAL
@@ -96,25 +96,25 @@ services:
       ARTEMIS_BROKER_URL: tcp://artemis:61616
       ARTEMIS_USER: admin
       ARTEMIS_PASSWORD: admin
-      # The 07:00 Europe/London weekday report. Independent of COURTREGISTER_GENERATION_ENABLED:
+      # The 07:00 Europe/London weekday report. Independent of YOTRESULTSDISTRIBUTION_GENERATION_ENABLED:
       # the report is a read of this service's own store and must keep running on a pod that
       # generates nothing, which is what makes an intake-only deployment alertable. Its window
       # needs no setting: a run reports from the previous scheduled run to now, so Monday reads
       # back to Friday and nothing falls between two windows.
-      COURTREGISTER_REPORT_ENABLED: "true"
+      YOTRESULTSDISTRIBUTION_REPORT_ENABLED: "true"
       # The intake gauges refresh on this interval in every service JVM that is not a command,
       # whether or not the report or the generation half is enabled, and under no lock: a gauge
       # describes the JVM that publishes it, so alerts aggregate across pods with max(). Ten
       # minutes by default.
-      COURTREGISTER_INTAKE_GAUGE_REFRESH: 10m
+      YOTRESULTSDISTRIBUTION_INTAKE_GAUGE_REFRESH: 10m
       # The e-mail output, switched separately from the Log Analytics output. On locally so the
       # WireMock notificationnotify stub is exercised; off in every environment until the
       # notificationnotify team provides the template.
-      COURTREGISTER_REPORT_EMAIL_ENABLED: "true"
+      YOTRESULTSDISTRIBUTION_REPORT_EMAIL_ENABLED: "true"
       # Local-only dummies. Never a real template id and never a real address: in a deployed
       # environment both arrive from Key Vault through the CSI driver.
       CR_REPORT_TEMPLATE_ID: 22222222-2222-2222-2222-222222222222
-      COURTREGISTER_REPORT_RECIPIENTS: support@example.invalid
+      YOTRESULTSDISTRIBUTION_REPORT_RECIPIENTS: support@example.invalid
 
   # The service's own store. Flyway runs at the application's start-up, not here.
   #
@@ -130,13 +130,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: courtregister
-      POSTGRES_USER: courtregister
-      POSTGRES_PASSWORD: courtregister
+      POSTGRES_DB: yotresultsdistribution
+      POSTGRES_USER: yotresultsdistribution
+      POSTGRES_PASSWORD: yotresultsdistribution
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U courtregister -d courtregister"]
+      test: ["CMD-SHELL", "pg_isready -U yotresultsdistribution -d yotresultsdistribution"]
       interval: 5s
       timeout: 5s
       retries: 10

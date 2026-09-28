@@ -1,9 +1,9 @@
-# Tasks: Court Register Service — full pipeline port, fix-first
+# Tasks: YOT Results Distribution Service — full pipeline port, fix-first
 
 > **Historical note (2026-09-05):** this increment is complete. Its tasks reference `doc/TECHNICAL_DESIGN.md`,
 > `doc/API_CONTRACTS.md`, `doc/SOLUTION_BRIEF.md`, `doc/CHANGELOG.md` and `doc/openapi.yaml`, which were
 > retired from the repo on that date — the design narrative lives on Confluence
-> ([Court Register Service](https://tools.hmcts.net/confluence/spaces/CRA/pages/2004104319/Court+Register+Service)).
+> ([YOT Results Distribution Service](https://tools.hmcts.net/confluence/spaces/CRA/pages/2004104319/Court+Register+Service)).
 > The task text is left as written; `doc/DEFECT-FIXES.md` remains.
 
 **Input**: Design documents from `/specs/001-court-register-port/`
@@ -27,9 +27,9 @@ their commits record verification evidence instead of a red assertion.
 assembled end-to-end behaviour, the container, the differential audit). No implementation task
 follows them and no red run is required; the task records the initial observed result.
 
-**Conventions**: package root `uk.gov.hmcts.cp.courtregister`; production code under
-`src/main/java/uk/gov/hmcts/cp/courtregister/`, tests under
-`src/test/java/uk/gov/hmcts/cp/courtregister/`; legacy sources referenced as `$DF` =
+**Conventions**: package root `uk.gov.hmcts.cp.yotresultsdistribution`; production code under
+`src/main/java/uk/gov/hmcts/cp/yotresultsdistribution/`, tests under
+`src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/`; legacy sources referenced as `$DF` =
 `cpp-context-azure-legalaidagency/azure-functions/durable-functions`. `*IT` suites need Docker and
 run inside `./gradlew test`. Conventional Commits on `main`; no AI attribution. **Every task that
 lands a C-fix updates that row of `doc/DEFECT-FIXES.md` (status → FIXED, pinning test confirmed)
@@ -65,7 +65,7 @@ in the same commit.**
 - [x] T005 [P] Shared test fixtures cloned from IR-REPO `support/`: `PostgresTestSupport`,
       `ServiceBusEmulatorTestSupport` (mounting `docker/servicebus-emulator/config.json`),
       `RedisTestSupport`, `ServiceTestSupport` (court-register properties), `AdjustableClock`,
-      `CapturedLog`, plus `application-test.yaml` (`courtregister.consumer.enabled=false`,
+      `CapturedLog`, plus `application-test.yaml` (`yotresultsdistribution.consumer.enabled=false`,
       datasource excluded, readiness `ping`). Verify with a trivial context test.
 - [x] T006 [P] Comparator vendored: `comparator-vectors/vectors.json`, `support/JsonParity`,
       `support/ComparatorContractTest`, `support/JsonParityTest` from IR-REPO (domain-independent;
@@ -88,15 +88,15 @@ in the same commit.**
 - [x] T008 [P] [US2] Write `domain/RequestFingerprintTest` (red; seam: `RequestFingerprint`) —
       canonicalisation (uppercase-hex UUID, offset-vs-Z instants, fractional seconds), changed
       immutable field changes the hash.
-- [x] T009 [P] [US4] Write `config/ConfigurationValidationTest` (red; seams: `CourtRegisterProperties`
-      + `PropertiesValidator` signatures) — every `courtregister.*` property/default in the plan's
+- [x] T009 [P] [US4] Write `config/ConfigurationValidationTest` (red; seams: `YotResultsDistributionProperties`
+      + `PropertiesValidator` signatures) — every `yotresultsdistribution.*` property/default in the plan's
       Configuration table binds; deadline < lease; renewal margin; exactly-one credential source;
       LIVE requires system-user-ids; stub-refused-when-namespace; worst-case fetch + submission
       arithmetic; `submission.validate-outbound` refused false when a namespace is set.
 - [x] T010 [P] [US4] Write `config/ProcessingMetricsTest` (red; seam: `ProcessingMetrics`) — one
-      case per instrument incl. `courtregister_completions_total{reason}` for the five reasons,
-      `courtregister_deadlettered_total{reason}`, and
-      `courtregister_transformation_anomalies_total{reason}` (the C19/C20/C27 anomaly metric).
+      case per instrument incl. `yotresultsdistribution_completions_total{reason}` for the five reasons,
+      `yotresultsdistribution_deadlettered_total{reason}`, and
+      `yotresultsdistribution_transformation_anomalies_total{reason}` (the C19/C20/C27 anomaly metric).
 - [x] T011 [P] [US1] Write `persistence/SchemaMigrationIT` (red) — every data-model V1 fact,
       including the `processed_output` court-register columns, `UNIQUE (source, request_id)`,
       `response_code`, `anomaly_summary` (nullable text, the C19/C20/C27 bounded-count field),
@@ -108,7 +108,7 @@ in the same commit.**
       `inbound/DistributionCommandParser`, `config/JacksonConfig`,
       `src/main/resources/contracts/distribution-command.schema.json` (green for T007).
 - [x] T013 [US2] Implement `domain/RequestFingerprint` (green for T008).
-- [x] T014 [US4] Implement `config/CourtRegisterProperties` + `config/PropertiesValidator` (green
+- [x] T014 [US4] Implement `config/YotResultsDistributionProperties` + `config/PropertiesValidator` (green
       for T009).
 - [x] T015 [US4] Implement `config/ProcessingMetrics` (green for T010).
 - [x] T016 [US1] Write `src/main/resources/db/migration/V1__create_processed_log.sql` per
@@ -143,8 +143,8 @@ in the same commit.**
 - [x] T021 [P] [US1] Write the emulator suite (red): `QueueSettlementIT`,
       `ContractValidationDeadLetterIT`, `DeliveryExhaustionIT`, `DuplicateDetectionIT`,
       `StoreOutageIT`, `ProlongedStoreOutageIT`, `ReadinessPolicyIT`, `StartupWithQueueDownIT`,
-      `QueueOutageRecoveryIT` — against queue `courtregister.requests` with a stub pipeline.
-- [x] T022 [US1] Implement `inbound/ServiceBusConsumerConfig`, `inbound/CourtRegisterMessageListener`,
+      `QueueOutageRecoveryIT` — against queue `yotresultsdistribution.requests` with a stub pipeline.
+- [x] T022 [US1] Implement `inbound/ServiceBusConsumerConfig`, `inbound/YotResultsDistributionMessageListener`,
       `inbound/ConsumerLifecycleController`, `inbound/StoreGate` impl,
       `application/DistributionPipeline` skeleton wired to stub ports,
       `config/{DeferredFlywayMigration,IntakeStartupHealth(+Indicator),ServiceBusHealthIndicator}`,
@@ -454,7 +454,7 @@ vocabulary and matching semantics.
       rule for a caller already holding the array; `Json.array` delegates to it and no behaviour
       moved. `pmdMain` was **red at the start of this task** with six violations and is green at the
       end: four were the seam fields these bodies now use, and the two genuinely pre-existing ones
-      (`CourtRegisterProperties` duplicate `@DefaultValue` literal, `NoRegisterReason` field/method
+      (`YotResultsDistributionProperties` duplicate `@DefaultValue` literal, `NoRegisterReason` field/method
       name) took narrow inline suppressions with reasons. `OutboundContractValidator`'s unused
       `json` field carries a suppression that says it comes off with T055's body.)*
 - [x] T055 [US3] Implement `adapter/progression/OutboundContractValidator` (green T052) — updates
@@ -784,13 +784,13 @@ documentation-final states.
       *(done — the seed is out and all 22 of T068's cases are green. Four things this task settled.
       **(1) The bean graph needed no widening.** Every port the pipeline takes now has a real
       adapter behind it, and none of them is declared here: each is a pair of configurations chosen
-      by a mode — payload by `courtregister.payload.mode`, subscriptions by
-      `courtregister.referencedata.mode`, submission by the payload mode, the processed log by
+      by a mode — payload by `yotresultsdistribution.payload.mode`, subscriptions by
+      `yotresultsdistribution.referencedata.mode`, submission by the payload mode, the processed log by
       `ProcessedLogConfig` — with `PropertiesValidator` deciding which of each pair may be chosen.
       What this task did to `PipelineConfig` is say so: its class note still described the live
       adapters as arriving "later", which had stopped being true at T066/T067, and a configuration
       whose comment describes a graph that no longer exists is the next reader's wrong turn.
-      **(2) `courtregister.submission.validate-outbound` reads nothing, deliberately, and now says
+      **(2) `yotresultsdistribution.submission.validate-outbound` reads nothing, deliberately, and now says
       so.** The key binds and startup refuses `false` where the deployed credential source is in
       use — which is all `ConfigurationValidationTest` and the plan's configuration table ever asked
       of it — but `PropertiesValidator`'s own javadoc claimed local runs could switch the check off
@@ -799,7 +799,7 @@ documentation-final states.
       that turns a swallowed 400 into a recorded failure, and the suite that needs an invalid shape
       on the wire has one over WireMock in `ProgressionCommandGatewayTest`. Recorded here because it
       is a decision, not an omission — the alternative reading is a one-method change.
-      **(3) `application.yaml` is final.** `courtregister.referencedata.headers` was the one setting
+      **(3) `application.yaml` is final.** `yotresultsdistribution.referencedata.headers` was the one setting
       the file never mentioned, bound since T066; it is documented beside its progression twin,
       including that a header configured under a contract name replaces the contract value. The
       retry-policy keys renamed in the shared-`RetryPolicy` remediation were already correct here
@@ -812,7 +812,7 @@ documentation-final states.
       assertion now drops comment lines before matching, because a block that documents why nothing
       here may be set to DEBUG is the opposite of the block it refuses, and a matcher that could not
       tell the two apart would punish the file for explaining itself.)*
-- [x] T069 [A] [US1] `e2e/CourtRegisterEndToEndIT` — message → POST(202) → COMPLETED `submitted`,
+- [x] T069 [A] [US1] `e2e/YotResultsDistributionEndToEndIT` — message → POST(202) → COMPLETED `submitted`,
       `processed_output.status = POSTED`; one case per no-op reason; runs the quickstart sequence.
       *(done — five cases, all green on introduction and recorded as the observed result rather than
       claimed as a red run. Four things this task settled.

@@ -54,7 +54,7 @@ and adds one dated sentence saying the mechanism changed in 004. The row's legac
 behaviour, rationale and status are untouched. `RegisteredDefectFixes` and `DifferentialAuditTest`
 stay green throughout.
 
-**Conventions**: package root `uk.gov.hmcts.cp.courtregister`; production under
+**Conventions**: package root `uk.gov.hmcts.cp.yotresultsdistribution`; production under
 `src/main/java/…`, tests under `src/test/java/…`. `*IT` suites need Docker and run inside
 `./gradlew test`. Conventional Commits on `004-release-stale-batches`; accepted types `feat`, `fix`,
 `chore`, `docs`, `test`, `refactor`, `build`, `ci`, `style`. No AI attribution anywhere. **Every phase
@@ -113,10 +113,10 @@ each of the four below is a blocking prerequisite for every user story.
       (extend) — the renamed setting, the new one, the removed one and the un-borrowed one.
       `stale_after_defaults_to_thirty_minutes`; `a_zero_stale_after_refuses_to_start` and
       `a_negative_stale_after_refuses_to_start`, each asserting the message names
-      `courtregister.generation.stale-after`; `batch_age_refresh_defaults_to_ten_minutes` and
+      `yotresultsdistribution.generation.stale-after`; `batch_age_refresh_defaults_to_ten_minutes` and
       `a_non_positive_batch_age_refresh_refuses_to_start` naming
-      `courtregister.generation.batch-age-refresh`; `the_completion_setting_is_no_longer_bound`,
-      which sets `courtregister.generation.completion=poll-only` and asserts the context binds no
+      `yotresultsdistribution.generation.batch-age-refresh`; `the_completion_setting_is_no_longer_bound`,
+      which sets `yotresultsdistribution.generation.completion=poll-only` and asserts the context binds no
       such value; and in `ReportPropertiesTest`,
       `batch_generated_within_defaults_to_ten_minutes_without_reading_the_generation_half`, over a
       context whose `stale-after` is `30m` — the case that would otherwise have silently tripled the
@@ -237,10 +237,10 @@ each of the four below is a blocking prerequisite for every user story.
       `config/ProcessedLogConfig` (the report's rendering limit is now `report.batchGeneratedWithin()`
       rather than the deleted resolution), `config/GenerationConfig` and `batch/GenerationReconciler`
       (the transitional reconciler's `@Scheduled` placeholder is re-pointed at
-      `${courtregister.generation.stale-after}`, so its cadence is thirty minutes until T022 deletes
+      `${yotresultsdistribution.generation.stale-after}`, so its cadence is thirty minutes until T022 deletes
       it, and `GenerationReconcilerTest`'s placeholder assertion follows).
       `PropertiesValidator.validateReport` loses its `GenerationProperties` parameter, which nothing
-      in it read any more, and `CourtRegisterProperties`'s javadoc reference to the grace period is
+      in it read any more, and `YotResultsDistributionProperties`'s javadoc reference to the grace period is
       re-pointed.
       **Two files of the other tree's had to be touched, and they are named here rather than left
       to the diff** (recorded at gate round 1 of the increment gate, 2026-09-21, having been
@@ -1118,7 +1118,7 @@ than deferred to a caller.
   "current transaction is aborted" exactly as the finding predicted, and with it the released
   batch's ending, its stamps and both halves of the account.
   **Green** (`51307fd`): `flock -w 7200 … ./gradlew test --tests
-  'uk.gov.hmcts.cp.courtregister.persistence.*' -Dtest.noFailFast=true` BUILD SUCCESSFUL, **427
+  'uk.gov.hmcts.cp.yotresultsdistribution.persistence.*' -Dtest.noFailFast=true` BUILD SUCCESSFUL, **427
   tests, 0 failures, 0 errors**, with `checkstyleMain` and `pmdMain` green.
   The round stands the released batch on the **earlier** day — the reverse of the exhaustion
   round's staging — so it is walked *before* the batch no attempt can release, and reads every row
@@ -1195,7 +1195,7 @@ older statements beside it did not.
   `PlatformTransactionManager` whose `getTransaction` throws): `flock -w 7200 … ./gradlew test
   --tests '*StoreOutageTest*' -Dtest.noFailFast=true` → **8 tests completed, 1 failed**, one
   assertion and no compile error — "Expecting actual throwable to be an instance of:
-  uk.gov.hmcts.cp.courtregister.domain.StoreUnavailableException but was:
+  uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException but was:
   org.springframework.transaction.CannotCreateTransactionException".
   **Green**: the same command with `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest`
   beside it, BUILD SUCCESSFUL, **8 of 8**, all four analysis tasks green. The branch is the outage
@@ -1281,7 +1281,7 @@ durations and a clock. No Spring context, no Docker.
       as one.** FR-003a says a contended batch is "counted by the pass's line and its counter", and
       the design rules say a path that leaves something undone moves one; `data-model.md`'s
       instrument table named only the two released totals. So
-      `courtregister_generation_contended_total` is added beside them, unlabelled - a batch id may
+      `yotresultsdistribution_generation_contended_total` is added beside them, unlabelled - a batch id may
       never be a series (cardinality, and privacy on a register whose every defendant is a child) -
       and `data-model.md` gains its row at T012.
       `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest` green.)
@@ -1325,7 +1325,7 @@ durations and a clock. No Spring context, no Docker.
       suppress a rule to stay minimal. Both cutoffs are `clock.instant()`, which is exactly what
       T013 is red against.
       **Three counters, and the third is the deviation T011's record states**: the released batches,
-      the released registers and `courtregister_generation_contended_total`. Every run moves all
+      the released registers and `yotresultsdistribution_generation_contended_total`. Every run moves all
       three, by nought where it released nothing, so the series exist to be alerted on from the
       first quiet night rather than appearing the first time something goes wrong.
       **The pass's own lines**: one INFO per released batch naming the batch, the court centre and
@@ -1522,7 +1522,7 @@ numbers.
       `the_releaser_takes_the_two_durations_and_not_the_whole_record`. Red: no such bean.
       **The command JVM is a nested context of its own**, because a nested `@SpringBootTest` does
       **not** inherit the enclosing one's `properties` — the first attempt loaded a pod configured
-      with nothing but `courtregister.cli=true` and failed to start. The outer list is now named
+      with nothing but `yotresultsdistribution.cli=true` and failed to start. The outer list is now named
       constants that both annotations share, so the pair differs by that one property and by
       nothing else, which is what makes the absence attributable to it.
       **Red** (`flock -w 7200 … ./gradlew test --tests '*GenerationWiringContextTest*'
@@ -1556,9 +1556,9 @@ numbers.
       the javadoc saying — where it says what **does** add up — that these two do not, because the
       registers they count are re-batched by the same run and are already inside `rows()`. Retire
       `GENERATION_RECONCILED` and `reconciled()`; add
-      `courtregister_generation_released_batches_total` and `_released_registers_total`.
+      `yotresultsdistribution_generation_released_batches_total` and `_released_registers_total`.
       **What Phase 3 had already landed**, per the gate record above: both released counters and
-      `courtregister_generation_release_contended_total` already existed and are already exercised,
+      `yotresultsdistribution_generation_release_contended_total` already existed and are already exercised,
       so this task is the line and the retirement. The record and `RunTally` moved with T017's
       seam; what landed here is the format string's three keys, the paragraph in `recorded(...)`
       that says the two released numbers are in neither account and what `contended` means, the
@@ -1566,7 +1566,7 @@ numbers.
       described the retired series.
       **The retirement is pinned by absence** (added in gate round 1):
       `GenerationMetricsTest.Surface.no_series_should_be_named_for_the_retired_reconciler` asserts
-      that no `courtregister_generation_reconciled_total` meter is registered after
+      that no `yotresultsdistribution_generation_reconciled_total` meter is registered after
       `exerciseEveryInstrument()`, and — reflectively — that `GenerationMetrics` declares no
       `GENERATION_RECONCILED` field and no `reconciled()` method. The surface case above could not
       carry the claim: it lists what `exerciseEveryInstrument` exercises, so a re-added
@@ -1628,7 +1628,7 @@ schedule on the generation half; from here there is exactly one.
 -Dtest.noFailFast=true`): **45 tests completed, 2 failed**, both assertions and neither a compile
 error — `the_reconciler_should_carry_no_timer_of_its_own` ("expected: null but was:
 @org.springframework.scheduling.annotation.Scheduled(scheduler=\"registerGenerationScheduler\",
-… fixedDelayString=\"${courtregister.generation.stale-after}\")") and
+… fixedDelayString=\"${yotresultsdistribution.generation.stale-after}\")") and
 `no_method_on_the_reconciler_should_be_scheduled` ("Expecting empty but was:
 [\"reconcileScheduled\"]"). **Green** (the same command plus `*CliModeConfigTest*`,
 `*ReportSchedulingConfigTest*` and `*GenerationWiringContextTest*`): BUILD SUCCESSFUL, 0 failures —
@@ -1665,7 +1665,7 @@ imports they needed went in gate round 1, and `@SchedulerLock` is kept only beca
 `ExceptionReportJobTest` still asserts the report's lock differs from `LOCK_NAME`; and
 `GenerationReconcilerTest` keeps four cases renamed to what they now claim, the counter assertions
 having gone with the series. **Its two gauges are now set by nothing between runs** —
-`courtregister_oldest_generating_age` and `_oldest_generated_age` were refreshed by the timer and
+`yotresultsdistribution_oldest_generating_age` and `_oldest_generated_age` were refreshed by the timer and
 the run stopped calling `reconcile()` at T016 — which is the gap FR-011 names and Phase 6's
 `BatchAgeSweep` (T024-T026) closes. A gauge that stands still is a reading nobody is owed tonight;
 a register stranded in a dead batch is a court centre that never gets its document, so the trade is
@@ -1677,7 +1677,7 @@ the right way round and it is named here so Phase 6 does not have to rediscover 
   `GenerationReconcilerTest.ItsOwnSchedule` that asserted the schedule now assert its absence, and
   `SchedulingConfig`'s prose about two surfaces sharing `GENERATION_SCHEDULER` follows.
 * **`spec.md` FR-009 (MEDIUM).** Amended to name all three run-line keys, to say that none of them
-  is a third sum and why, and to tie `contended=` to `courtregister_generation_contended_total`,
+  is a third sum and why, and to tie `contended=` to `yotresultsdistribution_generation_contended_total`,
   citing the coordinator's decision of 2026-09-20 as `data-model.md` does. The ambiguity-scan answer
   it belongs to carries the same note. The decision had been recorded in `plan.md` and
   `data-model.md` only, so the document the increment treats as outliving the decision disagreed
@@ -1761,7 +1761,7 @@ values on every pass.
       written. It is asserted anyway because it is the one of the three that says what FR-007 asks
       for in the end state - one wall-clock decision about a batch, and no second. Its first
       expectation named the 07:00 report's cron beside the run's and failed on a context that does
-      not carry it (`courtregister.report.enabled` is unset in this pair, so `ReportSchedulingConfig`
+      not carry it (`yotresultsdistribution.report.enabled` is unset in this pair, so `ReportSchedulingConfig`
       contributes nothing); the expectation was narrowed to the run's own cron, which is what "the
       generation half carries exactly one" means on this context.
 - [X] T024 [US4] `application/DocumentRendererTest` (new, reflection) and
@@ -1795,12 +1795,12 @@ values on every pass.
 
       **No red was available, and the task is recorded as a characterisation.** The red the task
       predicted had already been spent: `39b6aeaf` (Phase 1, T002) retired
-      `courtregister.generation.completion` from `GenerationProperties` and dropped the conjunct
+      `yotresultsdistribution.generation.completion` from `GenerationProperties` and dropped the conjunct
       from `PropertiesValidator`'s broker rule in the same commit that renamed the grace period, so
       by the time this task opened neither half of the predicted failure could be produced without
       first putting the setting back. Both cases are therefore green on introduction and are
       asserted anyway, because what they state is what T027 must not undo: the subscription starts
-      on `courtregister.generation.enabled` and on nothing else, and the broker rule has one
+      on `yotresultsdistribution.generation.enabled` and on nothing else, and the broker rule has one
       antecedent.
 
       `a_generation_enabled_context_subscribes_without_being_told_to` is stated over the
@@ -1879,7 +1879,7 @@ values on every pass.
 - [X] T023 [US4] `batch/RunCorrelation.java`, `persistence/RegisterBatchRepository.java`,
       `application/{DocumentOutcomeSink,RegisterNotifierService,NotificationDisposition,NotificationSummary}.java`,
       `domain/{BatchStatus,RegisterBatch}.java`, `config/{SchedulingConfig,SchedulingInfrastructureConfig,
-      ProcessedLogConfig,CourtRegisterProperties}.java`,
+      ProcessedLogConfig,YotResultsDistributionProperties}.java`,
       `adapter/publicevents/DocumentEventListener.java` — **the javadoc and comment sweep**. Every
       place that names the reconciler, the grace period or the query now names what is there instead.
       `RunCorrelation`'s "two independently scheduled units … and the first calls into the second"
@@ -1924,7 +1924,7 @@ values on every pass.
       the contract is about a rebase collision and not about how many lines an edit is. The hunk is
       reverted to `3c0fbeb0` at `a71ab390`, which leaves that file naming the grace-period
       reconciler and the three schedules until the owning tree applies the wording — the two
-      sentences are in the revert's commit body for it to take. `config/CourtRegisterProperties`
+      sentences are in the revert's commit body for it to take. `config/YotResultsDistributionProperties`
       and the one `docker-compose.yml` comment are in neither tree's list; both are kept, because
       the paragraphs they change are about the generation half's `stale-after` and the local stub
       of the generation half, and the coordinator is asked to assign them to 004 (open point).
@@ -2051,7 +2051,7 @@ scope and rule paragraphs, which this tree does not own, and T044 covers them in
    document or no instant, and a `generation-failed` with no instant, were acknowledged, dropped
    and counted nowhere. Test-first at `ef4afda0` (red: `expected 1.0 but was -1.0`), green at
    `3df47ef3`: one new bounded reason, `incomplete-outcome`, on
-   `courtregister_public_events_ignored_total`, with two cases beside the other five reasons in
+   `yotresultsdistribution_public_events_ignored_total`, with two cases beside the other five reasons in
    `DocumentEventListenerTest`. It is **not** Phase 7's `terminal-batch`, which is the sink's
    refused-transition drop; T033/T034 are untouched and still owe their own reason.
 5. **Comments the sweep missed** (LOW) — `docker-compose.yml`'s sdg-echo note and
@@ -2075,7 +2075,7 @@ Checkstyle, PMD and the coverage verification all ran; none was loosened.
 **Left standing, with the reason.** The `spring.jms` `subscription-durable` comment still says "the
 reconciler is the safety net, not the transport": it is outside the two `application.yaml` blocks
 this tree owns and the reviewer that raised it asked for an owner rather than a silent fix.
-`config/CourtRegisterProperties` and `docker-compose.yml` are in neither tree's ownership list and
+`config/YotResultsDistributionProperties` and `docker-compose.yml` are in neither tree's ownership list and
 their edits are kept - both paragraphs are about the generation half - with an assignment to 004
 asked of the coordinator. `doc/DEFECT-FIXES.md`'s P2 cell still names the deleted
 `GenerationReconcilerTest` case; T045 owns it, and the pointer to it two sections above this one
@@ -2373,7 +2373,7 @@ claim. T028 runs after them, not before, so the suite it characterises is the fi
       compiler forced them; `GenerationFailureEndToEndIT` and `GenerationMetricsTest` were already
       re-pointed there and each now carries an explicit statement that the mechanism is gone
       (`no_series_should_be_named_for_the_retired_reconciler`, and the class javadoc saying the
-      three release counters stand where `courtregister_generation_reconciled_total` stood). What
+      three release counters stand where `yotresultsdistribution_generation_reconciled_total` stood). What
       was left everywhere was **prose describing a live mechanism that is not there**, which in this
       repository is a defect and not a tidy-up.
       * `persistence/RegisterBatchRepositoryIT` — the bulk of it. `GRACE_EDGE` becomes `AGE_CUTOFF`
@@ -2394,7 +2394,7 @@ claim. T028 runs after them, not before, so the suite it characterises is the fi
       * `support/GeneratedRegisters` — `hasBeenWaitingFor`'s javadoc explained itself as the only
         way to reach the grace-period reconciler without shortening the grace period; it is now the
         only way to reach the staleness rule without shortening
-        `courtregister.generation.stale-after`, which is the same argument about the setting that
+        `yotresultsdistribution.generation.stale-after`, which is the same argument about the setting that
         exists.
       * `support/GenerationLegs` — the leg's one-line summary still had the outcome coming back
         "by topic or by query".
@@ -2476,7 +2476,7 @@ tree owns the file:
   several "the six commands" comments are **not** touched: those count statuses and CLI commands,
   both of which are unchanged.
 * **the retired query** — `config/LiveGenerationConfig` ("served by systemdocgenerator's command
-  API", not "command and query APIs") and `config/CourtRegisterProperties` (the endpoints comment
+  API", not "command and query APIs") and `config/YotResultsDistributionProperties` (the endpoints comment
   no longer lists `document/{id}`, which FR-006 removed).
 * **the reconciler** — `docker/sdg-echo/sdg-echo.py`'s header,
   `adapter/systemdocgenerator/SystemDocGeneratorClient`'s undefined-success comment, and
@@ -2495,7 +2495,7 @@ row, where the printed-table half of the `BATCH_RELEASED` case is discharged the
 names the deleted `GenerationReconcilerTest` case and promises the `GENERATION_TIMED_OUT` half of
 that fix, which is now doubly stale — T045 owns it. `.claude/agents/spec-validator.md` still names
 the reconciler in its read-these-files list and its outcome-is-learned rule (T044, Phase 9).
-`config/CourtRegisterProperties`, `application.yaml`'s `spring.jms` block and `docker-compose.yml`
+`config/YotResultsDistributionProperties`, `application.yaml`'s `spring.jms` block and `docker-compose.yml`
 are in neither tree's explicit ownership list and are edited here as comment-only corrections to
 mechanisms 004 removed; the coordinator is still asked to assign them to 004. `README.md`'s
 `## Status` section sits beside the same question: the increment-002 bullet edited here is in
@@ -2587,9 +2587,9 @@ whatever the last reconciliation saw and go on looking live.
       does not hide a bug of ours inside an outage of theirs — and
       `the_sweep_opens_its_own_run_id_and_removes_it`, which is T030's `RunCorrelation.under(...)`
       stated as a case rather than as a sentence. The instrument is
-      `courtregister_batch_sweep_failures_total{reason}` on `GenerationMetrics`, which a test cannot
+      `yotresultsdistribution_batch_sweep_failures_total{reason}` on `GenerationMetrics`, which a test cannot
       name before it exists: the generation half's twin of
-      `courtregister_intake_sweep_failures_total`, its own series because a pod with the generation
+      `yotresultsdistribution_intake_sweep_failures_total`, its own series because a pod with the generation
       half switched off publishes one of them and not the other. `GenerationMetricsTest`'s two
       surface cases gain the name in the same commit, so "exercising everything registers exactly
       the documented instruments" stays a claim about all of them.
@@ -2611,7 +2611,7 @@ whatever the last reconciliation saw and go on looking live.
       --tests '*ReportSchedulingConfigTest*' --tests '*CliModeConfigTest*' -Dtest.noFailFast=true`,
       **46 tests, 11 failed**, 0 errors — every failure an assertion. Five of the eleven are T029's
       seam, still refusing; the six this task adds are the three reds it names and the three halves
-      they are stated in. "expected: \"${courtregister.generation.batch-age-refresh}\" but was:
+      they are stated in. "expected: \"${yotresultsdistribution.generation.batch-age-refresh}\" but was:
       null" and "expected: \"batchSweepScheduler\" but was: null" for the annotation;
       "Expecting empty but was: [\"batchSweepConfig\"]" for the exclusion; and "Expected size: 4
       but was: 3 in: [registerGenerationScheduler, exceptionReportScheduler, intakeSweepScheduler]"
@@ -2620,7 +2620,7 @@ whatever the last reconciliation saw and go on looking live.
       the four reds possible: a class carrying only `BATCH_SWEEP_SCHEDULER` would have made the
       exclusion case green by accident, because a bean that is nowhere declared is absent from a
       command JVM for the wrong reason. So `config/BatchSweepConfig` lands at T031 declaring the
-      sweep bean behind `courtregister.generation.enabled` and **no** scheduler bean and **no**
+      sweep bean behind `yotresultsdistribution.generation.enabled` and **no** scheduler bean and **no**
       CLI-mode condition; T032 adds both. The exclusion is asserted twice over - the beans' absence
       from the CLI context, and the `@Conditional` itself by reflection - because an absence alone
       cannot tell a condition that is right from a configuration that was never imported.
@@ -2687,7 +2687,7 @@ ran and all passed, none of them loosened. Twelve cases more than Phase 5's 3648
 
 **One thing landed early, and it is named rather than left to the diff.** The first phase-close
 build was red on `TelemetryPrivacyTest`'s "the drive above moved every meter the downstream half
-can publish": `courtregister_batch_sweep_failures_total` existed and nothing drove it. That
+can publish": `yotresultsdistribution_batch_sweep_failures_total` existed and nothing drove it. That
 assertion is the existing test going red at the arrival of production code, so the fix belongs in
 this phase — `support/GenerationLegs` gains `theBatchAgeRefresh()` (the parked-batch WARN and both
 absorbed arms) and `BatchAgeSweep` joins `THE_LEGS`, and `boundedLabelVocabulary()` gains
@@ -2722,7 +2722,7 @@ from being sent after something already put right.
       **The seam is the instrument**: `GenerationMetrics.TERMINAL_BATCH` and
       `terminalBatchIgnored()`, which a test cannot name before they exist. No surface case in
       `GenerationMetricsTest` moves, because the meter is
-      `courtregister_public_events_ignored_total` and only a seventh bounded reason is new;
+      `yotresultsdistribution_public_events_ignored_total` and only a seventh bounded reason is new;
       `TelemetryPrivacyTest`'s bounded vocabulary picks the constant up by reflection.)
 - [x] T035 `application/ExceptionReportServiceTest` (extend) and
       `batch/cli/ReportExceptionsCliTest` (extend) — **FR-019**.
@@ -2751,7 +2751,7 @@ from being sent after something already put right.
 ### Implementation
 
 - [x] T034 [US3] `application/DocumentOutcomeSinkImpl.java`, `config/GenerationMetrics.java` — make
-      T033 green. The refused-transition branch counts `courtregister_public_events_ignored_total`
+      T033 green. The refused-transition branch counts `yotresultsdistribution_public_events_ignored_total`
       under a new bounded reason `terminal-batch`, beside the WARN it already writes. The constant's
       javadoc says why it exists and why it is not one of the notification counter's late-* labels,
       which describe two notifiers racing over one recipient and are a different event entirely.
@@ -2882,7 +2882,7 @@ VII.
       **T040's work had already landed, and Phase 6's close is where it is recorded.** The drive was
       not updated here because it could not wait until here: the moment `BatchAgeSweep` existed,
       `TelemetryPrivacyTest`'s standing claim that the drive moves every meter the downstream half
-      can publish went red on `courtregister_batch_sweep_failures_total`, and that is an existing
+      can publish went red on `yotresultsdistribution_batch_sweep_failures_total`, and that is an existing
       assertion failing at the arrival of production code rather than a task deferred. So Phase 6
       gave `GenerationLegs` `theBatchAgeRefresh()`, put `BatchAgeSweep` into `THE_LEGS` and added
       `SweepFailureReason`'s two codes to the bounded vocabulary, and said so in its close.
@@ -3141,14 +3141,14 @@ what this phase added: T037's one, T038's two and T039's one.
       whole request journal was
 
       ```text
-      ["/kv/.appconfig.featureflag%2FCourtRegisterService?api-version=2023-11-01&label=LOCAL",
+      ["/kv/.appconfig.featureflag%2FYotResultsDistributionService?api-version=2023-11-01&label=LOCAL",
        "/systemdocgenerator-command-api/command/api/rest/systemdocgenerator/generate-document"]
       ```
 
       the flag read and the one command, and **no `document/{id}`, on any schedule**. That is SC-004
       seen from outside, and it is the whole of the removal. The readings were still moving:
-      `courtregister_oldest_generating_age` **497.0** seconds, `courtregister_oldest_pending_age`
-      0.0, `courtregister_oldest_generated_age` 0.0 - FR-011 holding with the reconciler gone. (The
+      `yotresultsdistribution_oldest_generating_age` **497.0** seconds, `yotresultsdistribution_oldest_pending_age`
+      0.0, `yotresultsdistribution_oldest_generated_age` 0.0 - FR-011 holding with the reconciler gone. (The
       third of the three is `oldest_generated_age`; the quickstart names only the first.)
 
       **Steps 3 and 4 - and the one place the quickstart's own numbers are wrong.** The batch step 1
@@ -3165,7 +3165,7 @@ what this phase added: T037's one, T038's two and T039's one.
       ```
 
       Aged past 70 minutes instead (1h 18m), and with the schedule brought forward
-      (`COURTREGISTER_GENERATION_CRON='0 */2 * * * *'`, the quickstart's own local-only override),
+      (`YOTRESULTSDISTRIBUTION_GENERATION_CRON='0 */2 * * * *'`, the quickstart's own local-only override),
       the run is the line the quickstart prints:
 
       ```text
@@ -3200,7 +3200,7 @@ what this phase added: T037's one, T038's two and T039's one.
       acknowledged it and dropped it:
 
       ```text
-      courtregister_public_events_ignored_total{reason="terminal-batch"}  COUNT = 1.0
+      yotresultsdistribution_public_events_ignored_total{reason="terminal-batch"}  COUNT = 1.0
       ```
 
       and the store was unchanged - still `FAILED`, still `NOT_COMPLETED_BY_NEXT_RUN`,
@@ -3211,7 +3211,7 @@ what this phase added: T037's one, T038's two and T039's one.
       same image:
 
       ```text
-      event=courtregister_exception run_id=7551227e-… kind=BATCH_RELEASED batch_id=89786463-…
+      event=yotresultsdistribution_exception run_id=7551227e-… kind=BATCH_RELEASED batch_id=89786463-…
           court_centre_id=33333333-… register_date=2026-09-21 status=FAILED
           reason=NOT_COMPLETED_BY_NEXT_RUN age_seconds=66
       counts request_failed=0 request_late=0 batch_late=0 batch_failed=0 notification_failed=0
@@ -3243,13 +3243,13 @@ what this phase added: T037's one, T038's two and T039's one.
       **The three start-up refusals**, each against the built image:
 
       ```text
-      COURTREGISTER_GENERATION_STALE_AFTER=0s
-        -> courtregister.generation.stale-after (PT0S) must be positive — a timeout that never
+      YOTRESULTSDISTRIBUTION_GENERATION_STALE_AFTER=0s
+        -> yotresultsdistribution.generation.stale-after (PT0S) must be positive — a timeout that never
            expires is a run that never ends            (PropertiesValidator, exit 1)
-      COURTREGISTER_GENERATION_BATCH_AGE_REFRESH=-1m
-        -> courtregister.generation.batch-age-refresh (PT-1M) must be positive — a timeout that
+      YOTRESULTSDISTRIBUTION_GENERATION_BATCH_AGE_REFRESH=-1m
+        -> yotresultsdistribution.generation.batch-age-refresh (PT-1M) must be positive — a timeout that
            never expires is a run that never ends      (PropertiesValidator, exit 1)
-      COURTREGISTER_GENERATION_COMPLETION=poll-only
+      YOTRESULTSDISTRIBUTION_GENERATION_COMPLETION=poll-only
         -> "Started Application in 2.819 seconds", and the string `completion` appears NOWHERE in
            the start-up log: the key is gone and a deployment still setting it is setting nothing
       ```
@@ -3263,7 +3263,7 @@ what this phase added: T037's one, T038's two and T039's one.
       through `PropertiesLauncher` and says so in a comment. The command was therefore run as
       `docker compose exec app ./startup.sh generate-register …`, which is the deployed form and
       what the brief asks for. The registers were seeded through `psql` because the compose stack
-      runs `COURTREGISTER_PAYLOAD_MODE=STUB` and records nothing - the 002 quickstart states that
+      runs `YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB` and records nothing - the 002 quickstart states that
       plainly - so there is no message that produces a register on this stack at all. The
       quickstart's `SELECT … FROM register_record` is `processed_output`; there is no
       `register_record` table. All five are `quickstart.md`'s to correct and none of them is the
@@ -3271,12 +3271,12 @@ what this phase added: T037's one, T038's two and T039's one.
 
       **THE ONE DEFECT THE WALKTHROUGH FOUND. Recorded, NOT fixed** (the brief for this run forbids
       a fix, and this record is the report).
-      `adapter/report/LogEventReportSink`'s summary event `courtregister_exception_report` carries
+      `adapter/report/LogEventReportSink`'s summary event `yotresultsdistribution_exception_report` carries
       **five** counts and omits `batch_released`, while `EmailReportSink`'s CSV header carries six
       (*"Six since increment 004"*, `EmailReportSinkTest:85`) and `ReportExceptionsCli`'s counts line
       carries six. The morning observed above therefore wrote a summary reading
       `request_failed=0 request_late=0 batch_late=0 batch_failed=0 notification_failed=0
-      truncated=0` beside **one** `courtregister_exception` event. That is precisely the state the
+      truncated=0` beside **one** `yotresultsdistribution_exception` event. That is precisely the state the
       sink's own javadoc says must never occur: *"without that eleventh field a query would find
       fewer events than the counts imply and nothing would say whether a sink had broken"*. The
       omission is pinned in place by `LogEventReportSinkTest.THE_ELEVEN_SUMMARY_FIELDS`, which 004
@@ -3331,7 +3331,7 @@ what this phase added: T037's one, T038's two and T039's one.
       the run exposed one defect. **Both are closed**: the defect is fixed test-first and recorded
       immediately above (`b0f87b54`), and `quickstart.md` is corrected against the stack this run
       was driven on (`4de381bd`) - the 71-minute cutoff with FR-017's reason and the
-      `system_generated = true` alternative, the psql seeding under `COURTREGISTER_PAYLOAD_MODE=STUB`
+      `system_generated = true` alternative, the psql seeding under `YOTRESULTSDISTRIBUTION_PAYLOAD_MODE=STUB`
       in place of the three files that do not exist, `./startup.sh` in place of the `java -jar`
       form that cannot dispatch, the by-hand publisher for the late outcome with `sdg-echo`'s
       start-up behaviour explained, `processed_output` for `register_record`, `reason=flag-on` for
@@ -3484,7 +3484,7 @@ is fixed.
   `batch/cli`; that is true of `src/main` only. Corrected, naming the three `src/test` hand-offs.
 * **FR-011's reach (LOW, spec-validator).** FR-011, its US2 scenario, the flow diagram and the
   README said the three batch-age readings are refreshed in every non-command instance;
-  `BatchSweepConfig` is additionally conditional on `courtregister.generation.enabled`, which is
+  `BatchSweepConfig` is additionally conditional on `yotresultsdistribution.generation.enabled`, which is
   what `research.md` and `plan.md` describe. All four now say "that carries the generation half",
   with the spec's amendment dated.
 * **`SchedulingInfrastructureConfig`'s javadoc (LOW, code-reviewer).** It listed three schedules a
@@ -3581,7 +3581,7 @@ before the merge, and both are now CLOSED.**
 1. **The defect — CLOSED, `b0f87b54`, test-first.** `adapter/report/LogEventReportSink`'s summary
    event carried five counts and omitted `batch_released`, while the CSV sink and the command both
    carried six, so a morning whose only exception was a released batch wrote five noughts beside
-   one `courtregister_exception` event - the shape that sink's own contract tells a reader to read
+   one `yotresultsdistribution_exception` event - the shape that sink's own contract tells a reader to read
    as a broken sink. Red on three assertions in `LogEventReportSinkTest` (the field list at twelve,
    the empty morning at six noughts, and a new
    `a_released_batch_is_counted_on_the_summary_line`), green on one
@@ -3707,6 +3707,6 @@ given and goes on looking live.
 - **Three things are outside this repository** and are flagged, not done: the Confluence design
   document's sections on the reconciler and the query; the Gliffy diagram's dashed query arrow and
   its step label; and a check of the deployment branches for a raw
-  `courtregister.generation.grace-period` or `.completion` override — probably empty, since neither
+  `yotresultsdistribution.generation.grace-period` or `.completion` override — probably empty, since neither
   key has an environment placeholder in this repository, which is also why T002 removes the old key
   rather than aliasing it.

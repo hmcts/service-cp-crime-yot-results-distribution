@@ -20,7 +20,7 @@ notificationnotify e-mail per Youth Offending Team with the PDF attached. Every 
 batch has a recorded terminal state.
 
 The whole flow is switched between the legacy implementation and this service by one Azure App
-Configuration feature flag, `CourtRegisterService`, read by the results producer, by the legacy
+Configuration feature flag, `YotResultsDistributionService`, read by the results producer, by the legacy
 function-app triggers and by this service's nightly job. Every failure to read it leaves the legacy
 in charge.
 
@@ -61,5 +61,5 @@ branch of this repository needs its own entry.
 ```
 
 Nothing consumes this service. The register document written to the store is the schema progression
-already receives, and the POST to progression is retained behind `courtregister.output=progression-
+already receives, and the POST to progression is retained behind `yotresultsdistribution.output=progression-
 post` for the fallback sequencing the design describes.

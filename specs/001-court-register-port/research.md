@@ -1,4 +1,4 @@
-# Research: Court Register Service — full pipeline port, fix-first
+# Research: YOT Results Distribution Service — full pipeline port, fix-first
 
 Decisions taken before planning, with rationale and alternatives. Numbering continues the habit of
 the informant research file; where a decision is inherited unchanged from that service it is cited,
@@ -7,7 +7,7 @@ not restated.
 ## 1. Transport, settlement, idempotency, health — inherited
 
 **Decision**: clone the informant service's delivery machinery unchanged: dedicated ASB queue
-`courtregister.requests` + DLQ, `ServiceBusProcessorClient` peek-lock with explicit settlement,
+`yotresultsdistribution.requests` + DLQ, `ServiceBusProcessorClient` peek-lock with explicit settlement,
 durable `(source, request_id)` processed-log with fingerprint + single-runner claim, deferred
 Flyway, store-outage intake suspension, store-gates-readiness/queue-never health policy.
 

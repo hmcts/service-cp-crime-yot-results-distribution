@@ -7,7 +7,7 @@ HTTP, no batch is created by a caller. Everything below assumes that shape.
 Since increment 005 it does serve one HTTP surface besides actuator — the **operations API** under
 `/operations/**`, the named operator actions that replaced the CLI, each behind
 `cp-auth-rules-filter` and `cp-audit-filter-springboot` (see "The operations API" below). The CLI is
-gone: `batch/cli/`, `config/CliModeConfig`, the `courtregister.cli` property and the
+gone: `batch/cli/`, `config/CliModeConfig`, the `yotresultsdistribution.cli` property and the
 `docker/startup.sh` dispatch are removed, and the image starts the application, full stop.
 
 Since increment 002 the service owns **both halves** of the court-register flow: the intake half
@@ -18,10 +18,10 @@ two halves left behind and tells support about everything that is wrong.
 ## The two legs
 
 ```
-ASB queue courtregister.requests
+ASB queue yotresultsdistribution.requests
    │  (peek-lock delivery)
    ▼
-CourtRegisterMessageListener            inbound adapter — parse + settle ONLY
+YotResultsDistributionMessageListener            inbound adapter — parse + settle ONLY
    ▼
 DistributionPipeline                    application service — the use case, no I/O of its own
    ├─▶ IdempotencyGuard                 (source, requestId) processed-log — has this been done?
@@ -36,7 +36,7 @@ ProcessingStateService                  writes processed_request / processed_out
 ──────────────────────────────  18:00 Europe/London, Mon–Fri  ──────────────────────────────
 
 RegisterGenerationJob                   the scheduled run, one ShedLock-held run per night
-   ├─▶ FeatureFlagGate                  reads CourtRegisterService once per run, no cache, fail-closed
+   ├─▶ FeatureFlagGate                  reads YotResultsDistributionService once per run, no cache, fail-closed
    ├─▶ StaleBatchReleaser               the run's FIRST act: every PENDING or GENERATING batch past
    │                                    its cutoff is failed NOT_COMPLETED_BY_NEXT_RUN and its rows
    │                                    released, one fenced statement per batch
@@ -59,7 +59,7 @@ ExceptionReportJob                      the morning run, one ShedLock-held run p
    │                                    no cutover circuit: it reads the flag nowhere
    ├─▶ ExceptionReportService           the eight reads over one window, oldest first
    └─▶ ExceptionReportSink       «port» every sink on the context, each asked whatever the last said
-          ├─▶ LogEventReportSink        courtregister_exception per entry + one summary per run
+          ├─▶ LogEventReportSink        yotresultsdistribution_exception per entry + one summary per run
           └─▶ EmailReportSink           the list as a CSV, then one send per support address
                  ├─▶ PayloadFileStore   «port» the same write the 18:00 run makes, second caller
                  └─▶ ReportMailer «port» notificationnotify send-email-notification, one per address
@@ -74,7 +74,7 @@ BatchAgeSweep                           lock — the latter in every such JVM th
                                         refreshes goes on looking live
 ```
 
-- **Inbound adapters** (`CourtRegisterMessageListener`, `DocumentEventListener`) deserialise, and
+- **Inbound adapters** (`YotResultsDistributionMessageListener`, `DocumentEventListener`) deserialise, and
   settle or drop. NO business logic. NO transformation. NO downstream calls. The queue listener
   performs exactly one settlement (`complete` / `abandon` / `deadLetter`) on every path; the topic
   listener acknowledges by returning and counts every drop under a bounded reason.
@@ -104,8 +104,8 @@ BatchAgeSweep                           lock — the latter in every such JVM th
   else**: the report and the sweep take the eight report reads and the two gauge reads, and the two
   operations listings take the three reads they are built from — none of them writes a row.
 - **The report is not on the cutover lever's circuit.** `ExceptionReportJob` reads the
-  `CourtRegisterService` flag nowhere and is gated by it nowhere, and it runs whatever
-  `courtregister.generation.enabled` says — a pod that renders nothing still says every morning
+  `YotResultsDistributionService` flag nowhere and is gated by it nowhere, and it runs whatever
+  `yotresultsdistribution.generation.enabled` says — a pod that renders nothing still says every morning
   what is wrong with what it recorded. It is therefore not a second reader of the one lever.
 
 NEVER put business logic in a message listener.
@@ -116,7 +116,7 @@ outside the topic's.
 ### Package structure
 
 ```
-uk.gov.hmcts.cp.courtregister
+uk.gov.hmcts.cp.yotresultsdistribution
 ├── api/           the operations API: the seven controllers, their request and response records,
 │                  the ProblemDetail advice, and the auth/audit filter wiring. An INBOUND ADAPTER —
 │                  it parses, calls one application service, and maps the answer. No logic
@@ -200,7 +200,7 @@ message received
 
 Statuses — request level: `RECEIVED`, `RETRYING`, `COMPLETED`, `FAILED`.
 Completion reasons: `recorded`, `group-proceedings`, `no-defendants`, `no-subscriptions`,
-`no-youth-defendants` — plus `submitted`, which only `courtregister.output=progression-post`
+`no-youth-defendants` — plus `submitted`, which only `yotresultsdistribution.output=progression-post`
 produces.
 
 Rules:
@@ -264,23 +264,23 @@ Rules:
   applied, because there is no outcome, and applying one would be inventing evidence.
 - **A late or duplicate outcome moves nothing** and is counted: a team that has been told has been
   told. Every acknowledged-and-dropped path on the subscription carries a bounded reason on
-  `courtregister_public_events_ignored_total`.
+  `yotresultsdistribution_public_events_ignored_total`.
 - **The run report is not a tally of the night.** `generated` and `notified` are a snapshot taken at
   the moment the line is written, of a night that may still be settling; `snapshot=taken|unread`
   says whether they were read at all, and an unread snapshot is counted on
-  `courtregister_generation_unrecorded_total`.
+  `yotresultsdistribution_generation_unrecorded_total`.
 - Every batch transition is persisted before the message or event that caused it is settled or
   acknowledged.
 
 ## The Cutover Rule — one lever
 
 The whole flow is switched between the legacy implementation and this service by **one Azure App
-Configuration feature flag, `CourtRegisterService`**.
+Configuration feature flag, `YotResultsDistributionService`**.
 
 - The nightly job reads it **once per run, with no cache**, and does nothing when it is off or
   unreadable. Fail-closed: every failure to read leaves the legacy in charge.
 - **Never add a second switch** — no Helm value, no static-data patch, no endpoint — that decides
-  which implementation is live. `courtregister.output` and `courtregister.generation.enabled` are
+  which implementation is live. `yotresultsdistribution.output` and `yotresultsdistribution.generation.enabled` are
   deployment shape, not cutover levers, and neither may be documented as one.
 - **An operations endpoint is not a second lever.** `POST /operations/batches/generate` reads the
   same flag, through the same `FeatureFlagGate`, at exactly the point `generate-register` read it,
@@ -293,7 +293,7 @@ Configuration feature flag, `CourtRegisterService`**.
 
 ## Queue and Topic Semantics
 
-Queue **`courtregister.requests`** (+ its dead-letter queue), owned by this service.
+Queue **`yotresultsdistribution.requests`** (+ its dead-letter queue), owned by this service.
 
 - **Peek-lock only.** `ReceiveAndDelete` is banned — it loses messages on crash.
 - **Auto-complete disabled.** Exactly one explicit `complete()`, `abandon()` or `deadLetter()` on
@@ -327,7 +327,7 @@ subscription that every replica attaches to**.
   Changing a subscription between shared and non-shared abandons the existing subscription and its
   backlog, so it is a broker-visible change and not a local edit.
 - Every JVM that runs this application subscribes, and there is no longer any other kind: the CLI
-  JVM the `courtregister.cli` rule used to keep off the topic no longer exists, because an
+  JVM the `yotresultsdistribution.cli` rule used to keep off the topic no longer exists, because an
   operations call is served by a pod that is already subscribed rather than by a process about to
   exit. An operations endpoint must never bring up a second subscription of its own.
 
@@ -404,8 +404,8 @@ the same application services the CLI called:
   deployment that says nothing is authorised (FR-045, constitution 5.0.1). They are
   ordinary configuration: an operator may turn either off, the compose environment and the `test`
   profile do exactly that with the reason written beside them, and **start-up never refuses on the
-  combination** — no cross-field rule against `courtregister.operations.enabled`, no
-  `courtregister.servicebus.namespace` discriminator, no laptop-versus-pod exemption. What is still
+  combination** — no cross-field rule against `yotresultsdistribution.operations.enabled`, no
+  `yotresultsdistribution.servicebus.namespace` discriminator, no laptop-versus-pod exemption. What is still
   refused is a **value** that cannot mean what it says (FR-053): an audit transport switched on with
   no host or a port outside 1..65535, an audit filter switched on with no OpenAPI document to
   resolve, and an unusable `supersede-max-age` or `lock-wait`.
@@ -449,7 +449,7 @@ This service **adapts to** four contracts it does not own, and never redefines t
 | systemdocgenerator `generate-document` (REST, 202) + the `document-available` / `generation-failed` public events | systemdocgenerator | Add a field, treat any 2xx but 202 as success, or infer an outcome no event carried |
 | notificationnotify `send-email-notification` (REST, 202) | notificationnotify | Batch recipients into one call, or retry a 4xx |
 | the framework file-service `metadata` + `content` table schema (write-only, pinned to changesets 001–006) | the framework | Read through it, or migrate it. **The file service is the only store outside this service's own that may be written directly** (design owner, 2026-09-14, closing design Q20): no other context's tables are ever written. Two callers write through it since 003, not one - the nightly run's render payload and the morning report's exception CSV - through the same pinned changesets and the same write-only port |
-| the `CourtRegisterService` App Configuration flag | the cutover | Cache it, default it open, or add a second reader with different semantics |
+| the `YotResultsDistributionService` App Configuration flag | the cutover | Cache it, default it open, or add a second reader with different semantics |
 
 Plus the two this service's own increments froze: the **inbound queue message**
 (`distribution-command.schema.json`, `additionalProperties: false`, agreed with

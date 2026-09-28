@@ -13,7 +13,7 @@ before publishes the matching `document-available` event to Artemis over STOMP. 
 from the request the service actually sent, so the two fields that correlate it back to a batch,
 `sourceCorrelationId` (the batch id) and `payloadFileServiceId`, are the service's own values and
 not invented here; `originatingSource` is echoed for the same reason, since the listener keeps only
-the events whose source is CourtRegisterService.
+the events whose source is YotResultsDistributionService.
 
 The published body is a framework **JsonEnvelope**, not the bare payload: every public event on
 `public.event` carries a top-level `_metadata` object alongside the payload fields, and
