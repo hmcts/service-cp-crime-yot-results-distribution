@@ -134,6 +134,18 @@ Format: `[ID] [P?] [US#] Description`
     `FeatureFlagPropertiesTest`): 236 tests, 12 failed - 10 `AssertionError` (the five repeats, with
     generation on and off) and 2 `AssertionFailedError` (the two repeat counts). The two spaced-Id
     published-pair cases pass already: they pin behaviour that exists.
+- [x] **T009** [US2] [US3] Make them pass:
+  - `FeatureFlagProperties.connectionStringPartCount` counts every segment of a name, matched as
+    `connectionStringPart` matches it.
+  - `PropertiesValidator` requires `Endpoint`, `Id` and `Secret` each exactly once, under the same
+    setting-named refusal that quotes nothing, wherever a string is set.
+  - The "read exactly as the SDK" claims are corrected (`FeatureFlagProperties`,
+    `PropertiesValidator`, `spec.md` FR-004, `plan.md`): parts are matched as the SDK matches them,
+    and a repeat is refused because the SDK validates every segment of a name.
+  - Green run (2026-09-29, `-Dtest.noFailFast=true`, the eight T005 suites): 346 tests, 0 failed.
+    `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest` clean.
+  - **Still open:** SC-002 - the `*IT` suites and the JaCoCo gate need a Docker-backed
+    `./gradlew cleanTest build`.
 
 ## Handover
 

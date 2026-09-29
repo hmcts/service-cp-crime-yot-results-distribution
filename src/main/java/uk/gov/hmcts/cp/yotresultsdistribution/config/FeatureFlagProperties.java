@@ -78,14 +78,16 @@ public record FeatureFlagProperties(
     }
 
     /**
-     * One part of the connection string, read exactly as the SDK reads it.
+     * One part of the connection string: the value the SDK will be given for it.
      *
      * <p>{@code ConfigurationClientCredentials} (azure-data-appconfiguration) splits the string on
      * {@code ;}, trims each segment, and takes a part only where the trimmed segment begins with the
      * part's name immediately followed by {@code =}, ignoring case - a later segment of the same
-     * name replacing an earlier one. Reading it any other way admits strings the SDK then refuses,
+     * name replacing an earlier one. Matching any other way admits strings the SDK then refuses,
      * and the SDK's refusal quotes the whole value; so {@code Endpoint =...} is no endpoint here
-     * because it is none there, and the value returned is the one the SDK will be given.
+     * because it is none there. The SDK also validates every earlier segment of a name it replaces,
+     * which this does not: {@link #connectionStringPartCount} is what lets the validator refuse a
+     * repeated part instead.
      *
      * @param name the part's name - {@link #ENDPOINT_PART}, {@link #ID_PART} or
      *             {@link #SECRET_PART}
@@ -106,13 +108,30 @@ public record FeatureFlagProperties(
     }
 
     /**
-     * How many segments of the connection string carry the named part.
+     * How many segments of the connection string carry the named part, matched as
+     * {@link #connectionStringPart} matches them.
      *
-     * @param name the part's name
+     * <p>The SDK does not only keep the last segment of a name: it validates every {@code Endpoint=}
+     * (as a URL) and every {@code Secret=} (as Base64) it meets, and throws - quoting the whole
+     * value - on the first it cannot read, even where a later one could be. Checking the last
+     * value alone would admit a string the SDK then refuses, so {@link PropertiesValidator}
+     * refuses any part given more than once.
+     *
+     * @param name the part's name - {@link #ENDPOINT_PART}, {@link #ID_PART} or
+     *             {@link #SECRET_PART}
      * @return the number of segments that carry it
      */
     public long connectionStringPartCount(final String name) {
-        return connectionStringPart(name).isPresent() ? 1 : 0;
+        final String prefix = name + NAME_SEPARATOR;
+        long count = 0;
+        if (hasConnectionString()) {
+            for (final String segment : connectionString.split(PART_SEPARATOR)) {
+                if (segment.trim().regionMatches(true, 0, prefix, 0, prefix.length())) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     /**

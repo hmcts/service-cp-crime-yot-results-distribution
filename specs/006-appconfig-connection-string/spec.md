@@ -44,8 +44,9 @@ static key this service holds. No principle's wording changes.
 - **FR-003**: No connection string is no client, and every read answers `unreadable-not-configured`.
 - **FR-004**: With generation enabled, start-up refuses a missing connection string. Wherever a
   string is set, generation on or off, start-up refuses one that does not carry `Endpoint=` (an
-  http or https URL with a host), `Id=` and a Base64 `Secret=` - its parts read exactly as the SDK
-  reads them - and one whose endpoint is a real `.azconfig.io` store, or any store while
+  http or https URL with a host), `Id=` and a Base64 `Secret=` each exactly once - its parts
+  matched as the SDK matches them, and a repeated part refused because the SDK validates every
+  segment of a name, not only the last - and one whose endpoint is a real `.azconfig.io` store, or any store while
   `servicebus.namespace` is set, over anything but https. Independently of the validator, a string
   the SDK's builder cannot parse fails the reader's construction under the setting's name with no
   cause attached, since the SDK's own message quotes the value.

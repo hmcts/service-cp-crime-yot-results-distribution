@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
@@ -1718,9 +1719,11 @@ public class PropertiesValidator implements InitializingBean {
      * connect, and an unreadable flag is a run skipped and counted and indistinguishable from a store
      * outage. So the endpoint is required to parse as written, to carry one of
      * {@link #CLIENT_SCHEMES}, and to name a host; the secret is required to be the Base64 the SDK
-     * decodes it as. Parts are read exactly as the SDK reads them
-     * ({@link FeatureFlagProperties#connectionStringPart}), so nothing admitted here is refused
-     * there. A padded endpoint ({@code Endpoint=  https://...}) is refused too - the SDK's URL parse
+     * decodes it as. Parts are matched as the SDK matches them
+     * ({@link FeatureFlagProperties#connectionStringPart}), and each of the three is required
+     * exactly once - the SDK validates every segment of a name, not only the last it keeps, so a
+     * repeat whose earlier copy is bad would pass a check of the last and be refused there. With
+     * both, nothing admitted here is refused there. A padded endpoint ({@code Endpoint=  https://...}) is refused too - the SDK's URL parse
      * would forgive it, but a value somebody pasted with its whitespace is one worth a second look.
      * So is a padded Id ({@code Id= ...}): the SDK trims the segment but not the value, so it would
      * sign every read with the space and the store would refuse each one at 18:00.
@@ -1785,15 +1788,19 @@ public class PropertiesValidator implements InitializingBean {
                 .filter(PropertiesValidator::hasText)
                 .filter(PropertiesValidator::isBase64)
                 .isPresent();
-        if (!endpointReadable || !idPresent || !secretReadable) {
+        final boolean eachPartOnce = Stream.of(FeatureFlagProperties.ENDPOINT_PART,
+                        FeatureFlagProperties.ID_PART, FeatureFlagProperties.SECRET_PART)
+                .allMatch(part -> feature.connectionStringPartCount(part) == 1);
+        if (!eachPartOnce || !endpointReadable || !idPresent || !secretReadable) {
             throw new IllegalStateException(
                     FEATURE_CONNECTION_STRING + " must be an App Configuration connection string"
                             + " wherever it is set - Endpoint=<an http or https URL with a host>;"
                             + "Id=<the key's id>;Secret=<the key's Base64 secret>, as Key Vault"
-                            + " holds it. The client is built as this context starts, on every pod,"
-                            + " and a string with a part missing or unreadable is either a pod that"
-                            + " never starts or a client that cannot reach anything, read as an"
-                            + " unreadable flag every night. The value is not quoted here");
+                            + " holds it, each part once. The client is built as this context"
+                            + " starts, on every pod, and a string with a part missing, repeated or"
+                            + " unreadable is either a pod that never starts or a client that cannot"
+                            + " reach anything, read as an unreadable flag every night. The value is"
+                            + " not quoted here");
         }
     }
 

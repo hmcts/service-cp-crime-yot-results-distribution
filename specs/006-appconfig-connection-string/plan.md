@@ -42,8 +42,9 @@ Deployed: `cpp-aks-deploy` mounts `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`
 - `adapter/appconfig/AppConfigurationFlagReader` - the `TokenCredential` constructor removed.
 - `config/PropertiesValidator` - FR-004 and FR-005, messages naming settings only. The shape is
   asked of any string that is set, generation on or off; https is required of a real store or any
-  store on a deployed pod. Parts are read by `FeatureFlagProperties.connectionStringPart` exactly
-  as the SDK reads them.
+  store on a deployed pod. Parts are matched by `FeatureFlagProperties.connectionStringPart` as
+  the SDK matches them, and `connectionStringPartCount` refuses any part given more than once,
+  since the SDK validates every segment of a name.
 - `application.yaml`, `docker-compose.yml`.
 
 ## Test matrix
