@@ -23,7 +23,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -48,7 +47,6 @@ import uk.gov.hmcts.cp.yotresultsdistribution.batch.StaleBatchReleaser;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision;
 import uk.gov.hmcts.cp.yotresultsdistribution.pipeline.PdfPayloadMapper;
 import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
-import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
 
 /**
  * The downstream half in a context that is actually a deployment's.
@@ -75,13 +73,11 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
  * assertion is that what the context resolved is the real adapter and not merely that something
  * resolved.
  *
- * <p>The identity variables the workload-identity credential is built from are supplied by
- * {@link WorkloadIdentityStub}, because this context is a deployed pod's and a deployed pod is given
- * all three by the AKS webhook. Nothing here reads a flag, opens a connection to App Configuration,
- * or touches either database: both pools initialise lazily and the schedule's first fire is hours
+ * <p>The flag is configured the way a deployed pod's is, with a connection string of the shape Key
+ * Vault injects. Nothing here reads a flag, opens a connection to App Configuration, or touches
+ * either database: both pools initialise lazily and the schedule's first fire is hours
  * away.
  */
-@ExtendWith(WorkloadIdentityStub.class)
 @SpringBootTest(properties = {
     GenerationWiringContextTest.GENERATION_ENABLED,
     GenerationWiringContextTest.SDG_MODE,
@@ -89,7 +85,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
     GenerationWiringContextTest.FILESERVICE_MODE,
     GenerationWiringContextTest.FLAG_MODE,
     GenerationWiringContextTest.FILESERVICE_URL,
-    GenerationWiringContextTest.FLAG_ENDPOINT,
+    GenerationWiringContextTest.FLAG_CONNECTION_STRING,
     GenerationWiringContextTest.FLAG_LABEL,
     GenerationWiringContextTest.SDG_ENDPOINT,
     GenerationWiringContextTest.NN_ENDPOINT,
@@ -147,7 +143,8 @@ class GenerationWiringContextTest {
     static final String FILESERVICE_URL =
             "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice";
 
-    static final String FLAG_ENDPOINT = "yotresultsdistribution.feature.endpoint=https://appconfig.internal";
+    static final String FLAG_CONNECTION_STRING =
+            "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==";
 
     static final String FLAG_LABEL = "yotresultsdistribution.feature.label=ste86";
 

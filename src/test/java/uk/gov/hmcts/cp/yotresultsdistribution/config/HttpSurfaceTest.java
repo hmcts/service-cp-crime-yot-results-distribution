@@ -14,7 +14,6 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -28,7 +27,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import tools.jackson.databind.JsonNode;
-import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
 
 /**
  * The whole HTTP surface of this service, asserted rather than assumed (constitution Principle III).
@@ -227,7 +225,6 @@ class HttpSurfaceTest {
      */
     @Nested
     @NestedTestConfiguration(NestedTestConfiguration.EnclosingConfiguration.OVERRIDE)
-    @ExtendWith(WorkloadIdentityStub.class)
     @SpringBootTest(properties = {
         "yotresultsdistribution.generation.enabled=true",
         "yotresultsdistribution.generation.sdg-mode=LIVE",
@@ -235,7 +232,7 @@ class HttpSurfaceTest {
         "yotresultsdistribution.generation.fileservice-mode=LIVE",
         "yotresultsdistribution.generation.flag-mode=LIVE",
         "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice",
-        "yotresultsdistribution.feature.endpoint=https://appconfig.internal",
+        "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==",
         "yotresultsdistribution.feature.label=ste86",
         "yotresultsdistribution.endpoints.systemdocgenerator=http://systemdocgenerator.internal:8080",
         "yotresultsdistribution.endpoints.notificationnotify=http://notificationnotify.internal:8080",
@@ -439,7 +436,6 @@ class HttpSurfaceTest {
      */
     @Nested
     @NestedTestConfiguration(NestedTestConfiguration.EnclosingConfiguration.OVERRIDE)
-    @ExtendWith(WorkloadIdentityStub.class)
     @SpringBootTest(properties = {
         "yotresultsdistribution.operations.enabled=false",
         "yotresultsdistribution.generation.enabled=true",
@@ -449,7 +445,7 @@ class HttpSurfaceTest {
         "yotresultsdistribution.generation.fileservice-mode=LIVE",
         "yotresultsdistribution.generation.flag-mode=LIVE",
         "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice",
-        "yotresultsdistribution.feature.endpoint=https://appconfig.internal",
+        "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==",
         "yotresultsdistribution.feature.label=ste86",
         "yotresultsdistribution.endpoints.systemdocgenerator=http://systemdocgenerator.internal:8080",
         "yotresultsdistribution.endpoints.notificationnotify=http://notificationnotify.internal:8080",

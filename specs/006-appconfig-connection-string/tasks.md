@@ -27,9 +27,15 @@ Format: `[ID] [P?] [US#] Description`
 
 ## Phase 2: Implementation (green)
 
-- [ ] **T003** [US1] [US2] [US3] `FeatureFlagProperties`, `LiveFeatureFlagConfig`,
+- [x] **T003** [US1] [US2] [US3] `FeatureFlagProperties`, `LiveFeatureFlagConfig`,
   `AppConfigurationFlagReader`, `PropertiesValidator`, `application.yaml`, `docker-compose.yml`;
   delete the workload-identity flag path. `./gradlew build` green.
+  Green run (2026-09-29, `-Dtest.noFailFast=true`, the four suites plus `HttpSurfaceTest` and
+  `GenerationMetricsContextTest`): 264 tests, 0 failed. Full `./gradlew test` on a host with no
+  Docker: 3477 tests, 137 failed, every one a Testcontainers "could not find a valid Docker
+  environment" or a context-threshold cascade from one - no non-Docker failure. `checkstyleMain`,
+  `checkstyleTest`, `pmdMain` and `pmdTest` clean. **Open:** the JaCoCo gate and the `*IT` suites
+  need a Docker-backed `./gradlew build` before merge.
 
 ## Handover
 

@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.config;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -38,8 +39,8 @@ import org.springframework.stereotype.Component;
  * schedule read in the wrong zone, a lock that expires before the run it locks is allowed to end, a
  * notification claim whose lease cannot cover one recipient's POST cycle, a run with no payload
  * store, no flag, no renderer or no notifier, a generation half with no broker to hear an outcome
- * from, a stub reachable where registers are really produced, the local flag credential anywhere a
- * real flag is read, and a blank or malformed e-mail template id (fix P9). None of them is
+ * from, a stub reachable where registers are really produced, the published local flag pair anywhere
+ * a real flag is read, and a blank or malformed e-mail template id (fix P9). None of them is
  * discovered before 18:00, and by then the night's registers are already not going out
  * (research §11).
  */
@@ -162,9 +163,9 @@ public class PropertiesValidator implements InitializingBean {
     private static final String GENERATION_BATCH_AGE_REFRESH = GENERATION + ".batch-age-refresh";
     private static final String NN_MODE = GENERATION + ".nn-mode";
     private static final String FILESERVICE_URL = "yotresultsdistribution.fileservice.url";
-    private static final String FEATURE_ENDPOINT = "yotresultsdistribution.feature.endpoint";
+    private static final String FEATURE_CONNECTION_STRING =
+            "yotresultsdistribution.feature.connection-string";
     private static final String FEATURE_LABEL = "yotresultsdistribution.feature.label";
-    private static final String FEATURE_CREDENTIAL = "yotresultsdistribution.feature.credential";
     private static final String ENDPOINTS = "yotresultsdistribution.endpoints";
     private static final String ENDPOINTS_MAX_ATTEMPTS = ENDPOINTS + MAX_ATTEMPTS_SUFFIX;
     private static final String ENDPOINTS_CONNECT_TIMEOUT = ENDPOINTS + CONNECT_TIMEOUT_SUFFIX;
@@ -250,9 +251,9 @@ public class PropertiesValidator implements InitializingBean {
     /** Shared so the wording of a stub-in-the-wrong-place refusal is one string and not five. */
     private static final String IS_STUB_WHILE = " is STUB while ";
 
-    /** Shared so the wording of the local-credential refusals is one string and not two. */
-    private static final String IS_LOCAL_TEST_WHILE =
-            " is " + FeatureFlagProperties.LOCAL_TEST + " while ";
+    /** Shared so the wording of the published-pair refusals is one string and not two. */
+    private static final String CARRIES_THE_PUBLISHED_LOCAL_PAIR_WHILE =
+            " carries the published local pair while ";
 
     /**
      * The domain every real Azure App Configuration store's host ends with, and the estate has no
@@ -261,7 +262,7 @@ public class PropertiesValidator implements InitializingBean {
      * <p>Asked of the parsed <em>host</em> rather than searched for anywhere in the value, so that
      * the question asked is the one that matters and a path or a query mentioning the domain is not
      * mistaken for a store. A value no host can be read from names no store either way; what
-     * refuses that is {@link #requireAFlagStoreUrl}, under the setting's own name.
+     * refuses that is {@link #requireAReadableConnectionString}, under the setting's own name.
      */
     private static final String REAL_FLAG_STORE_DOMAIN = ".azconfig.io";
 
@@ -634,7 +635,7 @@ public class PropertiesValidator implements InitializingBean {
         validateTheNotificationClaimOutlastsOnePostCycle(properties);
         feature.validate();
         validateTheStubsAreNotWhereRegistersAreProduced(properties, generation);
-        validateTheLocalCredentialIsNowhereARealFlagIsRead(properties, feature);
+        validateThePublishedLocalPairIsNowhereARealFlagIsRead(properties, feature);
         validateGenerationHasTheDownstreamsItNeeds(properties, generation, feature);
         validateWhicheverHalfWritesAFileCanReachTheFileService(properties, generation, report);
         validateWhicheverHalfSendsCanReachNotificationnotify(properties, generation, report);
@@ -1376,62 +1377,68 @@ public class PropertiesValidator implements InitializingBean {
     }
 
     /**
-     * The same rule again, on the identity the one lever is read under.
+     * The same rule again, on the key the one lever is read with.
      *
-     * <p>{@code yotresultsdistribution.feature.credential=local-test} is not a stub - the reader, the SDK
-     * client and the fail-closed parsing are all the deployed ones - but the identity it signs the
-     * read with is a fixed, published pair that no Azure store has ever been given. So it fails in
-     * precisely the way the four STUB refusals above exist to prevent: the pod starts, reports
-     * itself healthy, waits until 18:00 and is refused by the store, which is UNREADABLE, which is
-     * a run skipped and counted and indistinguishable from an outage. It exists for the compose
-     * loop, whose App Configuration is a WireMock mapping that checks no credential at all, and
-     * that is the only place it belongs.
+     * <p>The compose loop reads its WireMock stub with a connection string carrying the published
+     * local pair ({@code Id=} {@link FeatureFlagProperties#PUBLISHED_LOCAL_ID}). It is not a stub -
+     * the reader, the SDK client and the fail-closed parsing are all the deployed ones - but the
+     * pair is one no Azure store has ever been given. So it fails in precisely the way the four STUB
+     * refusals above exist to prevent: the pod starts, reports itself healthy, waits until 18:00 and
+     * is refused by the store, which is UNREADABLE, which is a run skipped and counted and
+     * indistinguishable from an outage.
      *
-     * <p>Two discriminators. A {@code .azconfig.io} endpoint is a real store whatever else is
-     * configured - the mode cannot read it and would never have been meant to. And a Service Bus
-     * namespace means workload identity, which means a deployed pod: the same discriminator the
-     * STUB refusals draw deployment on, so the two rules agree about where "deployed" is.
+     * <p>Two discriminators. An endpoint whose host ends {@code .azconfig.io} is a real store
+     * whatever else is configured. And a Service Bus namespace means a deployed pod: the same
+     * discriminator the STUB refusals draw deployment on, so the two rules agree about where
+     * "deployed" is. Neither refusal quotes the value, whose parts are the setting's alone to know
+     * (constitution Principle VII).
      *
      * <p>Unconditional on the master switch, for the reason the zone and lock rules are: a job that
-     * happens to be disabled in this deployment is no reason to accept a credential that cannot
-     * read the flag in the next one.
+     * happens to be disabled in this deployment is no reason to accept a pair that cannot read the
+     * flag in the next one.
      *
-     * @param properties the bound settings, for the credential source
-     * @param feature    where the one lever is read from, and under which identity
-     * @throws IllegalStateException if the local credential is anywhere the reading could matter
+     * @param properties the bound settings, for the Service Bus namespace
+     * @param feature    where the one lever is read from, and with which key
+     * @throws IllegalStateException if the published pair is anywhere the reading could matter
      */
-    private static void validateTheLocalCredentialIsNowhereARealFlagIsRead(
+    private static void validateThePublishedLocalPairIsNowhereARealFlagIsRead(
             final YotResultsDistributionProperties properties, final FeatureFlagProperties feature) {
 
-        if (feature.credential() == FeatureFlagProperties.Credential.LOCAL_TEST) {
-            if (namesARealFlagStore(feature.endpoint())) {
+        final boolean published = feature.connectionStringPart(FeatureFlagProperties.ID_PART)
+                .map(String::trim)
+                .filter(FeatureFlagProperties.PUBLISHED_LOCAL_ID::equals)
+                .isPresent();
+        if (published) {
+            final String endpoint =
+                    feature.connectionStringPart(FeatureFlagProperties.ENDPOINT_PART).orElse(null);
+            if (namesARealFlagStore(endpoint)) {
                 throw new IllegalStateException(
-                        FEATURE_CREDENTIAL + IS_LOCAL_TEST_WHILE + FEATURE_ENDPOINT + " ("
-                                + feature.endpoint() + ") names a real App Configuration store -"
-                                + " the local identity is a published pair no store authorises, so"
-                                + " every run would be refused the flag and skip, and the legacy"
-                                + " would be presumed to be generating");
+                        FEATURE_CONNECTION_STRING + CARRIES_THE_PUBLISHED_LOCAL_PAIR_WHILE
+                                + "its Endpoint names a real App Configuration store - the local"
+                                + " pair is one no store authorises, so every run would be refused"
+                                + " the flag and skip, and the legacy would be presumed to be"
+                                + " generating");
             }
             if (hasText(properties.servicebus().namespace())) {
                 throw new IllegalStateException(
-                        FEATURE_CREDENTIAL + IS_LOCAL_TEST_WHILE + NAMESPACE + " is set, which is a"
-                                + " deployed environment - the flag is read on this pod's own"
-                                + " workload identity there, and a published local pair in its"
-                                + " place is a night's registers skipped on a flag nobody could"
-                                + " read");
+                        FEATURE_CONNECTION_STRING + CARRIES_THE_PUBLISHED_LOCAL_PAIR_WHILE + NAMESPACE
+                                + " is set, which is a deployed environment - the flag is read"
+                                + " there with the estate's connection string from Key Vault, and"
+                                + " the published local pair in its place is a night's registers"
+                                + " skipped on a flag nobody could read");
             }
         }
     }
 
     /**
-     * Whether the configured endpoint is a real Azure App Configuration store.
+     * Whether the connection string's endpoint is a real Azure App Configuration store.
      *
      * <p>Parsed rather than matched, because the question is about the host and only a parse can
      * find one: a pattern has to decide where the authority ends before it can look inside it, and
      * every spelling it did not anticipate - the absolute DNS form above among them - is read as
      * "not a store" and admitted. Any scheme, deliberately: an endpoint that names a real store
-     * under a scheme no client can be built from is still a real store, and the credential that
-     * cannot read it is still the wrong credential to have configured.
+     * under a scheme no client can be built from is still a real store, and the pair that cannot
+     * read it is still the wrong pair to have configured.
      *
      * @param endpoint what the deployment supplied, blank where it supplied nothing
      * @return true where the host, normalised, ends {@code .azconfig.io}
@@ -1497,10 +1504,10 @@ public class PropertiesValidator implements InitializingBean {
             final YotResultsDistributionProperties properties, final GenerationProperties generation,
             final FeatureFlagProperties feature) {
         if (generation.enabled()) {
-            requireForGeneration(feature.endpoint(), FEATURE_ENDPOINT,
+            requireForGeneration(feature.connectionString(), FEATURE_CONNECTION_STRING,
                     "the run reads the cutover flag before it does anything else, and an unreadable"
                             + " flag is a run skipped every night");
-            requireAFlagStoreUrl(feature.endpoint());
+            requireAReadableConnectionString(feature);
             requireForGeneration(feature.label(), FEATURE_LABEL,
                     "one App Configuration store serves every stack, so an unlabelled read is a read"
                             + " of somebody else's flag or of none");
@@ -1690,47 +1697,73 @@ public class PropertiesValidator implements InitializingBean {
     }
 
     /**
-     * The endpoint has to be a URL a client can be built from, not merely a value that is set.
+     * The connection string has to be one a client can be built from, not merely a value that is set.
      *
      * <p>Presence is not enough, and the refusal belongs here rather than in the SDK.
-     * {@code ConfigurationClientBuilder.endpoint} does {@code new URL(endpoint)} and throws
-     * "'endpoint' must be a valid URL"; the connection-string form fails the same way while parsing
-     * its credential. Both are reached as {@code LiveFeatureFlagConfig.featureFlagReader} is built,
-     * which is during refresh wherever generation is enabled - so a host pasted out of the portal
-     * without its scheme, or a Helm value that lost one, is a pod that never starts, under an Azure
-     * {@code IllegalArgumentException} that names no setting of this service's.
+     * {@code ConfigurationClientBuilder.connectionString} parses the value as the reader is built -
+     * during refresh, on every pod - and throws on a part it cannot read under an exception that
+     * names no setting of this service's and may quote what it was given, which is the one value
+     * this service holds that must never be quoted. So the three parts the SDK needs are required
+     * here, under the setting's own name, and the refusal carries none of them.
      *
-     * <p><strong>Parsed rather than matched</strong>, because the shapes that get past a pattern are
-     * the ones that fail furthest from here. {@code http://foo:bad} looks like a scheme and then
-     * something, and is a port that is not a number: {@code new URL} throws on it where the reader
-     * is built. {@code http://:} looks the same and is worse, because {@code new URL} accepts it -
-     * the client is built on an empty host, every read at 18:00 fails to connect, and an unreadable
-     * flag is a run skipped and counted and indistinguishable from a store outage, which is the
-     * failure this whole validator exists to turn into a refusal. So the endpoint is required to
-     * parse, to carry one of {@link #CLIENT_SCHEMES}, and to name a host.
+     * <p><strong>The endpoint is parsed rather than matched</strong>, because the shapes that get
+     * past a pattern are the ones that fail furthest from here. {@code http://foo:bad} is a port
+     * that is not a number and throws where the reader is built; {@code http://:} is worse, because
+     * the builder accepts it - the client is built on an empty host, every read at 18:00 fails to
+     * connect, and an unreadable flag is a run skipped and counted and indistinguishable from a store
+     * outage. So the endpoint is required to parse as written, to carry one of
+     * {@link #CLIENT_SCHEMES}, and to name a host; the secret is required to be the Base64 the SDK
+     * decodes it as.
      *
-     * <p>Asked only where generation is enabled, which is the only case in which the reader is
-     * built at all: an intake-only pod contributes no
-     * {@code LiveFeatureFlagConfig} and has nothing to refuse.
+     * <p>Asked only where generation is enabled. The reader is built on every pod, since
+     * {@code GET /operations/flag} is served on every pod, but a pod with no nightly job and no
+     * connection string answers {@code NOT_CONFIGURED} rather than refusing to start.
      *
-     * @param endpoint what the deployment supplied for the flag store
+     * @param feature what the deployment supplied for the flag store
      */
-    private static void requireAFlagStoreUrl(final String endpoint) {
-        final boolean aClientCouldBeBuilt = asEndpointUri(endpoint)
+    private static void requireAReadableConnectionString(final FeatureFlagProperties feature) {
+        final boolean endpointReadable = feature
+                .connectionStringPart(FeatureFlagProperties.ENDPOINT_PART)
+                .filter(endpoint -> endpoint.equals(endpoint.strip()))
+                .flatMap(PropertiesValidator::asEndpointUri)
                 .map(URI::getScheme)
                 .filter(scheme -> CLIENT_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT)))
                 .isPresent();
-        if (!aClientCouldBeBuilt) {
+        final boolean idPresent = feature.connectionStringPart(FeatureFlagProperties.ID_PART)
+                .filter(PropertiesValidator::hasText)
+                .isPresent();
+        final boolean secretReadable = feature
+                .connectionStringPart(FeatureFlagProperties.SECRET_PART)
+                .filter(PropertiesValidator::hasText)
+                .filter(PropertiesValidator::isBase64)
+                .isPresent();
+        if (!endpointReadable || !idPresent || !secretReadable) {
             throw new IllegalStateException(
-                    FEATURE_ENDPOINT + " (" + endpoint + ") must be an http or https URL with a"
-                            + " host when " + GENERATION_ENABLED + " is true - set it to the store's"
-                            + " own endpoint with its scheme, as https://<store>.azconfig.io or"
-                            + " http://<stub>:<port> for the local loop. The App Configuration"
-                            + " client is built as this context starts, and a value with no scheme,"
-                            + " no host or a port that is not a number is either a pod that never"
-                            + " starts or a client that cannot reach anything, read as an"
-                            + " unreadable flag every night");
+                    FEATURE_CONNECTION_STRING + " must be an App Configuration connection string"
+                            + " when " + GENERATION_ENABLED + " is true - Endpoint=<an http or https"
+                            + " URL with a host>;Id=<the key's id>;Secret=<the key's Base64"
+                            + " secret>, as Key Vault holds it. The client is built as this context"
+                            + " starts, and a string with a part missing or unreadable is either a"
+                            + " pod that never starts or a client that cannot reach anything, read"
+                            + " as an unreadable flag every night. The value is not quoted here");
         }
+    }
+
+    /**
+     * Whether a secret is the Base64 the SDK decodes it as.
+     *
+     * @param secret the connection string's secret part
+     * @return {@code true} where it decodes
+     */
+    private static boolean isBase64(final String secret) {
+        boolean decodes;
+        try {
+            Base64.getDecoder().decode(secret);
+            decodes = true;
+        } catch (final IllegalArgumentException notBase64) {
+            decodes = false;
+        }
+        return decodes;
     }
 
     /**

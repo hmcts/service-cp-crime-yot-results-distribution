@@ -30,7 +30,7 @@ class FeatureFlagPropertiesTest {
     class AsText {
 
         @Test
-        void to_string_with_a_connection_string_should_carry_none_of_it() {
+        void rendering_with_a_connection_string_should_carry_none_of_it() {
             final FeatureFlagProperties properties =
                     new FeatureFlagProperties(CONNECTION_STRING, KEY, "STE41", Duration.ofSeconds(2));
 
@@ -42,7 +42,7 @@ class FeatureFlagPropertiesTest {
         }
 
         @Test
-        void to_string_without_a_connection_string_should_say_it_is_unset() {
+        void rendering_without_a_connection_string_should_say_it_is_unset() {
             final FeatureFlagProperties properties =
                     new FeatureFlagProperties(null, KEY, "STE41", Duration.ofSeconds(2));
 

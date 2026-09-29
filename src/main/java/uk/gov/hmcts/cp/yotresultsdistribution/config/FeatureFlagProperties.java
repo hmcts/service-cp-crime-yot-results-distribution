@@ -1,102 +1,119 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.config;
 
 import java.time.Duration;
+import java.util.Optional;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Where the one lever is read from.
  *
- * <p>Bound from the {@code yotresultsdistribution.feature} keys. The endpoint and the label are bindings
- * rather than values - they arrive from the deployment, and a service that invented either would
- * read a different stack's flag or none at all - so neither has a default worth having and both
- * become required once generation is enabled.
+ * <p>Bound from the {@code yotresultsdistribution.feature} keys. The connection string and the label
+ * are bindings rather than values - they arrive from the deployment, and a service that invented
+ * either would read a different stack's flag or none at all - so neither has a default worth having
+ * and both become required once generation is enabled.
  *
- * <p>The key is the exception: it is the same setting the legacy reads, spelled the same way, and
- * that sameness is what makes the flag one lever rather than three. Changing it here without
- * changing it there leaves two implementations disagreeing about the cutover.
+ * <p><strong>The connection string is the estate's App Configuration key</strong> (constitution
+ * 5.1.0): {@code APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING} from Key Vault on a deployed pod, the
+ * secret resultsvalidator reads, because no App Configuration role can be assigned to this service's
+ * identity. It names the store itself ({@code Endpoint=}) and authorises the read ({@code Id=},
+ * {@code Secret=}), so there is no separate endpoint to disagree with it. It is the one static key
+ * this service holds, and nothing prints it: {@link #toString()} says only whether it is set.
+ *
+ * <p>The key is the exception to "a binding, not a value": it is the same setting the legacy reads,
+ * spelled the same way, and that sameness is what makes the flag one lever rather than three.
  *
  * <p>{@link #validate()} holds the two settings that have defaults to what those defaults have to
- * be. The endpoint and the label have none, so whether they are present is a question about
- * generation rather than about this record, and {@link PropertiesValidator} asks it.
+ * be. Whether the connection string and the label are present, and whether the string can be read,
+ * is a question about generation rather than about this record, and {@link PropertiesValidator}
+ * asks it.
  *
- * @param endpoint   the App Configuration store, empty where none is configured
- * @param key        the setting key, in App Configuration's feature-flag form
- * @param label      the stack's label, which is how one store serves every stack
- * @param timeout    the whole budget for the read; a timeout is UNREADABLE, which is OFF
- * @param credential which identity the read is authorised with, deployed or local
+ * @param connectionString the App Configuration connection string, blank where none is configured
+ * @param key              the setting key, in App Configuration's feature-flag form
+ * @param label            the stack's label, which is how one store serves every stack
+ * @param timeout          the whole budget for the read; a timeout is UNREADABLE, which is OFF
  */
 @ConfigurationProperties(prefix = "yotresultsdistribution.feature")
 public record FeatureFlagProperties(
         String connectionString,
-        String endpoint,
         @DefaultValue(".appconfig.featureflag/YotResultsDistributionService") String key,
         String label,
-        @DefaultValue("2s") Duration timeout,
-        @DefaultValue(WORKLOAD_IDENTITY) Credential credential) {
+        @DefaultValue("2s") Duration timeout) {
 
-    /** The identity of the published local pair the compose loop reads its stub with. */
+    /**
+     * The identity of the published local pair the compose loop reads its WireMock stub with.
+     *
+     * <p>Published, and a secret of nothing: no Azure store has ever been given it, and the only
+     * thing that answers it is a mapping that checks no credential. {@link PropertiesValidator}
+     * refuses it anywhere a real flag is read.
+     */
     public static final String PUBLISHED_LOCAL_ID = "0-l0-s0:yotresultsdistributionlocal";
 
-    /**
-     * The binding constructor, named because a second one sits beside it.
-     */
-    @ConstructorBinding
-    public FeatureFlagProperties {
-        // Nothing to normalise; the annotation is the point.
-    }
+    /** The part of a connection string that names the store. */
+    public static final String ENDPOINT_PART = "Endpoint";
 
-    /**
-     * The flag settings read with a connection string.
-     *
-     * @param connectionString the App Configuration connection string, or blank
-     * @param key              the setting key
-     * @param label            the stack's label
-     * @param timeout          the whole budget for the read
-     */
-    public FeatureFlagProperties(final String connectionString, final String key,
-            final String label, final Duration timeout) {
-        this(connectionString, null, key, label, timeout, Credential.WORKLOAD_IDENTITY);
-    }
+    /** The part that names the access key's identity. */
+    public static final String ID_PART = "Id";
 
-    /** The deployed identity, and the default: what the AKS webhook projects into the pod. */
-    public static final String WORKLOAD_IDENTITY = "workload-identity";
-
-    /** The compose loop's fixed identity, refused anywhere the reading could matter. */
-    public static final String LOCAL_TEST = "local-test";
+    /** The part that carries the access key's secret. */
+    public static final String SECRET_PART = "Secret";
 
     private static final String PREFIX = "yotresultsdistribution.feature";
     private static final String KEY = PREFIX + ".key";
     private static final String TIMEOUT = PREFIX + ".timeout";
 
+    /** Separates the parts of a connection string. */
+    private static final String PART_SEPARATOR = ";";
+
+    /** Separates a part's name from its value; the first one only, since a value may carry more. */
+    private static final char NAME_SEPARATOR = '=';
+
     /**
-     * Which identity the App Configuration read is authorised with.
+     * Whether a connection string is configured at all.
      *
-     * <p>A setting rather than a Spring profile, for the reason {@link PayloadSourceMode} gives:
-     * "whose identity read the flag" is a question an operator must be able to answer from the
-     * configuration in front of them - and, unlike a profile, it is a question
-     * {@link PropertiesValidator} can refuse the wrong answer to at startup.
+     * @return {@code true} where one is set
      */
-    public enum Credential {
+    public boolean hasConnectionString() {
+        return connectionString != null && !connectionString.isBlank();
+    }
 
-        /**
-         * The pod's own workload identity. The deployed value, and the default.
-         *
-         * <p>Built from the three variables the AKS webhook projects, exactly as the producer builds
-         * its Service Bus credential, so the platform ask stays one checkable statement.
-         */
-        WORKLOAD_IDENTITY,
+    /**
+     * One part of the connection string, as the SDK would read it.
+     *
+     * <p>The value is returned exactly as written, untrimmed: a question about whether the SDK can
+     * build a client from it has to be asked of what the SDK will be given. Names are matched
+     * without regard to case, as the SDK matches them.
+     *
+     * @param name the part's name - {@link #ENDPOINT_PART}, {@link #ID_PART} or
+     *             {@link #SECRET_PART}
+     * @return the part's value, or empty where the string carries no such part
+     */
+    public Optional<String> connectionStringPart(final String name) {
+        Optional<String> part = Optional.empty();
+        if (hasConnectionString()) {
+            for (final String segment : connectionString.split(PART_SEPARATOR)) {
+                final int separator = segment.indexOf(NAME_SEPARATOR);
+                if (separator > 0 && segment.substring(0, separator).trim().equalsIgnoreCase(name)) {
+                    part = Optional.of(segment.substring(separator + 1));
+                }
+            }
+        }
+        return part;
+    }
 
-        /**
-         * A fixed, published identity that authorises nothing, for the local compose loop alone.
-         *
-         * <p>It exists so the <em>real</em> reader can be pointed at the WireMock App Configuration
-         * stub: a bearer token is only ever sent over TLS, so a workload-identity credential cannot
-         * read a plain-HTTP stand-in at all. {@link PropertiesValidator} refuses this value wherever
-         * the endpoint names a real store or the pod is a deployed one.
-         */
-        LOCAL_TEST
+    /**
+     * The settings as text, with the connection string reduced to whether it is set.
+     *
+     * <p>A record's generated {@code toString()} prints every component, and this one's first
+     * component is a key with access to every stack's flags. Settings reach a log or an exception
+     * message by accident more often than by design (constitution Principle VII).
+     *
+     * @return the key, the label and the timeout, and {@code <set>} or {@code <unset>}
+     */
+    @Override
+    public String toString() {
+        return "FeatureFlagProperties[connectionString=" + (hasConnectionString() ? "<set>" : "<unset>")
+                + ", key=" + key + ", label=" + label + ", timeout=" + timeout + "]";
     }
 
     /**

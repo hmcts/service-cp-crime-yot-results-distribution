@@ -499,9 +499,9 @@ class AppConfigurationFlagReaderTest {
          * separately here and the case reads how long the answer took: at the client's budget it is
          * the client that ended it, and the reader's own deadline was never reached.
          *
-         * <p>Both credentials build their client through the factory this asserts on, which is what
-         * makes the {@code local-test} client the deployed one in this respect as well as in the
-         * key, the label, the fail-closed parsing and the outer deadline.
+         * <p>The live wiring builds its client through the factory this asserts on, which is what
+         * makes the compose loop's client the deployed one in this respect as well as in the key,
+         * the label, the fail-closed parsing and the outer deadline.
          */
         @Test
         @DisplayName("the client the adapter builds ends a black-holed read at its own budget, not "
