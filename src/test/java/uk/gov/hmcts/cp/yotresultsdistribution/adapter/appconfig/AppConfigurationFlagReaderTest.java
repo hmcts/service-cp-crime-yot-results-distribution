@@ -457,6 +457,19 @@ class AppConfigurationFlagReaderTest {
         private static final Duration PATIENT_BUDGET = Duration.ofSeconds(3);
 
         /**
+         * Halfway between the client's budget and the reader's outer deadline: the line that says
+         * which of the two ended a read.
+         *
+         * <p>This case asks <em>which</em> bound fired, not how closely the client kept to its
+         * own, so it is not held to {@link #JITTER}: the first call on a freshly built HTTP client
+         * pays for its class loading and its connection pool, which a shared CI runner has been
+         * seen to stretch past two jitters. The deadline itself is still pinned to one jitter by
+         * the case above.
+         */
+        private static final Duration CLIENT_OR_READER =
+                SHORT_BUDGET.plus(PATIENT_BUDGET.minus(SHORT_BUDGET).dividedBy(2));
+
+        /**
          * The nightly job asks this question first and does nothing until it is answered, so a read
          * that outlasts its budget is a run that has not started: at 18:00 the difference between a
          * skipped run and a stalled one is an alert nobody gets. The configured timeout is
@@ -525,7 +538,7 @@ class AppConfigurationFlagReaderTest {
                             + "with - a client with no legs of its own would have been ended by "
                             + "the reader's outer deadline instead, having held the connection "
                             + "for it")
-                    .isLessThan(SHORT_BUDGET.plus(JITTER).plus(JITTER));
+                    .isLessThan(CLIENT_OR_READER);
         }
     }
 
