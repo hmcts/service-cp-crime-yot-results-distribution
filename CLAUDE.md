@@ -93,7 +93,9 @@ notification enabled against production data outside cutover.
   App Configuration connection string, `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING` in Key Vault
   (the secret resultsvalidator reads), injected as `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`
   - because no App Configuration role can be assigned to this service's identity through
-  `ccm-namespace`. It is still never committed, never defaulted, and never logged or echoed.
+  `ccm-namespace`. It is still never committed, never defaulted, and never logged or echoed. The
+  published local pair committed in `docker-compose.yml` is not a key: it authorises nothing, and
+  start-up refuses it wherever a real flag is read.
 - The STE wiring (helmsman entry, values, queue terraform, MI exports) lives in the sibling infra
   repos, not here.
 - **The operations API's two filter switches default ON.** `AUTHZ_HTTP_ENABLED` and

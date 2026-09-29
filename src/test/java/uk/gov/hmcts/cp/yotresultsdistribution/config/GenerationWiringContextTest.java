@@ -599,7 +599,8 @@ class GenerationWiringContextTest {
          * A string the SDK cannot parse fails the reader's construction under the setting's name,
          * quoting nothing.
          *
-         * <p>{@code ConfigurationClientBuilder.connectionString} throws
+         * <p>{@code ConfigurationClientBuilder.connectionString} only stores the value;
+         * {@code buildClient()} parses it and throws
          * {@code IllegalArgumentException("Could not parse 'connectionString' ... Actual:" + value)}
          * - the whole string, secret included. The reader is built on every pod, generation on or
          * off, and whether the validator ran first is bean order, which nothing guarantees. So the

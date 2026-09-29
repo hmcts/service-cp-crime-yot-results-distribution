@@ -1408,6 +1408,8 @@ public class PropertiesValidator implements InitializingBean {
     private static void validateThePublishedLocalPairIsNowhereARealFlagIsRead(
             final YotResultsDistributionProperties properties, final FeatureFlagProperties feature) {
 
+        // Trimmed on purpose, and not redundant: the part is read as the SDK reads it, which trims
+        // the segment but not the value, so "Id= <published id>" is still the published pair.
         final boolean published = feature.connectionStringPart(FeatureFlagProperties.ID_PART)
                 .map(String::trim)
                 .filter(FeatureFlagProperties.PUBLISHED_LOCAL_ID::equals)
@@ -1703,7 +1705,7 @@ public class PropertiesValidator implements InitializingBean {
      * The connection string has to be one a client can be built from, not merely a value that is set.
      *
      * <p>Presence is not enough, and the refusal belongs here rather than in the SDK.
-     * {@code ConfigurationClientBuilder.connectionString} parses the value as the reader is built -
+     * {@code ConfigurationClientBuilder.buildClient()} parses the value as the reader is built -
      * during refresh, on every pod - and throws on a part it cannot read under an exception that
      * names no setting of this service's and may quote what it was given, which is the one value
      * this service holds that must never be quoted. So the three parts the SDK needs are required
@@ -1720,6 +1722,8 @@ public class PropertiesValidator implements InitializingBean {
      * ({@link FeatureFlagProperties#connectionStringPart}), so nothing admitted here is refused
      * there. A padded endpoint ({@code Endpoint=  https://...}) is refused too - the SDK's URL parse
      * would forgive it, but a value somebody pasted with its whitespace is one worth a second look.
+     * So is a padded Id ({@code Id= ...}): the SDK trims the segment but not the value, so it would
+     * sign every read with the space and the store would refuse each one at 18:00.
      *
      * <p>Asked of <strong>any string that is set</strong>, whatever generation says: the reader is
      * built on every pod, since {@code GET /operations/flag} is served on every pod, and an
@@ -1774,6 +1778,7 @@ public class PropertiesValidator implements InitializingBean {
                 .isPresent();
         final boolean idPresent = feature.connectionStringPart(FeatureFlagProperties.ID_PART)
                 .filter(PropertiesValidator::hasText)
+                .filter(id -> id.equals(id.strip()))
                 .isPresent();
         final boolean secretReadable = feature
                 .connectionStringPart(FeatureFlagProperties.SECRET_PART)

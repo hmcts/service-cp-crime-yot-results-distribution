@@ -27,7 +27,10 @@ string's shape and https refusals), `config/FeatureFlagPropertiesTest` and
 
 Modified sections (this amendment): Technology Stack - the Feature flag and
 Secrets/identity bullets; Increments - 005 marked complete, 006 added as
-current. Nothing else; Principles I-VIII untouched.
+current. Nothing else; Principles I-VIII untouched. Clarified the same day,
+without a version bump (006 T007): the Secrets/identity bullet now names the
+published local pair committed in `docker-compose.yml` beside the sanctioned
+key, as 006 FR-005 already did - wording only, no rule changes.
 
 Templates / guidance reviewed:
   - CLAUDE.md, README.md, .claude/rules/design_rules.md,
@@ -1310,7 +1313,9 @@ them read it the same way they read everything else.
 - **Secrets/identity**: workload identity + Key Vault CSI. The App
   Configuration connection string is the one static key this service holds, and
   it arrives the same way every other secret does - Key Vault, CSI, never a
-  committed value or an environment default.
+  committed value or an environment default. The one connection string that is
+  committed, the published local pair in `docker-compose.yml`, authorises
+  nothing and is refused wherever a real flag is read (006 FR-005).
 - **Deployment**: AKS via the standard Flux route. Since increment 002 this
   service **owns the schedule, the render request and the e-mail fan-out**;
   it contains **no PDF rendering code** (systemdocgenerator renders the

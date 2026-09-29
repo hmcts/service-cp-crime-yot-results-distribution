@@ -24,9 +24,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * spelled the same way, and that sameness is what makes the flag one lever rather than three.
  *
  * <p>{@link #validate()} holds the two settings that have defaults to what those defaults have to
- * be. Whether the connection string and the label are present, and whether the string can be read,
- * is a question about generation rather than about this record, and {@link PropertiesValidator}
- * asks it.
+ * be. Whether the connection string and the label are present is a question about generation, and
+ * whether a string can be read is asked of any string that is set, generation or not; neither is a
+ * question about this record, and {@link PropertiesValidator} asks both.
  *
  * @param connectionString the App Configuration connection string, blank where none is configured
  * @param key              the setting key, in App Configuration's feature-flag form

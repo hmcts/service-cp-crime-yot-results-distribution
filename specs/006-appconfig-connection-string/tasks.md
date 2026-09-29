@@ -97,7 +97,7 @@ Format: `[ID] [P?] [US#] Description`
   - Red run (2026-09-29, `-Dtest.noFailFast=true`, `ConfigurationValidationTest` and
     `FeatureFlagPropertiesTest`): 219 tests, 2 failed, both `AssertionError` - the padded-Id case
     with generation on and with it off.
-- [ ] **T007** [US2] [US3] Make them pass, and tidy the notes that change no behaviour:
+- [x] **T007** [US2] [US3] Make them pass, and tidy the notes that change no behaviour:
   - `PropertiesValidator` refuses an Id that differs from its `strip()`, as it does a padded
     endpoint.
   - `LiveFeatureFlagConfig` builds the HTTP client before the `try`, so the catch guards only the
@@ -108,6 +108,12 @@ Format: `[ID] [P?] [US#] Description`
   - T003's wording claims only what its evidence shows.
   - Constitution 5.1.0 and `CLAUDE.md` name the published local pair in `docker-compose.yml`
     beside the sanctioned key, as FR-005 does - a wording clarification inside the same amendment.
+  - The Id's `trim()` in the published-pair check is kept, not removed: the part keeps a space after
+    its `=`, so without it `Id= <published id>` would slip past that refusal.
+  - Green run (2026-09-29, `-Dtest.noFailFast=true`, the eight T005 suites): 329 tests, 0 failed.
+    `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest` clean.
+  - **Still open:** SC-002 - the `*IT` suites and the JaCoCo gate need a Docker-backed
+    `./gradlew cleanTest build`.
 
 ## Handover
 

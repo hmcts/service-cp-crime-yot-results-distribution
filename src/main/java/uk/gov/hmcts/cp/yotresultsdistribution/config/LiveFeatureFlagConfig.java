@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.config;
 
+import com.azure.core.http.HttpClient;
 import com.azure.core.http.policy.FixedDelayOptions;
 import com.azure.core.http.policy.RetryOptions;
 import com.azure.data.appconfiguration.ConfigurationClient;
@@ -74,8 +75,9 @@ public class LiveFeatureFlagConfig {
      * skipped run with a cause on it.
      *
      * <p><strong>A string the builder cannot parse is refused here, in this service's own
-     * words.</strong> {@code ConfigurationClientBuilder.connectionString} throws
-     * {@code IllegalArgumentException} with the whole value - secret included - in its message.
+     * words.</strong> {@code ConfigurationClientBuilder.connectionString} only stores the value;
+     * {@code buildClient()} parses it, and throws {@code IllegalArgumentException} with the whole
+     * value - secret included - in its message.
      * {@link PropertiesValidator} refuses every shape the builder would, under the setting's name,
      * but nothing orders it before this bean and bean order is not a thing to rely on for a secret.
      * So the builder's exception is classified and rethrown as one naming only the setting, with no
@@ -96,11 +98,14 @@ public class LiveFeatureFlagConfig {
     private static ConfigurationClient connectionStringClient(final FeatureFlagProperties properties) {
         ConfigurationClient client = null;
         if (properties.hasConnectionString()) {
+            // Built outside the try, so the catch below guards only the parse that can quote the
+            // value and never mislabels an HTTP-client failure as an unparseable string.
+            final HttpClient httpClient = AppConfigurationFlagReader.httpClientFor(properties);
             try {
                 client = new ConfigurationClientBuilder()
                         .connectionString(properties.connectionString())
                         .retryOptions(NO_RETRIES)
-                        .httpClient(AppConfigurationFlagReader.httpClientFor(properties))
+                        .httpClient(httpClient)
                         .buildClient();
             } catch (final IllegalArgumentException unparseable) {
                 // Classified and rethrown without its cause: the SDK's message quotes the value.
