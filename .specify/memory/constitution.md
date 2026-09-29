@@ -1,6 +1,42 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 5.0.3 → 5.1.0
+Bump rationale: MINOR - the flag's credential is changed (2026-09-29). The
+                Technology Stack said the flag is read on the pod's workload
+                identity with an `App Configuration Data Reader` role. That
+                role cannot be granted: `ccm-namespace` resolves role names
+                through the cluster ConfigMap `azure-info/role-definition`,
+                which carries no App Configuration role, and the platform team
+                has no date for adding one. Every other reader of the estate's
+                flags (resultsvalidator, the WildFly contexts) authorises with
+                the shared connection string from Key Vault, so this service
+                does the same and the workload-identity read is removed rather
+                than kept beside it. No principle's wording changes; the
+                Cutover Rule (one flag, read once per run, fail-closed) is
+                untouched. MINOR rather than PATCH because a stack choice is
+                replaced and a static key is admitted where the stack said
+                none; not MAJOR because no principle is redefined.
+
+Proposed in: specs/006-appconfig-connection-string/spec.md. Pinned by
+`config/ConfigurationValidationTest.PublishedLocalPair`,
+`config/ConfigurationValidationTest.ConnectionStringPrivacy`,
+`config/FeatureFlagPropertiesTest` and
+`config/GenerationWiringContextTest.FlagCredential`.
+
+Modified sections (this amendment): Technology Stack - the Feature flag and
+Secrets/identity bullets. Nothing else; Principles I-VIII untouched.
+
+Templates / guidance reviewed:
+  - CLAUDE.md, README.md, .claude/rules/design_rules.md,
+    docker/wiremock/README.md                ⚠ UPDATED in the same commit -
+      each described the flag as read on workload identity, or forbade every
+      static key.
+  - specs/002-consolidate-progression-leg/*  ✅ left as history - research §3
+      records the decision this amendment reverses.
+  - .specify/templates/*                     ✅ compatible - no change.
+
+Previous amendment (5.0.2 → 5.0.3):
 Version change: 5.0.2 → 5.0.3
 Bump rationale: PATCH - the owned OpenAPI document is named (2026-09-21). The
                 principle called it `src/main/resources/openapi.yaml`; the file
@@ -1239,9 +1275,13 @@ them read it the same way they read everything else.
 - **Second datasource**: the shared framework `fileservice` Postgres,
   `INSERT` on `metadata` and `content` only, credentials via Key Vault CSI; a
   readiness input only while a run is in progress.
-- **Feature flag**: `com.azure:azure-data-appconfiguration` + workload
-  identity (`App Configuration Data Reader`), key
+- **Feature flag**: `com.azure:azure-data-appconfiguration`, authorised by the
+  estate's shared App Configuration connection string
+  (`APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, from Key Vault via the CSI
+  driver - the secret resultsvalidator reads), key
   `.appconfig.featureflag/YotResultsDistributionService`, label = stack, 2 s timeout.
+  The connection string is never committed, never defaulted, and never reaches
+  a log, an exception message, a `toString()` or a response (Principle VII).
 - **HTTP surface**: Spring Boot Actuator — health, readiness/liveness,
   metrics — **and** the operations API under `/operations/**`. No business
   endpoints (Principle III). Since increment 005 the seven operator actions are
@@ -1265,7 +1305,10 @@ them read it the same way they read everything else.
   queue + DLQ depth; alerts on DLQ > 0 and on failures sustained for
   15 minutes. Expect a high COMPLETED-but-not-submitted rate: two of the four
   no-op reasons are this flow's most common legitimate outcomes.
-- **Secrets/identity**: workload identity + Key Vault CSI.
+- **Secrets/identity**: workload identity + Key Vault CSI. The App
+  Configuration connection string is the one static key this service holds, and
+  it arrives the same way every other secret does - Key Vault, CSI, never a
+  committed value or an environment default.
 - **Deployment**: AKS via the standard Flux route. Since increment 002 this
   service **owns the schedule, the render request and the e-mail fan-out**;
   it contains **no PDF rendering code** (systemdocgenerator renders the
@@ -1424,4 +1467,4 @@ retained as quick-reference material and MUST be kept in sync.
   needs the same written sign-off the old parity regime demanded, before
   merge. C-numbers are stable: renumber never, append only.
 
-**Version**: 5.0.3 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-21
+**Version**: 5.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-29
