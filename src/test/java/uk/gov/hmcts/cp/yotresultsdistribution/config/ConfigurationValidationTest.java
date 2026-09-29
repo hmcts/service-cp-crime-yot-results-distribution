@@ -1642,6 +1642,8 @@ class ConfigurationValidationTest {
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret ="
                     + DEPLOYED_SECRET,
             "Endpoint=  https://appconfig.internal;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id= ste-id;Secret="
+                    + DEPLOYED_SECRET,
             "not-a-connection-string-" + DEPLOYED_SECRET,
         })
         void enabling_generation_with_a_flag_connection_string_that_cannot_be_read_should_fail_startup(
@@ -1672,6 +1674,8 @@ class ConfigurationValidationTest {
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id",
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!",
             "Endpoint =https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id= ste-id;Secret="
                     + DEPLOYED_SECRET,
         })
         void a_flag_connection_string_that_cannot_be_read_should_fail_startup_with_generation_off(
@@ -1707,6 +1711,7 @@ class ConfigurationValidationTest {
                                 .hasMessageContaining(FLAG_CONNECTION_STRING)
                                 .hasMessageContaining("https")
                                 .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("ste-id")
                                 .hasMessageNotContaining("yot-results-distribution-ste86");
                     });
         }
@@ -1721,6 +1726,7 @@ class ConfigurationValidationTest {
                                 .hasMessageContaining(FLAG_CONNECTION_STRING)
                                 .hasMessageContaining("https")
                                 .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("ste-id")
                                 .hasMessageNotContaining("appconfig.internal");
                     });
         }
@@ -1729,6 +1735,15 @@ class ConfigurationValidationTest {
         void a_deployed_pod_reading_its_store_over_https_should_start() {
             runner.withPropertyValues(NAMESPACE_PROPERTY, FLAG_CONNECTION_STRING
                             + "=Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                            + DEPLOYED_SECRET)
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
+
+        /** The scheme is read as a URI scheme, which is case-insensitive: HTTPS is https. */
+        @Test
+        void a_real_store_over_an_uppercase_https_scheme_should_start() {
+            generating.withPropertyValues(FLAG_CONNECTION_STRING
+                            + "=Endpoint=HTTPS://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
                             + DEPLOYED_SECRET)
                     .run(context -> assertThat(context).hasNotFailed());
         }

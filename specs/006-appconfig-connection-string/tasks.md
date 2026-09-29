@@ -35,7 +35,8 @@ Format: `[ID] [P?] [US#] Description`
 
 - [x] **T003** [US1] [US2] [US3] `FeatureFlagProperties`, `LiveFeatureFlagConfig`,
   `AppConfigurationFlagReader`, `PropertiesValidator`, `application.yaml`, `docker-compose.yml`;
-  delete the workload-identity flag path. `./gradlew build` green.
+  delete the workload-identity flag path. The affected suites, Checkstyle and PMD are green; the
+  full `./gradlew build` is **not yet** (SC-002, below).
   Green run (2026-09-29, `-Dtest.noFailFast=true`, the four suites plus `HttpSurfaceTest` and
   `GenerationMetricsContextTest`): 264 tests, 0 failed. Full `./gradlew test` on a host with no
   Docker: 3477 tests, 137 failed, every one a Testcontainers "could not find a valid Docker
@@ -80,6 +81,33 @@ Format: `[ID] [P?] [US#] Description`
   - `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest` are clean.
   - **Still open:** SC-002, the JaCoCo gate and the `*IT` suites, which need a Docker-backed
     `./gradlew build`.
+
+## Phase 4: Gate remediation (round 2 leftovers)
+
+- [x] **T006** [US2] [US3] Red tests for the round-2 notes:
+  - `ConfigurationValidationTest.GenerationDownstreams`: an Id with a space after its `=`
+    (`Id= ste-id`) is refused, generation on and off, naming the setting and quoting none of the
+    secret, Id or host. The SDK trims the segment, not the value, so it would sign with the padded
+    Id and fail only at 18:00.
+  - The two plain-http refusals also assert the Id is absent. `HTTPS://` in upper case is accepted
+    for a real store.
+  - `FeatureFlagPropertiesTest.Parts`: an empty `;;` segment is passed over, and a space after `=`
+    stays on the value.
+  - No seam needed.
+  - Red run (2026-09-29, `-Dtest.noFailFast=true`, `ConfigurationValidationTest` and
+    `FeatureFlagPropertiesTest`): 219 tests, 2 failed, both `AssertionError` - the padded-Id case
+    with generation on and with it off.
+- [ ] **T007** [US2] [US3] Make them pass, and tidy the notes that change no behaviour:
+  - `PropertiesValidator` refuses an Id that differs from its `strip()`, as it does a padded
+    endpoint.
+  - `LiveFeatureFlagConfig` builds the HTTP client before the `try`, so the catch guards only the
+    parse that can quote the value.
+  - Javadoc: `ConfigurationClientBuilder.buildClient()` parses and throws, not `connectionString`
+    (`LiveFeatureFlagConfig`, `PropertiesValidator`, `GenerationWiringContextTest`);
+    `FeatureFlagProperties` says presence is generation's, readability any set string's.
+  - T003's wording claims only what its evidence shows.
+  - Constitution 5.1.0 and `CLAUDE.md` name the published local pair in `docker-compose.yml`
+    beside the sanctioned key, as FR-005 does - a wording clarification inside the same amendment.
 
 ## Handover
 

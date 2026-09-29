@@ -107,6 +107,21 @@ class FeatureFlagPropertiesTest {
         }
 
         @Test
+        void an_empty_segment_should_be_passed_over() {
+            assertThat(partOf("Endpoint=https://x.azconfig.io;;Id=ste-id;;Secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .contains("ste-id");
+        }
+
+        @Test
+        void a_space_after_the_equals_sign_should_stay_on_the_value() {
+            assertThat(partOf("Endpoint=https://x.azconfig.io;Id= ste-id;Secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .as("the SDK trims the segment, not the value, so it would sign with ' ste-id'")
+                    .contains(" ste-id");
+        }
+
+        @Test
         void no_connection_string_should_have_no_parts() {
             assertThat(new FeatureFlagProperties(" ", KEY, "STE41", Duration.ofSeconds(2))
                     .connectionStringPart(FeatureFlagProperties.ENDPOINT_PART))
