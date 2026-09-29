@@ -532,7 +532,8 @@ class GenerationWiringContextTest {
 
         private static final String NEVER_QUOTED_ID = "ste-id-never-quoted";
 
-        private static final String NEVER_QUOTED_SECRET = "bmV2ZXItcXVvdGVkLXNlY3JldA==";
+        private static final String NEVER_QUOTED_SECRET =
+                "bmV2ZXItcXVvdGVkLXNlY3JldA=="; // gitleaks:allow
 
         /** App Configuration's feature-flag JSON, as the vendored value schema declares it. */
         private static final String FLAG_ON = "{\\\"id\\\":\\\"YotResultsDistributionService\\\","

@@ -98,7 +98,8 @@ class ConfigurationValidationTest {
     private static final String FLAG_CONNECTION_STRING = "yotresultsdistribution.feature.connection-string";
 
     /** Invented here and distinctive, so a refusal that quoted it would be found. */
-    private static final String DEPLOYED_SECRET = "ZGVwbG95ZWQtc2VjcmV0LW5ldmVyLXF1b3RlZA==";
+    private static final String DEPLOYED_SECRET =
+            "ZGVwbG95ZWQtc2VjcmV0LW5ldmVyLXF1b3RlZA=="; // gitleaks:allow
 
     /** The shape Key Vault injects on a deployed pod. */
     private static final String FLAG_CONNECTION_STRING_PROPERTY = FLAG_CONNECTION_STRING

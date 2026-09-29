@@ -19,7 +19,8 @@ import org.junit.jupiter.api.Test;
 class FeatureFlagPropertiesTest {
 
     /** Invented here, and distinctive enough to be looked for. */
-    private static final String SECRET = "c2VjcmV0LXRoYXQtbXVzdC1uZXZlci1sZWFr";
+    private static final String SECRET =
+            "c2VjcmV0LXRoYXQtbXVzdC1uZXZlci1sZWFr"; // gitleaks:allow
 
     private static final String CONNECTION_STRING =
             "Endpoint=https://ste-store.azconfig.io;Id=ste-id;Secret=" + SECRET;
