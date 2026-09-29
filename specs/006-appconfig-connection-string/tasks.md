@@ -115,6 +115,26 @@ Format: `[ID] [P?] [US#] Description`
   - **Still open:** SC-002 - the `*IT` suites and the JaCoCo gate need a Docker-backed
     `./gradlew cleanTest build`.
 
+## Phase 5: Gate remediation (round 3: repeated parts)
+
+- [x] **T008** [US2] [US3] Red tests for repeated parts. The SDK validates every `Endpoint=` segment
+  (`new URL`) and every `Secret=` segment (Base64), throwing on the first bad one, where
+  `connectionStringPart` keeps only the last - so a bad-then-good repeat passed the validator and
+  was refused only at `buildClient()`:
+  - `ConfigurationValidationTest.GenerationDownstreams`: a repeated `Endpoint` (bad then good, and
+    good then good), `Id` and `Secret`, and a mixed-case repeat (`endpoint=` + `Endpoint=`), each
+    refused with generation on and off, naming the setting and quoting none of the secret, Id or
+    host.
+  - `ConfigurationValidationTest.PublishedLocalPair`: `Id= <published id>` against a real store and
+    on a deployed pod gets the published-pair refusal itself, pinning the retained `trim()`.
+  - `FeatureFlagPropertiesTest.Parts`: `connectionStringPartCount` counts every segment of a name,
+    case-insensitively, and none that is not a part.
+  - Seam: `FeatureFlagProperties.connectionStringPartCount`, answering at most one.
+  - Red run (2026-09-29, `-Dtest.noFailFast=true`, `ConfigurationValidationTest` and
+    `FeatureFlagPropertiesTest`): 236 tests, 12 failed - 10 `AssertionError` (the five repeats, with
+    generation on and off) and 2 `AssertionFailedError` (the two repeat counts). The two spaced-Id
+    published-pair cases pass already: they pin behaviour that exists.
+
 ## Handover
 
 - Deployed wiring: `cpp-aks-deploy` PR #935 (93bde6a0).

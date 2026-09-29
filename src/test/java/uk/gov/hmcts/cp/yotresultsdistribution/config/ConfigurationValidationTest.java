@@ -1645,6 +1645,18 @@ class ConfigurationValidationTest {
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id= ste-id;Secret="
                     + DEPLOYED_SECRET,
             "not-a-connection-string-" + DEPLOYED_SECRET,
+            "Endpoint=http://foo:bad;Endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!;"
+                    + "Secret=" + DEPLOYED_SECRET,
+            "endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
         })
         void enabling_generation_with_a_flag_connection_string_that_cannot_be_read_should_fail_startup(
                 final String connectionString) {
@@ -1676,6 +1688,18 @@ class ConfigurationValidationTest {
             "Endpoint =https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
                     + DEPLOYED_SECRET,
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id= ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=http://foo:bad;Endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!;"
+                    + "Secret=" + DEPLOYED_SECRET,
+            "endpoint=https://yot-results-distribution-ste86.azconfig.io;"
+                    + "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
                     + DEPLOYED_SECRET,
         })
         void a_flag_connection_string_that_cannot_be_read_should_fail_startup_with_generation_off(
@@ -2144,6 +2168,35 @@ class ConfigurationValidationTest {
                         assertThat(context).hasFailed();
                         assertThat(context.getStartupFailure())
                                 .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("yotresultsdistribution.servicebus.namespace");
+                    });
+        }
+
+        /**
+         * The published pair written with a space after {@code Id=} is still the published pair.
+         *
+         * <p>The SDK trims the segment but not the value, so this pins the trim the published-pair
+         * check keeps: the refusal is the published pair's own, not the generic readability one.
+         */
+        @Test
+        void the_published_local_pair_with_a_spaced_id_against_a_real_store_should_fail_startup() {
+            generating.withPropertyValues(spacedLocalPairAt(REAL_STORE_ENDPOINT)).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasMessageContaining(FLAG_CONNECTION_STRING)
+                        .hasMessageContaining("published local pair")
+                        .hasMessageContaining("real App Configuration store");
+            });
+        }
+
+        @Test
+        void the_published_local_pair_with_a_spaced_id_on_a_deployed_pod_should_fail_startup() {
+            runner.withPropertyValues(NAMESPACE_PROPERTY, spacedLocalPairAt("http://wiremock:8080"))
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("published local pair")
                                 .hasMessageContaining("yotresultsdistribution.servicebus.namespace");
                     });
         }
@@ -3228,6 +3281,12 @@ class ConfigurationValidationTest {
     /** The flag's connection-string setting, signed with the published local pair. */
     private static String localPairAt(final String endpoint) {
         return FLAG_CONNECTION_STRING + "=Endpoint=" + endpoint + ";Id="
+                + FeatureFlagProperties.PUBLISHED_LOCAL_ID + ";Secret=" + LOCAL_PAIR_SECRET;
+    }
+
+    /** The same, with a space after {@code Id=} - which the SDK keeps on the value. */
+    private static String spacedLocalPairAt(final String endpoint) {
+        return FLAG_CONNECTION_STRING + "=Endpoint=" + endpoint + ";Id= "
                 + FeatureFlagProperties.PUBLISHED_LOCAL_ID + ";Secret=" + LOCAL_PAIR_SECRET;
     }
 }

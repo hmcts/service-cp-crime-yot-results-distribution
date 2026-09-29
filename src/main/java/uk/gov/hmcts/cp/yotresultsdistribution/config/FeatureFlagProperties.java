@@ -106,6 +106,16 @@ public record FeatureFlagProperties(
     }
 
     /**
+     * How many segments of the connection string carry the named part.
+     *
+     * @param name the part's name
+     * @return the number of segments that carry it
+     */
+    public long connectionStringPartCount(final String name) {
+        return connectionStringPart(name).isPresent() ? 1 : 0;
+    }
+
+    /**
      * The settings as text, with the connection string reduced to whether it is set.
      *
      * <p>A record's generated {@code toString()} prints every component, and this one's first

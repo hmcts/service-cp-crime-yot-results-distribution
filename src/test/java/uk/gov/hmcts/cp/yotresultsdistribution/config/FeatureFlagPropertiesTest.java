@@ -128,6 +128,45 @@ class FeatureFlagPropertiesTest {
                     .isEmpty();
         }
 
+        @Test
+        void a_part_given_twice_should_be_counted_twice() {
+            assertThat(countOf("Id=first;Endpoint=https://x.azconfig.io;Id=second;Secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .as("the SDK reads every segment of a name, so the validator must see each one")
+                    .isEqualTo(2);
+        }
+
+        @Test
+        void a_part_given_twice_in_different_cases_should_be_counted_twice() {
+            assertThat(countOf("endpoint=https://x.azconfig.io; Endpoint=https://x.azconfig.io;"
+                    + "Id=ste-id;Secret=" + SECRET, FeatureFlagProperties.ENDPOINT_PART))
+                    .isEqualTo(2);
+        }
+
+        @Test
+        void a_part_given_once_should_be_counted_once() {
+            assertThat(countOf("Endpoint=https://x.azconfig.io;Id=ste-id;Secret=" + SECRET,
+                    FeatureFlagProperties.SECRET_PART))
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void a_name_separated_from_its_equals_sign_should_not_be_counted() {
+            assertThat(countOf("Endpoint=https://x.azconfig.io;Endpoint =https://y;Id=ste-id;Secret="
+                    + SECRET, FeatureFlagProperties.ENDPOINT_PART))
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void no_connection_string_should_count_no_parts() {
+            assertThat(countOf(" ", FeatureFlagProperties.ID_PART)).isZero();
+        }
+
+        private long countOf(final String connectionString, final String name) {
+            return new FeatureFlagProperties(connectionString, KEY, "STE41", Duration.ofSeconds(2))
+                    .connectionStringPartCount(name);
+        }
+
         private Optional<String> partOf(final String connectionString, final String name) {
             return new FeatureFlagProperties(connectionString, KEY, "STE41", Duration.ofSeconds(2))
                     .connectionStringPart(name);
