@@ -23,6 +23,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -525,6 +527,13 @@ class GenerationWiringContextTest {
         /** The published local pair's secret; Base64 of {@code not-a-secret}. */
         private static final String LOCAL_SECRET = "bm90LWEtc2VjcmV0";
 
+        /** Invented, distinctive parts a refusal that quoted the value would be found by. */
+        private static final String NEVER_QUOTED_HOST = "ste-store-never-quoted.azconfig.io";
+
+        private static final String NEVER_QUOTED_ID = "ste-id-never-quoted";
+
+        private static final String NEVER_QUOTED_SECRET = "bmV2ZXItcXVvdGVkLXNlY3JldA==";
+
         /** App Configuration's feature-flag JSON, as the vendored value schema declares it. */
         private static final String FLAG_ON = "{\\\"id\\\":\\\"YotResultsDistributionService\\\","
                 + "\\\"enabled\\\":true,\\\"conditions\\\":{\\\"client_filters\\\":[]}}";
@@ -584,6 +593,44 @@ class GenerationWiringContextTest {
             assertThat(store.findAll(getRequestedFor(urlPathMatching(ANY_KEY_PATH))))
                     .as("and nothing was asked")
                     .isEmpty();
+        }
+
+        /**
+         * A string the SDK cannot parse fails the reader's construction under the setting's name,
+         * quoting nothing.
+         *
+         * <p>{@code ConfigurationClientBuilder.connectionString} throws
+         * {@code IllegalArgumentException("Could not parse 'connectionString' ... Actual:" + value)}
+         * - the whole string, secret included. The reader is built on every pod, generation on or
+         * off, and whether the validator ran first is bean order, which nothing guarantees. So the
+         * builder's own refusal must be one this service wrote: the setting named, no part of the
+         * value, and no cause attached to carry the SDK's message along with it.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID,
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Secret=" + NEVER_QUOTED_SECRET + ";Tag=x",
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID + ";Secret=not*base64!",
+            "Endpoint =https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID + ";Secret="
+                    + NEVER_QUOTED_SECRET,
+            "Endpoint=nope-" + NEVER_QUOTED_HOST + ":bad;Id=" + NEVER_QUOTED_ID + ";Secret="
+                    + NEVER_QUOTED_SECRET,
+        })
+        @DisplayName("a string the SDK cannot parse is refused under the setting, quoting nothing")
+        void an_unparseable_connection_string_should_be_refused_quoting_none_of_it(
+                final String connectionString) {
+
+            final FeatureFlagProperties properties = flagWith(connectionString);
+            final LiveFeatureFlagConfig config = new LiveFeatureFlagConfig();
+
+            assertThatThrownBy(() -> config.featureFlagReader(properties))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("yotresultsdistribution.feature.connection-string")
+                    .hasMessageNotContaining(NEVER_QUOTED_SECRET)
+                    .hasMessageNotContaining(NEVER_QUOTED_ID)
+                    .hasMessageNotContaining(NEVER_QUOTED_HOST)
+                    .as("a cause would carry the SDK's message, which quotes the value")
+                    .hasNoCause();
         }
 
         /** The flag settings, read with this case's connection string. */

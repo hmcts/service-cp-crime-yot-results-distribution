@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,8 @@ class FeatureFlagPropertiesTest {
                     .as("the secret, and the string it travels in, stay out of every rendering")
                     .doesNotContain(SECRET)
                     .doesNotContain(CONNECTION_STRING)
+                    .doesNotContain("ste-id")
+                    .doesNotContain("ste-store.azconfig.io")
                     .contains("connectionString=<set>");
         }
 
@@ -50,6 +53,69 @@ class FeatureFlagPropertiesTest {
                     .as("unset is the answer an operator needs, and it is still not a value")
                     .contains("connectionString=<unset>")
                     .contains("label=STE41");
+        }
+    }
+
+    /**
+     * A part of the connection string, read exactly as the SDK reads it.
+     *
+     * <p>{@code ConfigurationClientCredentials} splits on {@code ;}, trims each segment, and takes a
+     * part only where the trimmed segment begins with its name and {@code =}, ignoring case. The
+     * validator asks its questions of these parts, so a part read any other way is a string the
+     * validator admits and the SDK then refuses - on an exception that quotes the whole value.
+     */
+    @Nested
+    @DisplayName("one part of the connection string")
+    class Parts {
+
+        @Test
+        void a_part_name_should_match_without_regard_to_case() {
+            assertThat(partOf("endpoint=https://x.azconfig.io;ID=ste-id;secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .contains("ste-id");
+        }
+
+        @Test
+        void a_value_carrying_an_equals_sign_should_be_read_whole() {
+            assertThat(partOf("Endpoint=https://x.azconfig.io;Id=ste-id;Secret=YWJj==",
+                    FeatureFlagProperties.SECRET_PART))
+                    .contains("YWJj==");
+        }
+
+        @Test
+        void a_part_given_twice_should_be_read_as_its_last_value() {
+            assertThat(partOf("Id=first;Endpoint=https://x.azconfig.io;Id=second;Secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .contains("second");
+        }
+
+        @Test
+        void a_padded_segment_should_be_read_as_its_trimmed_value() {
+            assertThat(partOf("Endpoint=https://x.azconfig.io; Id=ste-id ;Secret=" + SECRET,
+                    FeatureFlagProperties.ID_PART))
+                    .as("the SDK trims the segment, so the value it uses carries no trailing space")
+                    .contains("ste-id");
+        }
+
+        @Test
+        void a_name_separated_from_its_equals_sign_should_not_be_a_part() {
+            assertThat(partOf("Endpoint =https://x.azconfig.io;Id=ste-id;Secret=" + SECRET,
+                    FeatureFlagProperties.ENDPOINT_PART))
+                    .as("the SDK needs the name immediately followed by '=', and reads no endpoint "
+                            + "from this - so neither may the validator")
+                    .isEmpty();
+        }
+
+        @Test
+        void no_connection_string_should_have_no_parts() {
+            assertThat(new FeatureFlagProperties(" ", KEY, "STE41", Duration.ofSeconds(2))
+                    .connectionStringPart(FeatureFlagProperties.ENDPOINT_PART))
+                    .isEmpty();
+        }
+
+        private Optional<String> partOf(final String connectionString, final String name) {
+            return new FeatureFlagProperties(connectionString, KEY, "STE41", Duration.ofSeconds(2))
+                    .connectionStringPart(name);
         }
     }
 }

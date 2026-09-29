@@ -37,6 +37,33 @@ Format: `[ID] [P?] [US#] Description`
   `checkstyleTest`, `pmdMain` and `pmdTest` clean. **Open:** the JaCoCo gate and the `*IT` suites
   need a Docker-backed `./gradlew build` before merge.
 
+## Phase 3: Gate remediation (round 1: code-reviewer, qa, spec-validator)
+
+- [x] **T004** [US2] [US3] Red tests for the gate findings:
+  - `GenerationWiringContextTest.FlagCredential`: an unparseable string makes the reader's
+    construction fail under the setting's name, with no cause and no secret, Id or host.
+  - `ConfigurationValidationTest`:
+    - the shape check applies with generation off;
+    - `Secret=not*base64!` is refused;
+    - `Endpoint =`, `Id =` and `Secret =` are refused;
+    - a padded endpoint with a deployed Id is refused;
+    - plain http is refused against a real store or on a deployed pod, and still starts against a stub;
+    - a context carrying `LiveFeatureFlagConfig`, with generation on and off, has no part of the
+      value anywhere in its cause chain.
+  - `FeatureFlagPropertiesTest.Parts`: SDK-identical part reading.
+  - The FR-006 assertions now also cover the Id and the host.
+  - No seam needed: every case is written against the existing API.
+  - Red run (2026-09-29, `-Dtest.noFailFast=true`, the three suites): 232 tests, 16 failed, every
+    one an assertion failure (15 `AssertionError`, 1 `AssertionFailedError`). `GenerationDownstreams`
+    9, `FlagCredential` 5, `FeatureFlagPropertiesTest$Parts` 2.
+- [ ] **T005** [US2] [US3] Make them pass:
+  - `LiveFeatureFlagConfig` rethrows the builder's `IllegalArgumentException` as a
+    setting-named `IllegalStateException` with no cause.
+  - `PropertiesValidator` asks the shape of any string that is set, and https of a real store or a
+    deployed pod.
+  - `FeatureFlagProperties.connectionStringPart` reads parts as the SDK does.
+  - Update the stale Javadoc and comments the gates named.
+
 ## Handover
 
 - Deployed wiring: `cpp-aks-deploy` PR #935 (93bde6a0).

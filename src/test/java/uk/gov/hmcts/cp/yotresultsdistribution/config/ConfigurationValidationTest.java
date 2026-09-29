@@ -1634,6 +1634,14 @@ class ConfigurationValidationTest {
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Secret=" + DEPLOYED_SECRET,
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id",
             "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=",
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!",
+            "Endpoint =https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id =ste-id;Secret="
+                    + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret ="
+                    + DEPLOYED_SECRET,
+            "Endpoint=  https://appconfig.internal;Id=ste-id;Secret=" + DEPLOYED_SECRET,
             "not-a-connection-string-" + DEPLOYED_SECRET,
         })
         void enabling_generation_with_a_flag_connection_string_that_cannot_be_read_should_fail_startup(
@@ -1644,9 +1652,124 @@ class ConfigurationValidationTest {
                         assertThat(context).hasFailed();
                         assertThat(context.getStartupFailure())
                                 .hasMessageContaining(FLAG_CONNECTION_STRING)
-                                .hasMessageContaining("yotresultsdistribution.generation.enabled")
                                 .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("ste-id")
+                                .hasMessageNotContaining("yot-results-distribution-ste86")
+                                .hasMessageNotContaining("appconfig.internal")
                                 .hasMessageNotContaining(connectionString);
+                    });
+        }
+
+        /**
+         * The shape is asked of any string that is set, not only of one a nightly job will read.
+         *
+         * <p>The reader is built on every pod whatever generation says, and the SDK's builder
+         * quotes the whole value when it cannot parse it. So a pod with the job off that has been
+         * given an unreadable string is refused here, under the setting's name, rather than there.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id",
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!",
+            "Endpoint =https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET,
+        })
+        void a_flag_connection_string_that_cannot_be_read_should_fail_startup_with_generation_off(
+                final String connectionString) {
+
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                            FLAG_CONNECTION_STRING + "=" + connectionString)
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("ste-id")
+                                .hasMessageNotContaining("yot-results-distribution-ste86");
+                    });
+        }
+
+        /**
+         * A real store, or any store a deployed pod reads, is reached over TLS.
+         *
+         * <p>HMAC does not send the secret, but the signed request and the flag's answer would travel
+         * in the clear, and the store refuses plain HTTP anyway - which reads at 18:00 as an
+         * unreadable flag, a skipped run indistinguishable from an outage.
+         */
+        @Test
+        void a_real_store_over_plain_http_should_fail_startup() {
+            generating.withPropertyValues(FLAG_CONNECTION_STRING
+                            + "=Endpoint=http://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                            + DEPLOYED_SECRET)
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("https")
+                                .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("yot-results-distribution-ste86");
+                    });
+        }
+
+        @Test
+        void a_deployed_pod_reading_its_store_over_plain_http_should_fail_startup() {
+            runner.withPropertyValues(NAMESPACE_PROPERTY, FLAG_CONNECTION_STRING
+                            + "=Endpoint=http://appconfig.internal;Id=ste-id;Secret=" + DEPLOYED_SECRET)
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("https")
+                                .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining("appconfig.internal");
+                    });
+        }
+
+        @Test
+        void a_deployed_pod_reading_its_store_over_https_should_start() {
+            runner.withPropertyValues(NAMESPACE_PROPERTY, FLAG_CONNECTION_STRING
+                            + "=Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret="
+                            + DEPLOYED_SECRET)
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
+
+        /** Plain HTTP stays the local loop's: a stub that is neither a real store nor deployed. */
+        @Test
+        void a_stub_over_plain_http_should_start() {
+            generating.withPropertyValues(FLAG_CONNECTION_STRING
+                            + "=Endpoint=http://wiremock:8080;Id=ste-id;Secret=" + DEPLOYED_SECRET)
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
+
+        /**
+         * With the live reader in the context, the failure is still one this service wrote.
+         *
+         * <p>The validator's refusal and the builder's are both under the setting's name; which one
+         * a start-up meets is bean order, so neither may depend on the other having run. Nothing in
+         * any exception on the way out may carry a part of the value.
+         */
+        @ParameterizedTest
+        @ValueSource(booleans = {true, false})
+        void a_context_with_the_live_reader_should_refuse_an_unreadable_string_quoting_none_of_it(
+                final boolean generationEnabled) {
+
+            final ApplicationContextRunner withTheLiveReader = (generationEnabled ? generating : runner
+                    .withPropertyValues(CONNECTION_STRING_PROPERTY))
+                    .withUserConfiguration(LiveFeatureFlagConfig.class);
+            withTheLiveReader.withPropertyValues(FLAG_CONNECTION_STRING
+                            + "=Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=not*base64!")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasStackTraceContaining(FLAG_CONNECTION_STRING);
+                        for (Throwable link = context.getStartupFailure(); link != null;
+                                link = link.getCause()) {
+                            assertThat(String.valueOf(link.getMessage()))
+                                    .as("every exception on the way out, not only the outermost")
+                                    .doesNotContain("not*base64!")
+                                    .doesNotContain("ste-id")
+                                    .doesNotContain("yot-results-distribution-ste86");
+                        }
                     });
         }
 
