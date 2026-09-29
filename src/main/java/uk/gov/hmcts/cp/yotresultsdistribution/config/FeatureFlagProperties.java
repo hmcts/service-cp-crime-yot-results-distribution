@@ -66,7 +66,7 @@ public record FeatureFlagProperties(
     private static final String PART_SEPARATOR = ";";
 
     /** Separates a part's name from its value; the first one only, since a value may carry more. */
-    private static final char NAME_SEPARATOR = '=';
+    private static final String NAME_SEPARATOR = "=";
 
     /**
      * Whether a connection string is configured at all.
@@ -78,23 +78,27 @@ public record FeatureFlagProperties(
     }
 
     /**
-     * One part of the connection string, as the SDK would read it.
+     * One part of the connection string, read exactly as the SDK reads it.
      *
-     * <p>The value is returned exactly as written, untrimmed: a question about whether the SDK can
-     * build a client from it has to be asked of what the SDK will be given. Names are matched
-     * without regard to case, as the SDK matches them.
+     * <p>{@code ConfigurationClientCredentials} (azure-data-appconfiguration) splits the string on
+     * {@code ;}, trims each segment, and takes a part only where the trimmed segment begins with the
+     * part's name immediately followed by {@code =}, ignoring case - a later segment of the same
+     * name replacing an earlier one. Reading it any other way admits strings the SDK then refuses,
+     * and the SDK's refusal quotes the whole value; so {@code Endpoint =...} is no endpoint here
+     * because it is none there, and the value returned is the one the SDK will be given.
      *
      * @param name the part's name - {@link #ENDPOINT_PART}, {@link #ID_PART} or
      *             {@link #SECRET_PART}
      * @return the part's value, or empty where the string carries no such part
      */
     public Optional<String> connectionStringPart(final String name) {
+        final String prefix = name + NAME_SEPARATOR;
         Optional<String> part = Optional.empty();
         if (hasConnectionString()) {
             for (final String segment : connectionString.split(PART_SEPARATOR)) {
-                final int separator = segment.indexOf(NAME_SEPARATOR);
-                if (separator > 0 && segment.substring(0, separator).trim().equalsIgnoreCase(name)) {
-                    part = Optional.of(segment.substring(separator + 1));
+                final String trimmed = segment.trim();
+                if (trimmed.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                    part = Optional.of(trimmed.substring(prefix.length()));
                 }
             }
         }

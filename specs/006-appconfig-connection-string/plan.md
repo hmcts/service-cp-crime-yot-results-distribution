@@ -36,9 +36,14 @@ Deployed: `cpp-aks-deploy` mounts `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`
 
 - `config/FeatureFlagProperties` - `(connectionString, key, label, timeout)`, masked `toString()`,
   `PUBLISHED_LOCAL_ID`.
-- `config/LiveFeatureFlagConfig` - one `connectionStringClient`; workload identity removed.
+- `config/LiveFeatureFlagConfig` - one `connectionStringClient`; workload identity removed. The
+  builder's `IllegalArgumentException` (whose message quotes the whole value) is rethrown as a
+  setting-named `IllegalStateException` with no cause, so no bean order is relied on.
 - `adapter/appconfig/AppConfigurationFlagReader` - the `TokenCredential` constructor removed.
-- `config/PropertiesValidator` - FR-004 and FR-005, messages naming settings only.
+- `config/PropertiesValidator` - FR-004 and FR-005, messages naming settings only. The shape is
+  asked of any string that is set, generation on or off; https is required of a real store or any
+  store on a deployed pod. Parts are read by `FeatureFlagProperties.connectionStringPart` exactly
+  as the SDK reads them.
 - `application.yaml`, `docker-compose.yml`.
 
 ## Test matrix
@@ -49,8 +54,9 @@ Deployed: `cpp-aks-deploy` mounts `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`
 | `ConfigurationValidationTest.ConnectionStringPrivacy` | FR-004, FR-006 |
 | `ConfigurationValidationTest.GenerationDownstreams` | FR-004 |
 | `ConfigurationValidationTest.ShippedConfiguration` | FR-001 |
-| `FeatureFlagPropertiesTest` | FR-006 |
-| `GenerationWiringContextTest.FlagCredential` | FR-002, FR-003 |
+| `FeatureFlagPropertiesTest` | FR-004 (`Parts`), FR-006 |
+| `GenerationWiringContextTest.FlagCredential` | FR-002, FR-003, FR-004, FR-006 |
+| `adapter/appconfig/AppConfigurationFlagReaderTest` | FR-007 (unchanged) |
 
 ## Complexity Tracking
 

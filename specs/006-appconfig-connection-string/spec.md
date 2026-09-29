@@ -42,13 +42,22 @@ static key this service holds. No principle's wording changes.
   removed; the store is the connection string's own `Endpoint=`, and the workload-identity read is
   removed rather than kept as an option.
 - **FR-003**: No connection string is no client, and every read answers `unreadable-not-configured`.
-- **FR-004**: With generation enabled, start-up refuses a missing connection string, and one that
-  does not carry `Endpoint=` (an http or https URL with a host), `Id=` and `Secret=`.
+- **FR-004**: With generation enabled, start-up refuses a missing connection string. Wherever a
+  string is set, generation on or off, start-up refuses one that does not carry `Endpoint=` (an
+  http or https URL with a host), `Id=` and a Base64 `Secret=` - its parts read exactly as the SDK
+  reads them - and one whose endpoint is a real `.azconfig.io` store, or any store while
+  `servicebus.namespace` is set, over anything but https. Independently of the validator, a string
+  the SDK's builder cannot parse fails the reader's construction under the setting's name with no
+  cause attached, since the SDK's own message quotes the value.
 - **FR-005**: Start-up refuses the published local pair (`Id=0-l0-s0:yotresultsdistributionlocal`)
   where its endpoint names a real `.azconfig.io` store or `servicebus.namespace` is set, with or
-  without generation.
-- **FR-006**: No refusal message, no log line and no `toString()` carries the connection string or
-  any part of it but the setting's name.
+  without generation. The pair committed in `docker-compose.yml` sits outside 005's FR-034 (no
+  connection string in a committed value): it authorises nothing (its secret is Base64 of
+  `not-a-secret`, and no store has been given it), it is refused wherever a real flag is read, and
+  it follows the precedent of the Service Bus emulator's published SAS key committed beside it.
+- **FR-006**: No refusal message, no exception on the way out of start-up (cause chains included),
+  no log line and no `toString()` carries the connection string or any part of it - secret, Id or
+  endpoint host - but the setting's name.
 - **FR-007**: The key, the label, the 2 s budget, the no-retry client and the fail-closed parsing
   are unchanged.
 

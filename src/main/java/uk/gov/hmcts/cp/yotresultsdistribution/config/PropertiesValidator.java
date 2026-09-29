@@ -286,6 +286,9 @@ public class PropertiesValidator implements InitializingBean {
      */
     private static final Set<String> CLIENT_SCHEMES = Set.of("http", "https");
 
+    /** The one scheme a real store, or any store a deployed pod reads, is reached over. */
+    private static final String HTTPS = "https";
+
     /** Shared so the wording of a required-setting refusal is one string and not four. */
     private static final String MUST_BE_SET_WHEN = " must be set when ";
 
@@ -636,6 +639,7 @@ public class PropertiesValidator implements InitializingBean {
         feature.validate();
         validateTheStubsAreNotWhereRegistersAreProduced(properties, generation);
         validateThePublishedLocalPairIsNowhereARealFlagIsRead(properties, feature);
+        validateAnyFlagConnectionStringIsReadable(properties, feature);
         validateGenerationHasTheDownstreamsItNeeds(properties, generation, feature);
         validateWhicheverHalfWritesAFileCanReachTheFileService(properties, generation, report);
         validateWhicheverHalfSendsCanReachNotificationnotify(properties, generation, report);
@@ -739,8 +743,8 @@ public class PropertiesValidator implements InitializingBean {
 
     /**
      * Constitution Principle V: the stub must not be reachable in a production profile. A namespace
-     * means workload identity, which means a deployed pod — the same discriminator the credential
-     * rule above already draws deployment on.
+     * means Service Bus on workload identity, which means a deployed pod — the same discriminator
+     * the flag's published-pair rule draws deployment on.
      */
     private static void validateTheStubIsNotDeployed(final YotResultsDistributionProperties properties) {
         if (hasText(properties.servicebus().namespace())) {
@@ -1507,7 +1511,6 @@ public class PropertiesValidator implements InitializingBean {
             requireForGeneration(feature.connectionString(), FEATURE_CONNECTION_STRING,
                     "the run reads the cutover flag before it does anything else, and an unreadable"
                             + " flag is a run skipped every night");
-            requireAReadableConnectionString(feature);
             requireForGeneration(feature.label(), FEATURE_LABEL,
                     "one App Configuration store serves every stack, so an unlabelled read is a read"
                             + " of somebody else's flag or of none");
@@ -1713,14 +1716,54 @@ public class PropertiesValidator implements InitializingBean {
      * connect, and an unreadable flag is a run skipped and counted and indistinguishable from a store
      * outage. So the endpoint is required to parse as written, to carry one of
      * {@link #CLIENT_SCHEMES}, and to name a host; the secret is required to be the Base64 the SDK
-     * decodes it as.
+     * decodes it as. Parts are read exactly as the SDK reads them
+     * ({@link FeatureFlagProperties#connectionStringPart}), so nothing admitted here is refused
+     * there. A padded endpoint ({@code Endpoint=  https://...}) is refused too - the SDK's URL parse
+     * would forgive it, but a value somebody pasted with its whitespace is one worth a second look.
      *
-     * <p>Asked only where generation is enabled. The reader is built on every pod, since
-     * {@code GET /operations/flag} is served on every pod, but a pod with no nightly job and no
-     * connection string answers {@code NOT_CONFIGURED} rather than refusing to start.
+     * <p>Asked of <strong>any string that is set</strong>, whatever generation says: the reader is
+     * built on every pod, since {@code GET /operations/flag} is served on every pod, and an
+     * unreadable string reaches the builder on a pod with the job off exactly as on one with it on.
+     * A pod with no string at all still answers {@code NOT_CONFIGURED} rather than refusing to
+     * start; only its <em>presence</em> is generation's to require.
      *
-     * @param feature what the deployment supplied for the flag store
+     * <p><strong>And https wherever the real key could be used</strong> - an endpoint whose host is
+     * a real store, or any endpoint on a deployed pod. HMAC does not send the secret, but the signed
+     * request and the flag's answer would travel in the clear, and the store refuses plain HTTP, so
+     * it reads at 18:00 as an unreadable flag. Plain HTTP stays the compose stub's.
+     *
+     * @param properties the bound settings, for the Service Bus namespace that says "deployed"
+     * @param feature    what the deployment supplied for the flag store
      */
+    private static void validateAnyFlagConnectionStringIsReadable(
+            final YotResultsDistributionProperties properties, final FeatureFlagProperties feature) {
+        if (feature.hasConnectionString()) {
+            requireAReadableConnectionString(feature);
+            requireTlsWhereTheRealKeyIsUsed(properties, feature);
+        }
+    }
+
+    private static void requireTlsWhereTheRealKeyIsUsed(
+            final YotResultsDistributionProperties properties, final FeatureFlagProperties feature) {
+        final String endpoint =
+                feature.connectionStringPart(FeatureFlagProperties.ENDPOINT_PART).orElse(null);
+        final boolean realKeyUsed =
+                namesARealFlagStore(endpoint) || hasText(properties.servicebus().namespace());
+        final boolean overTls = asEndpointUri(endpoint)
+                .map(URI::getScheme)
+                .filter(HTTPS::equalsIgnoreCase)
+                .isPresent();
+        if (realKeyUsed && !overTls) {
+            throw new IllegalStateException(
+                    FEATURE_CONNECTION_STRING + " must name its store over https where the store is"
+                            + " a real App Configuration store or " + NAMESPACE + " is set - the"
+                            + " signed read and the flag's answer would otherwise travel in the"
+                            + " clear, and the store refuses plain HTTP, which reads at 18:00 as an"
+                            + " unreadable flag. Plain http is the local stub's alone. The value is"
+                            + " not quoted here");
+        }
+    }
+
     private static void requireAReadableConnectionString(final FeatureFlagProperties feature) {
         final boolean endpointReadable = feature
                 .connectionStringPart(FeatureFlagProperties.ENDPOINT_PART)
@@ -1740,12 +1783,12 @@ public class PropertiesValidator implements InitializingBean {
         if (!endpointReadable || !idPresent || !secretReadable) {
             throw new IllegalStateException(
                     FEATURE_CONNECTION_STRING + " must be an App Configuration connection string"
-                            + " when " + GENERATION_ENABLED + " is true - Endpoint=<an http or https"
-                            + " URL with a host>;Id=<the key's id>;Secret=<the key's Base64"
-                            + " secret>, as Key Vault holds it. The client is built as this context"
-                            + " starts, and a string with a part missing or unreadable is either a"
-                            + " pod that never starts or a client that cannot reach anything, read"
-                            + " as an unreadable flag every night. The value is not quoted here");
+                            + " wherever it is set - Endpoint=<an http or https URL with a host>;"
+                            + "Id=<the key's id>;Secret=<the key's Base64 secret>, as Key Vault"
+                            + " holds it. The client is built as this context starts, on every pod,"
+                            + " and a string with a part missing or unreadable is either a pod that"
+                            + " never starts or a client that cannot reach anything, read as an"
+                            + " unreadable flag every night. The value is not quoted here");
         }
     }
 

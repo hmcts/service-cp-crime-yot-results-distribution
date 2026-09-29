@@ -47,11 +47,10 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
  * this suite's stub, so what runs is {@code getConfigurationSetting(key, label)} over App
  * Configuration's own {@code kv} resource - the request the deployed pod makes, down to the
  * URL-encoded key in the path and the label in the query - and not a hand-rolled HTTP call standing
- * in for it. Only the credential differs: a token credential refuses a plain-{@code http} endpoint
- * outright ("token credentials require a URL using the HTTPS protocol scheme"), so the stub is
- * addressed with a connection string carrying a fixed, invented test secret. The deployed reader
- * uses {@code WorkloadIdentityCredential} (research §3); which credential signs the request changes
- * nothing about the resource, the key, the label or the answer, which is what this suite is about.
+ * in for it. The client is built the way the deployed pod's is, from a connection string
+ * (constitution 5.1.0); only the pair differs - a fixed, invented test secret here, the estate's
+ * key from Key Vault there - and which pair signs the request changes nothing about the resource,
+ * the key, the label or the answer, which is what this suite is about.
  *
  * <p><strong>Three answers and never a fourth.</strong> {@link FlagDecision} is
  * {@code ON | OFF | UNREADABLE(reason)} and the port promises it never throws, so every case here
@@ -369,13 +368,13 @@ class AppConfigurationFlagReaderTest {
         }
 
         /**
-         * The platform ask is an {@code App Configuration Data Reader} role assignment for this
-         * pod's identity (design §8). Until it lands, every read is refused - and it must be
-         * refused as its own cause, or the first night of the cutover looks like an empty store.
+         * A store that refuses the key - revoked, rotated, or never valid for this store - refuses
+         * every read, and it must be refused as its own cause, or the night after a key rotation
+         * looks like an empty store.
          */
         @ParameterizedTest(name = "{0} is access denied")
         @ValueSource(ints = {401, 403})
-        @DisplayName("a store that refuses this pod's identity is unreadable, access denied")
+        @DisplayName("a store that refuses the connection string's key is unreadable, access denied")
         void a_store_that_refuses_this_identity_is_unreadable_access_denied(final int status) {
             answering(status, "{\"status\":" + status + "}");
 

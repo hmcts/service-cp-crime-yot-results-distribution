@@ -36,7 +36,7 @@ Jira: none — this work carries no ticket; it lands on plain `main`
 | **Design (authoritative)** | Confluence — [Court Register Service](https://tools.hmcts.net/confluence/spaces/CRA/pages/2004104319/Court+Register+Service) (CRA space). This repo carries **no** design narrative; do not create `doc/*_DESIGN.md`, `SOLUTION_BRIEF.md`, `API_CONTRACTS.md` or `CHANGELOG.md` here |
 | Defect-fix register | `doc/DEFECT-FIXES.md` |
 | Constitution | `.specify/memory/constitution.md` |
-| Specifications | `specs/001-court-register-port/` (complete), `specs/002-consolidate-progression-leg/` (complete), `specs/003-exception-report/` (complete), `specs/004-release-stale-batches/` (complete), `specs/005-operations-rest-api/` (current) |
+| Specifications | `specs/001-court-register-port/` (complete), `specs/002-consolidate-progression-leg/` (complete), `specs/003-exception-report/` (complete), `specs/004-release-stale-batches/` (complete), `specs/005-operations-rest-api/` (complete), `specs/006-appconfig-connection-string/` (current) |
 | Operations API (owned) | `src/main/resources/yot-results-distribution-openapi.yaml`; authorisation rules `src/main/resources/acl/operations-rules.drl` |
 | Inbound message schema | `src/main/resources/contracts/distribution-command.schema.json` |
 | Register contract (frozen) | `src/main/resources/contracts/progression/` (+ `PROVENANCE.md`) |
@@ -149,8 +149,8 @@ every refusal.
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/005-operations-rest-api/plan.md` (with `research.md`, `data-model.md`,
-`quickstart.md` and `contracts/` alongside it); the completed increments are
-`specs/001-court-register-port/`, `specs/002-consolidate-progression-leg/`,
-`specs/003-exception-report/` and `specs/004-release-stale-batches/`.
+`specs/006-appconfig-connection-string/plan.md` (with `spec.md` and `tasks.md` alongside
+it); the completed increments are `specs/001-court-register-port/`,
+`specs/002-consolidate-progression-leg/`, `specs/003-exception-report/`,
+`specs/004-release-stale-batches/` and `specs/005-operations-rest-api/`.
 <!-- SPECKIT END -->

@@ -46,6 +46,10 @@ import uk.gov.hmcts.cp.yotresultsdistribution.application.FeatureFlagReader;
 @Profile("!test")
 public class LiveFeatureFlagConfig {
 
+    /** The setting a refusal names, since the value itself is never named. */
+    private static final String CONNECTION_STRING_SETTING =
+            "yotresultsdistribution.feature.connection-string";
+
     /** The read is the whole budget, so the SDK is asked once and never asked again. */
     private static final RetryOptions NO_RETRIES =
             new RetryOptions(new FixedDelayOptions(0, Duration.ZERO));
@@ -67,10 +71,16 @@ public class LiveFeatureFlagConfig {
      * The client the flag is read through, or {@code null} where no connection string is configured.
      *
      * <p>No connection string is no client, which the reader reads as {@code NOT_CONFIGURED} - a
-     * skipped run with a cause on it. {@link PropertiesValidator} has already refused the cases that
-     * matter - generation enabled with no string, or with one the builder could not read - before
-     * this bean is built, so the builder is not handed a value it would throw on, and its message,
-     * which may quote the value, does not reach a start-up failure.
+     * skipped run with a cause on it.
+     *
+     * <p><strong>A string the builder cannot parse is refused here, in this service's own
+     * words.</strong> {@code ConfigurationClientBuilder.connectionString} throws
+     * {@code IllegalArgumentException} with the whole value - secret included - in its message.
+     * {@link PropertiesValidator} refuses every shape the builder would, under the setting's name,
+     * but nothing orders it before this bean and bean order is not a thing to rely on for a secret.
+     * So the builder's exception is classified and rethrown as one naming only the setting, with no
+     * cause attached: the cause is the SDK's message, and carrying it would carry the value
+     * (constitution Principle VII - never attach a throwable this service did not write).
      *
      * <p>Retries off and every leg bounded: the budget is the whole of the read, three SDK attempts
      * inside it would spend the run's decision on the first attempt's back-off, and a leg nobody
@@ -80,15 +90,25 @@ public class LiveFeatureFlagConfig {
      *
      * @param properties where the flag is read from
      * @return the client, or {@code null} where no store is configured
+     * @throws IllegalStateException if the connection string cannot be parsed; it names the setting
+     *                               and quotes nothing
      */
     private static ConfigurationClient connectionStringClient(final FeatureFlagProperties properties) {
         ConfigurationClient client = null;
         if (properties.hasConnectionString()) {
-            client = new ConfigurationClientBuilder()
-                    .connectionString(properties.connectionString())
-                    .retryOptions(NO_RETRIES)
-                    .httpClient(AppConfigurationFlagReader.httpClientFor(properties))
-                    .buildClient();
+            try {
+                client = new ConfigurationClientBuilder()
+                        .connectionString(properties.connectionString())
+                        .retryOptions(NO_RETRIES)
+                        .httpClient(AppConfigurationFlagReader.httpClientFor(properties))
+                        .buildClient();
+            } catch (final IllegalArgumentException unparseable) {
+                // Classified and rethrown without its cause: the SDK's message quotes the value.
+                throw new IllegalStateException(CONNECTION_STRING_SETTING + " could not be parsed by"
+                        + " the App Configuration client - it must be Endpoint=<an http or https URL"
+                        + " with a host>;Id=<the key's id>;Secret=<the key's Base64 secret>, as Key"
+                        + " Vault holds it. The value is not quoted here");
+            }
         }
         return client;
     }

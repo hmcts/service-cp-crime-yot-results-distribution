@@ -84,8 +84,8 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
      *
      * <p>Null is not an oversight and not a failure to be raised at construction: a deployment that
      * names no store is {@link UnreadableReason#NOT_CONFIGURED}, which is a skipped run with a cause
-     * on it, and {@code PropertiesValidator} has already refused the case that matters - generation
-     * enabled with no connection string - before this class is built.
+     * on it. Generation enabled with no connection string is refused at start-up by
+     * {@code PropertiesValidator}; this class does not depend on that having run first.
      */
     private final ConfigurationClient client;
 

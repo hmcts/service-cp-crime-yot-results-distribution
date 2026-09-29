@@ -321,12 +321,11 @@ class HttpSurfaceTest {
      * wherever the service runs, keeping its {@code !test} profile gating and its LIVE/STUB mode
      * selection exactly as they were.
      *
-     * <p><strong>And no App Configuration endpoint is configured here on purpose.</strong> That is
-     * the shape a pod with no nightly job is deployed in - {@code PropertiesValidator} asks for the
-     * endpoint and the label only once generation is on - so the credential has no store to be
-     * built against and the three workload-identity variables a deployed pod is given are absent.
-     * The pod must start anyway, and the reading must be {@code UNREADABLE} with its own cause on
-     * it rather than a refusal.
+     * <p><strong>And no App Configuration connection string is configured here on purpose.</strong>
+     * That is the shape a pod with no nightly job may be deployed in - {@code PropertiesValidator}
+     * requires the connection string and the label only once generation is on - so the reader has
+     * no client to read through. The pod must start anyway, and the reading must be
+     * {@code UNREADABLE} with its own cause on it ({@code NOT_CONFIGURED}) rather than a refusal.
      *
      * <p>The two estate filters are off: what they do has suites of its own, and this case is about
      * which beans a pod holds and what the endpoint answers.

@@ -11,6 +11,12 @@ Format: `[ID] [P?] [US#] Description`
   Secrets/identity); update `CLAUDE.md`, `README.md`, `docker/wiremock/README.md` and
   `.claude/rules/design_rules.md`; point `.specify/feature.json` here. Run `/speckit-analyze`
   before merge.
+  `/speckit-analyze` (2026-09-29, after T004):
+  - Zero CRITICAL findings and no constitution conflict.
+  - Two MEDIUM:
+    - `plan.md`'s Changes and Test matrix did not name the remediation; fixed with T005.
+    - SC-002, the Docker-backed `./gradlew build` with the JaCoCo gate, is still open (see T003).
+  - One LOW: FR-007 was not mapped in the test matrix; fixed with T005.
 
 ## Phase 1: Tests (red)
 
@@ -56,13 +62,24 @@ Format: `[ID] [P?] [US#] Description`
   - Red run (2026-09-29, `-Dtest.noFailFast=true`, the three suites): 232 tests, 16 failed, every
     one an assertion failure (15 `AssertionError`, 1 `AssertionFailedError`). `GenerationDownstreams`
     9, `FlagCredential` 5, `FeatureFlagPropertiesTest$Parts` 2.
-- [ ] **T005** [US2] [US3] Make them pass:
+- [x] **T005** [US2] [US3] Make them pass:
   - `LiveFeatureFlagConfig` rethrows the builder's `IllegalArgumentException` as a
     setting-named `IllegalStateException` with no cause.
   - `PropertiesValidator` asks the shape of any string that is set, and https of a real store or a
     deployed pod.
   - `FeatureFlagProperties.connectionStringPart` reads parts as the SDK does.
-  - Update the stale Javadoc and comments the gates named.
+  - Update the stale Javadoc and comments the gates named (`scripts/container-smoke.sh`,
+    `AppConfigurationFlagReaderTest`, `HttpSurfaceTest`, `PropertiesValidator`), the constitution's
+    Increments list, `CLAUDE.md`, and FR-004/FR-005/FR-006 in `spec.md`.
+  - Green run (2026-09-29, `-Dtest.noFailFast=true`): the three T004 suites plus
+    `AppConfigurationFlagReaderTest`, `HttpSurfaceTest`, `GenerationMetricsContextTest`,
+    `FeatureFlagGateTest` and `StubGenerationAdaptersTest` ran 324 tests with 0 failed.
+  - Full `./gradlew test` on a host with no Docker: 3502 tests, 137 failed. Every failure is a
+    Testcontainers "Docker environment" failure or a context cascade from one, the same 137 as
+    T003's baseline, so there are no regressions.
+  - `checkstyleMain`, `checkstyleTest`, `pmdMain` and `pmdTest` are clean.
+  - **Still open:** SC-002, the JaCoCo gate and the `*IT` suites, which need a Docker-backed
+    `./gradlew build`.
 
 ## Handover
 

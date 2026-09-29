@@ -21,11 +21,13 @@ Bump rationale: MINOR - the flag's credential is changed (2026-09-29). The
 Proposed in: specs/006-appconfig-connection-string/spec.md. Pinned by
 `config/ConfigurationValidationTest.PublishedLocalPair`,
 `config/ConfigurationValidationTest.ConnectionStringPrivacy`,
-`config/FeatureFlagPropertiesTest` and
+`config/ConfigurationValidationTest.GenerationDownstreams` (the connection
+string's shape and https refusals), `config/FeatureFlagPropertiesTest` and
 `config/GenerationWiringContextTest.FlagCredential`.
 
 Modified sections (this amendment): Technology Stack - the Feature flag and
-Secrets/identity bullets. Nothing else; Principles I-VIII untouched.
+Secrets/identity bullets; Increments - 005 marked complete, 006 added as
+current. Nothing else; Principles I-VIII untouched.
 
 Templates / guidance reviewed:
   - CLAUDE.md, README.md, .claude/rules/design_rules.md,
@@ -1372,7 +1374,7 @@ them read it the same way they read everything else.
   learned about still has nothing invented about it - it is failed through the
   store rather than through the sink. **No `doc/DEFECT-FIXES.md` row is added
   or amended.**
-- **005 "operations-rest-api" — current.** The six operations commands become
+- **005 "operations-rest-api" — complete.** The six operations commands become
   seven `/operations/**` endpoints and the CLI is removed. The REST layer is an
   inbound adapter in `uk.gov.hmcts.cp.yotresultsdistribution.api` that calls the same
   application services the CLI classes called, moving no logic and adding no
@@ -1389,6 +1391,15 @@ them read it the same way they read everything else.
   `/operations/**`, the usersgroups path for the identity client and the
   Artemis audit connection land in the infrastructure repositories**: the CLI
   is gone, so a pod deployed without them has no operational surface at all.
+- **006 "appconfig-connection-string" — current.** The cutover flag is read
+  with the estate's shared App Configuration connection string from Key Vault
+  (`yotresultsdistribution.feature.connection-string`) instead of the pod's
+  workload identity, which no App Configuration role can be assigned to through
+  `ccm-namespace`; `feature.endpoint` and `feature.credential` are removed. The
+  one lever is unchanged - same key, same label, read once per run, no cache,
+  fail-closed. The string is refused at start-up wherever it is set and cannot
+  be parsed, and is never quoted in a refusal, a log line or a rendering of the
+  settings. **No `doc/DEFECT-FIXES.md` row is added or amended.**
 
 ## Development Workflow & Quality Gates
 
