@@ -94,8 +94,18 @@ class ConfigurationValidationTest {
     private static final String FILESERVICE_URL_PROPERTY =
             "yotresultsdistribution.fileservice.url=jdbc:postgresql://localhost:5432/fileservice";
 
-    private static final String FLAG_ENDPOINT_PROPERTY =
-            "yotresultsdistribution.feature.endpoint=https://appconfig.internal";
+    /** The setting the flag's connection string binds to. */
+    private static final String FLAG_CONNECTION_STRING = "yotresultsdistribution.feature.connection-string";
+
+    /** Invented here and distinctive, so a refusal that quoted it would be found. */
+    private static final String DEPLOYED_SECRET = "ZGVwbG95ZWQtc2VjcmV0LW5ldmVyLXF1b3RlZA==";
+
+    /** The shape Key Vault injects on a deployed pod. */
+    private static final String FLAG_CONNECTION_STRING_PROPERTY = FLAG_CONNECTION_STRING
+            + "=Endpoint=https://appconfig.internal;Id=ste-id;Secret=" + DEPLOYED_SECRET;
+
+    /** The published local pair's secret; Base64 of {@code not-a-secret}. */
+    private static final String LOCAL_PAIR_SECRET = "bm90LWEtc2VjcmV0";
 
     private static final String FLAG_LABEL_PROPERTY = "yotresultsdistribution.feature.label=ste86";
 
@@ -135,7 +145,7 @@ class ConfigurationValidationTest {
      */
     private final ApplicationContextRunner generating = runner.withPropertyValues(
             CONNECTION_STRING_PROPERTY, GENERATION_ENABLED_PROPERTY, FILESERVICE_URL_PROPERTY,
-            FLAG_ENDPOINT_PROPERTY, FLAG_LABEL_PROPERTY, SDG_ENDPOINT_PROPERTY, NN_ENDPOINT_PROPERTY,
+            FLAG_CONNECTION_STRING_PROPERTY, FLAG_LABEL_PROPERTY, SDG_ENDPOINT_PROPERTY, NN_ENDPOINT_PROPERTY,
             ENDPOINTS_IDENTITY_PROPERTY, TEMPLATE_PROPERTY, BROKER_URL_PROPERTY);
 
     @Configuration(proxyBeanMethods = false)
@@ -1592,46 +1602,51 @@ class ConfigurationValidationTest {
         }
 
         @Test
-        void enabling_generation_without_a_flag_store_should_fail_startup() {
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=").run(context -> {
+        void enabling_generation_without_a_flag_connection_string_should_fail_startup() {
+            generating.withPropertyValues(FLAG_CONNECTION_STRING + "=").run(context -> {
                 assertThat(context).hasFailed();
                 assertThat(context.getStartupFailure())
-                        .hasMessageContaining("yotresultsdistribution.feature.endpoint")
+                        .hasMessageContaining(FLAG_CONNECTION_STRING)
                         .hasMessageContaining("yotresultsdistribution.generation.enabled");
             });
         }
 
         /**
-         * A flag store named by a value the client cannot be built from.
+         * A connection string no client can be built from, or one that could be built and would
+         * reach nothing.
          *
-         * <p>Presence is not enough here, and the shape is this validator's to refuse rather than
-         * the SDK's. {@code ConfigurationClientBuilder.endpoint} does {@code new URL(endpoint)} and
-         * throws "'endpoint' must be a valid URL"; the connection-string form fails the same way in
-         * its credential parsing. Both happen while {@code LiveFeatureFlagConfig.featureFlagReader}
-         * is being built, which is during refresh with generation enabled - so a host pasted out of
-         * the portal without its scheme, or a Helm value that lost one, is a pod that never starts,
-         * on an Azure {@code IllegalArgumentException} that names no setting of this service's.
-         *
-         * <p>Every shape below is one an operator can plausibly supply: the bare host, a host and
-         * port, a value with the scheme separator half typed, and something that is not an endpoint
-         * at all.
+         * <p>The shape is this validator's to refuse rather than the SDK's: the builder throws while
+         * {@code LiveFeatureFlagConfig.featureFlagReader} is built, during refresh, on an exception
+         * that names no setting of this service's - and may quote the value it could not parse,
+         * which is the one value this service holds that must never be quoted. {@code http://:}
+         * is worse still, because the builder accepts it: every read at 18:00 fails to connect and
+         * reads exactly like a store outage. So each shape below is refused under the setting's
+         * name, and the refusal carries no part of what was supplied.
          */
         @ParameterizedTest
         @ValueSource(strings = {
-            "yot-results-distribution-ste86.azconfig.io",
-            "wiremock:8080",
-            "https:/wiremock:8080",
-            "not-an-endpoint",
+            "Endpoint=yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=wiremock:8080;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https:/wiremock:8080;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=http://foo:bad;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=http://:;Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Id=ste-id;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Secret=" + DEPLOYED_SECRET,
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id",
+            "Endpoint=https://yot-results-distribution-ste86.azconfig.io;Id=ste-id;Secret=",
+            "not-a-connection-string-" + DEPLOYED_SECRET,
         })
-        void enabling_generation_with_a_flag_store_that_is_not_a_url_should_fail_startup(
-                final String endpoint) {
+        void enabling_generation_with_a_flag_connection_string_that_cannot_be_read_should_fail_startup(
+                final String connectionString) {
 
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=" + endpoint)
+            generating.withPropertyValues(FLAG_CONNECTION_STRING + "=" + connectionString)
                     .run(context -> {
                         assertThat(context).hasFailed();
                         assertThat(context.getStartupFailure())
-                                .hasMessageContaining("yotresultsdistribution.feature.endpoint")
-                                .hasMessageContaining("yotresultsdistribution.generation.enabled");
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("yotresultsdistribution.generation.enabled")
+                                .hasMessageNotContaining(DEPLOYED_SECRET)
+                                .hasMessageNotContaining(connectionString);
                     });
         }
 
@@ -1950,75 +1965,66 @@ class ConfigurationValidationTest {
     }
 
     /**
-     * The same rule again, on the identity the flag read is authorised with.
+     * The same rule again, on the connection string the flag read is authorised with.
      *
-     * <p>{@code yotresultsdistribution.feature.credential=local-test} is not a stub - the reader, the SDK
-     * client and the fail-closed parsing are all the deployed ones - but the identity it reads under
-     * is a fixed, published one that no real store will ever authorise. So it fails in the one way
-     * the STUB refusals exist to prevent: a pod that starts, reports itself healthy, and at 18:00
-     * reads nothing, skips the run and counts it, indistinguishable from a store outage.
+     * <p>The compose loop reads its WireMock stub with a fixed, published pair
+     * ({@code Id=} {@link FeatureFlagProperties#PUBLISHED_LOCAL_ID}) that no real store has ever
+     * been given. It is not a stub - the reader, the SDK client and the fail-closed parsing are all
+     * the deployed ones - but it fails in the one way the STUB refusals exist to prevent: a pod
+     * that starts, reports itself healthy, and at 18:00 is refused the flag, skips the run and
+     * counts it, indistinguishable from a store outage.
      *
      * <p>Two discriminators, and the second is the one the STUB refusals already draw deployment on.
-     * A {@code .azconfig.io} endpoint is a real Azure App Configuration store whatever else is
-     * configured, and a Service Bus namespace means workload identity, which means a deployed pod.
-     * Both are unconditional on the master switch, for the reason the zone and lock rules are: a job
-     * that happens to be disabled in this deployment is no reason to accept a credential that cannot
-     * read the flag in the next one.
+     * An endpoint whose host ends {@code .azconfig.io} is a real Azure App Configuration store
+     * whatever else is configured, and a Service Bus namespace means a deployed pod. Both are
+     * unconditional on the master switch: a job that happens to be disabled in this deployment is
+     * no reason to accept a pair that cannot read the flag in the next one.
      */
     @Nested
-    @DisplayName("the local-test credential is nowhere a real flag is read")
-    class LocalTestCredential {
+    @DisplayName("the published local pair is nowhere a real flag is read")
+    class PublishedLocalPair {
 
         /** What a real store's endpoint looks like; the estate has no other shape. */
-        private static final String REAL_STORE =
-                "yotresultsdistribution.feature.endpoint=https://yot-results-distribution-ste86.azconfig.io";
-
-        private static final String LOCAL_TEST_PROPERTY =
-                "yotresultsdistribution.feature.credential=local-test";
+        private static final String REAL_STORE_ENDPOINT =
+                "https://yot-results-distribution-ste86.azconfig.io";
 
         @Test
-        void the_local_test_credential_against_a_real_store_should_fail_startup() {
-            generating.withPropertyValues(REAL_STORE, LOCAL_TEST_PROPERTY).run(context -> {
+        void the_published_local_pair_against_a_real_store_should_fail_startup() {
+            generating.withPropertyValues(localPairAt(REAL_STORE_ENDPOINT)).run(context -> {
                 assertThat(context).hasFailed();
                 assertThat(context.getStartupFailure())
-                        .hasMessageContaining("yotresultsdistribution.feature.credential")
-                        .hasMessageContaining("yotresultsdistribution.feature.endpoint");
+                        .hasMessageContaining(FLAG_CONNECTION_STRING)
+                        .hasMessageContaining("published local pair")
+                        .hasMessageContaining("real App Configuration store");
             });
         }
 
         @Test
-        void the_local_test_credential_on_a_deployed_pod_should_fail_startup() {
-            runner.withPropertyValues(NAMESPACE_PROPERTY, LOCAL_TEST_PROPERTY).run(context -> {
-                assertThat(context).hasFailed();
-                assertThat(context.getStartupFailure())
-                        .hasMessageContaining("yotresultsdistribution.feature.credential")
-                        .hasMessageContaining("yotresultsdistribution.servicebus.namespace");
-            });
+        void the_published_local_pair_on_a_deployed_pod_should_fail_startup() {
+            runner.withPropertyValues(NAMESPACE_PROPERTY, localPairAt("http://wiremock:8080"))
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("yotresultsdistribution.servicebus.namespace");
+                    });
         }
 
         /**
          * Which leaves the one place it exists for: the compose loop, whose App Configuration is a
-         * WireMock stub on plain HTTP and whose credential source is a connection string.
+         * WireMock stub on plain HTTP.
          */
         @Test
-        void the_local_test_credential_against_the_compose_stub_should_start() {
-            generating.withPropertyValues(
-                    "yotresultsdistribution.feature.endpoint=http://wiremock:8080", LOCAL_TEST_PROPERTY)
+        void the_published_local_pair_against_the_compose_stub_should_start() {
+            generating.withPropertyValues(localPairAt("http://wiremock:8080"))
                     .run(context -> assertThat(context).hasNotFailed());
         }
 
         /**
-         * <strong>[A] characterisation.</strong> {@code PropertiesValidator} already refuses every
-         * shape below and admits the two beneath them; these cases state the discriminations the
-         * rule is written in terms of rather than driving them. Until now one canonical endpoint
-         * stood for all of it, so the trimming, the lower-casing and the authority-only matching
-         * were each held down by nothing: a real store named with its port, its trailing slash, its
-         * own query or in upper case is what an operator actually pastes out of the portal, and any
-         * of them read as "not a store" is a pod that starts on a published identity and skips
-         * every run at 18:00 with ACCESS_DENIED. Green on introduction; non-vacuity is the mutation
-         * quoted in this commit - except for the padded value, whose trimming the binder does
-         * before the validator sees it, so that case states the behaviour end to end rather than
-         * the validator's own {@code trim}.
+         * A real store named with its port, its trailing slash, its own query, in upper case or
+         * padded is what an operator actually pastes out of the portal, and any of them read as
+         * "not a store" is a pod that starts on a published identity and skips every run at 18:00
+         * with ACCESS_DENIED.
          */
         @ParameterizedTest
         @ValueSource(strings = {
@@ -2029,29 +2035,18 @@ class ConfigurationValidationTest {
             "  https://yot-results-distribution-ste86.azconfig.io  ",
         })
         void a_real_store_however_it_is_written_should_fail_startup(final String endpoint) {
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=" + endpoint,
-                    LOCAL_TEST_PROPERTY).run(context -> {
-                        assertThat(context).hasFailed();
-                        assertThat(context.getStartupFailure())
-                                .hasMessageContaining("yotresultsdistribution.feature.credential")
-                                .hasMessageContaining("yotresultsdistribution.feature.endpoint");
-                    });
+            generating.withPropertyValues(localPairAt(endpoint)).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasMessageContaining(FLAG_CONNECTION_STRING)
+                        .hasMessageContaining("real App Configuration store");
+            });
         }
 
         /**
-         * The same store written in the absolute DNS form, which is the spelling the rule missed.
-         *
-         * <p>A trailing root dot is how a fully qualified name is written, and it names the same
-         * host: {@code store.azconfig.io.} and {@code store.azconfig.io} resolve identically and the
-         * SDK builds the same client from either. So a rule that asks whether the value ends
-         * {@code .azconfig.io} reads the absolute spelling as "not a store" and admits the published
-         * local identity against a real App Configuration store - the one deployment this refusal
-         * exists to prevent, and the one whose failure is invisible until 18:00.
-         *
-         * <p>The upper-case host, the port and the path travel with it, because each of them is
-         * already characterised above on the relative spelling and none of them survives the
-         * absolute one: the question is about the host and the host alone, however the deployment
-         * wrote it.
+         * The same store written in the absolute DNS form: {@code store.azconfig.io.} and
+         * {@code store.azconfig.io} resolve identically and the SDK builds the same client from
+         * either, so the root dot is removed before the domain is asked about.
          */
         @ParameterizedTest
         @ValueSource(strings = {
@@ -2060,54 +2055,18 @@ class ConfigurationValidationTest {
             "https://yot-results-distribution-ste86.azconfig.io.:443/kv",
         })
         void a_real_store_in_its_absolute_dns_form_should_fail_startup(final String endpoint) {
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=" + endpoint,
-                    LOCAL_TEST_PROPERTY).run(context -> {
-                        assertThat(context).hasFailed();
-                        assertThat(context.getStartupFailure())
-                                .hasMessageContaining("yotresultsdistribution.feature.credential is"
-                                        + " local-test while yotresultsdistribution.feature.endpoint ("
-                                        + endpoint + ") names a real App Configuration store");
-                    });
+            generating.withPropertyValues(localPairAt(endpoint)).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasMessageContaining(FLAG_CONNECTION_STRING)
+                        .hasMessageContaining("real App Configuration store");
+            });
         }
 
         /**
-         * The other half of the same question: a value that names no host at all.
-         *
-         * <p>Neither of these is a URL a client can be built from, and neither is refused by asking
-         * whether the value looks like "a scheme and then something". {@code http://foo:bad} has a
-         * port that is not a number, so {@code new URL} throws
-         * {@code Error at index 0 in: "bad"} inside {@code ConfigurationClientBuilder.endpoint} as
-         * the reader is built - during refresh, wherever generation is enabled - which is a pod that
-         * never starts under an exception naming no setting of this service's. {@code http://:} is
-         * worse, because it is accepted there: the client is built on an empty host, every read at
-         * 18:00 fails to connect, and an unreadable flag is a run skipped and counted and
-         * indistinguishable from a store outage.
-         *
-         * <p>Both belong to this rule rather than to the SDK, and both are refused under the
-         * endpoint's own name - which is also what a value that names no store falls through to when
-         * the credential rule has nothing to say about it.
-         */
-        @ParameterizedTest
-        @ValueSource(strings = {
-            "http://foo:bad",
-            "http://:",
-        })
-        void an_endpoint_naming_no_host_should_fail_startup(final String endpoint) {
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=" + endpoint,
-                    LOCAL_TEST_PROPERTY).run(context -> {
-                        assertThat(context).hasFailed();
-                        assertThat(context.getStartupFailure())
-                                .hasMessageContaining("yotresultsdistribution.feature.endpoint (" + endpoint
-                                        + ") must be an http or https URL with a host when"
-                                        + " yotresultsdistribution.generation.enabled is true");
-                    });
-        }
-
-        /**
-         * <strong>[A] characterisation.</strong> The rule is about the host and says so: the
-         * compose stub is reached by a name of the estate's own, and a path or a query that happens
-         * to mention the store's domain is not a store. A validator that searched the whole string
-         * would refuse the local loop this credential exists for.
+         * The rule is about the host and says so: a path or a query that happens to mention the
+         * store's domain is not a store, and a validator that searched the whole string would
+         * refuse the local loop the pair exists for.
          */
         @ParameterizedTest
         @ValueSource(strings = {
@@ -2117,37 +2076,71 @@ class ConfigurationValidationTest {
         void a_stub_whose_path_or_query_mentions_the_domain_should_still_start(
                 final String endpoint) {
 
-            generating.withPropertyValues("yotresultsdistribution.feature.endpoint=" + endpoint,
-                    LOCAL_TEST_PROPERTY)
+            generating.withPropertyValues(localPairAt(endpoint))
                     .run(context -> assertThat(context).hasNotFailed());
         }
 
-        /**
-         * <strong>[A] characterisation.</strong> Both discriminators are unconditional on the
-         * master switch, and until now only the namespace one was asserted with generation off. A
-         * job that happens to be disabled in this deployment is no reason to accept a credential
-         * that cannot read the flag in the next one - and an intake-only pod is exactly where a
-         * credential nobody exercises is left behind to be found at cutover.
-         */
         @Test
-        void the_local_test_credential_against_a_real_store_should_fail_with_generation_off() {
-            runner.withPropertyValues(CONNECTION_STRING_PROPERTY, REAL_STORE, LOCAL_TEST_PROPERTY)
+        void the_published_local_pair_against_a_real_store_should_fail_with_generation_off() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY, localPairAt(REAL_STORE_ENDPOINT))
                     .run(context -> {
                         assertThat(context).hasFailed();
                         assertThat(context.getStartupFailure())
-                                .hasMessageContaining("yotresultsdistribution.feature.credential")
-                                .hasMessageContaining("yotresultsdistribution.feature.endpoint");
+                                .hasMessageContaining(FLAG_CONNECTION_STRING)
+                                .hasMessageContaining("real App Configuration store");
                     });
         }
 
         @Test
-        void the_deployed_credential_against_a_real_store_should_start() {
-            generating.withPropertyValues(REAL_STORE).run(context -> {
+        void a_deployed_connection_string_against_a_real_store_should_start() {
+            final String deployed = "Endpoint=" + REAL_STORE_ENDPOINT + ";Id=ste-id;Secret="
+                    + DEPLOYED_SECRET;
+            generating.withPropertyValues(FLAG_CONNECTION_STRING + "=" + deployed).run(context -> {
                 assertThat(context).hasNotFailed();
-                assertThat(context.getBean(FeatureFlagProperties.class).credential())
-                        .as("workload-identity is what an environment that says nothing gets")
-                        .isEqualTo(FeatureFlagProperties.Credential.WORKLOAD_IDENTITY);
+                assertThat(context.getBean(FeatureFlagProperties.class).connectionString())
+                        .as("what Key Vault injects is what the reader is built from")
+                        .isEqualTo(deployed);
             });
+        }
+    }
+
+    /**
+     * No refusal of the flag's connection string quotes it.
+     *
+     * <p>The string is the estate's App Configuration key. A start-up refusal is printed to the
+     * pod's log and kept by the log index for as long as the index keeps anything, so the refusal
+     * names the setting and the rule it broke and nothing it was given (constitution Principle
+     * VII). The malformed shapes are asserted beside the rules that refuse them, in
+     * {@code GenerationDownstreams}; these are the published-pair refusals.
+     */
+    @Nested
+    @DisplayName("no refusal quotes the flag's connection string")
+    class ConnectionStringPrivacy {
+
+        private static final String REAL_STORE_HOST = "yot-results-distribution-ste86.azconfig.io";
+
+        @Test
+        void a_published_pair_refused_against_a_real_store_should_quote_none_of_it() {
+            generating.withPropertyValues(localPairAt("https://" + REAL_STORE_HOST))
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageNotContaining(LOCAL_PAIR_SECRET)
+                                .hasMessageNotContaining(FeatureFlagProperties.PUBLISHED_LOCAL_ID)
+                                .hasMessageNotContaining(REAL_STORE_HOST);
+                    });
+        }
+
+        @Test
+        void a_published_pair_refused_on_a_deployed_pod_should_quote_none_of_it() {
+            runner.withPropertyValues(NAMESPACE_PROPERTY, localPairAt("http://wiremock:8080"))
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageNotContaining(LOCAL_PAIR_SECRET)
+                                .hasMessageNotContaining(FeatureFlagProperties.PUBLISHED_LOCAL_ID)
+                                .hasMessageNotContaining("wiremock:8080");
+                    });
         }
     }
 
@@ -2183,6 +2176,29 @@ class ConfigurationValidationTest {
         private final ApplicationContextRunner shippedOnTheStub = shipped
                 .withPropertyValues("yotresultsdistribution.payload.mode=STUB",
                         "yotresultsdistribution.referencedata.mode=STUB");
+
+        @Test
+        void the_flag_connection_string_should_arrive_from_the_variable_the_file_documents() {
+            final String injected = "Endpoint=https://appconfig.internal;Id=ste-id;Secret="
+                    + DEPLOYED_SECRET;
+            shippedOnTheStub
+                    .withSystemProperties("YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING=" + injected)
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        assertThat(context.getBean(FeatureFlagProperties.class).connectionString())
+                                .isEqualTo(injected);
+                    });
+        }
+
+        @Test
+        void the_flag_connection_string_should_default_to_nothing() {
+            shippedOnTheStub.run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(FeatureFlagProperties.class).connectionString())
+                        .as("FR-034: no credential-shaped value is an environment default")
+                        .isNullOrEmpty();
+            });
+        }
 
         @Test
         void the_queue_it_names_should_be_the_court_register_queue() {
@@ -3069,5 +3085,11 @@ class ConfigurationValidationTest {
                                     + " filter to read")
                             .hasNotFailed());
         }
+    }
+
+    /** The flag's connection-string setting, signed with the published local pair. */
+    private static String localPairAt(final String endpoint) {
+        return FLAG_CONNECTION_STRING + "=Endpoint=" + endpoint + ";Id="
+                + FeatureFlagProperties.PUBLISHED_LOCAL_ID + ";Secret=" + LOCAL_PAIR_SECRET;
     }
 }

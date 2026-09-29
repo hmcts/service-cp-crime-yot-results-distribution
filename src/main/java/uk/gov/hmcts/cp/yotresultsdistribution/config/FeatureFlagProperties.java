@@ -2,6 +2,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.config;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -28,11 +29,36 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "yotresultsdistribution.feature")
 public record FeatureFlagProperties(
+        String connectionString,
         String endpoint,
         @DefaultValue(".appconfig.featureflag/YotResultsDistributionService") String key,
         String label,
         @DefaultValue("2s") Duration timeout,
         @DefaultValue(WORKLOAD_IDENTITY) Credential credential) {
+
+    /** The identity of the published local pair the compose loop reads its stub with. */
+    public static final String PUBLISHED_LOCAL_ID = "0-l0-s0:yotresultsdistributionlocal";
+
+    /**
+     * The binding constructor, named because a second one sits beside it.
+     */
+    @ConstructorBinding
+    public FeatureFlagProperties {
+        // Nothing to normalise; the annotation is the point.
+    }
+
+    /**
+     * The flag settings read with a connection string.
+     *
+     * @param connectionString the App Configuration connection string, or blank
+     * @param key              the setting key
+     * @param label            the stack's label
+     * @param timeout          the whole budget for the read
+     */
+    public FeatureFlagProperties(final String connectionString, final String key,
+            final String label, final Duration timeout) {
+        this(connectionString, null, key, label, timeout, Credential.WORKLOAD_IDENTITY);
+    }
 
     /** The deployed identity, and the default: what the AKS webhook projects into the pod. */
     public static final String WORKLOAD_IDENTITY = "workload-identity";

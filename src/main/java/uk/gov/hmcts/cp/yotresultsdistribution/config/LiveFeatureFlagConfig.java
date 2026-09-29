@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.StandardEnvironment;
 import uk.gov.hmcts.cp.yotresultsdistribution.adapter.appconfig.AppConfigurationFlagReader;
 import uk.gov.hmcts.cp.yotresultsdistribution.application.FeatureFlagReader;
 
@@ -104,6 +105,16 @@ public class LiveFeatureFlagConfig {
                     namesAStore(properties) ? workloadIdentity(environment) : null);
             case LOCAL_TEST -> new AppConfigurationFlagReader(properties, localTestClient(properties));
         };
+    }
+
+    /**
+     * The flag port over these settings alone.
+     *
+     * @param properties where the flag is read from
+     * @return the port
+     */
+    public FeatureFlagReader featureFlagReader(final FeatureFlagProperties properties) {
+        return featureFlagReader(properties, new StandardEnvironment());
     }
 
     /**

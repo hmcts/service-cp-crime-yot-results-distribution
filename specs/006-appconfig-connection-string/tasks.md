@@ -14,11 +14,16 @@ Format: `[ID] [P?] [US#] Description`
 
 ## Phase 1: Tests (red)
 
-- [ ] **T002** [US1] [US2] [US3] Rewrite `ConfigurationValidationTest` (`PublishedLocalPair`,
+- [x] **T002** [US1] [US2] [US3] Rewrite `ConfigurationValidationTest` (`PublishedLocalPair`,
   `ConnectionStringPrivacy`, the flag cases of `GenerationDownstreams`, a `ShippedConfiguration`
   case), `GenerationWiringContextTest.FlagCredential`, add `FeatureFlagPropertiesTest`, and move
   the test support to the connection string. Seams: `FeatureFlagProperties.connectionString` and
   `PUBLISHED_LOCAL_ID` land with the old behaviour so the run is red on assertions.
+  Red run (2026-09-29, `-Dtest.noFailFast=true`, the four suites): 245 tests completed, 48 failed,
+  every one an `AssertionError` - `PublishedLocalPair` 15, `GenerationDownstreams` 16, the
+  generating cases elsewhere that now carry only a connection string 12,
+  `FeatureFlagPropertiesTest` 2, `ShippedConfiguration` 1, `ConnectionStringPrivacy` 1,
+  `FlagCredential` 1.
 
 ## Phase 2: Implementation (green)
 

@@ -9,7 +9,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static uk.gov.hmcts.cp.yotresultsdistribution.config.FeatureFlagProperties.Credential.LOCAL_TEST;
 
 import com.azure.core.http.HttpClient;
 import com.azure.core.http.netty.NettyAsyncHttpClientBuilder;
@@ -154,8 +153,7 @@ class AppConfigurationFlagReaderTest {
     private static AppConfigurationFlagReader readerFor(
             final String key, final String label, final Duration budget) {
         final FeatureFlagProperties properties =
-                new FeatureFlagProperties(
-                        server.baseUrl(), key, label, budget, LOCAL_TEST);
+                new FeatureFlagProperties(storeConnectionString(), key, label, budget);
         return new AppConfigurationFlagReader(properties, clientFor(properties));
     }
 
@@ -169,8 +167,7 @@ class AppConfigurationFlagReaderTest {
      */
     private static ConfigurationClient clientFor(final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(new NettyAsyncHttpClientBuilder()
                         .responseTimeout(properties.timeout())
@@ -188,8 +185,7 @@ class AppConfigurationFlagReaderTest {
     private static ConfigurationClient clientOn(
             final HttpClient httpClient, final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(httpClient)
                 .buildClient();
@@ -210,11 +206,15 @@ class AppConfigurationFlagReaderTest {
      */
     private static ConfigurationClient unboundedClientFor(final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(new NettyAsyncHttpClientBuilder().build())
                 .buildClient();
+    }
+
+    /** The stub's connection string, signed with the fixed test pair. */
+    private static String storeConnectionString() {
+        return "Endpoint=" + server.baseUrl() + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET;
     }
 
     /** The store's answer for a setting that is there, carrying {@code value} verbatim. */
@@ -471,8 +471,7 @@ class AppConfigurationFlagReaderTest {
         void a_black_holed_store_answers_inside_the_budget() {
             answeringAfter(BLACK_HOLED_MS, settingCarrying(flagValue(true)));
             final FeatureFlagProperties properties =
-                    new FeatureFlagProperties(
-                            server.baseUrl(), KEY, LABEL, SHORT_BUDGET, LOCAL_TEST);
+                    new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, SHORT_BUDGET);
             final AppConfigurationFlagReader reader =
                     new AppConfigurationFlagReader(properties, unboundedClientFor(properties));
 
@@ -509,10 +508,8 @@ class AppConfigurationFlagReaderTest {
                 + "at the reader's outer deadline")
         void the_adapters_client_ends_a_black_holed_read_at_the_budget_it_was_built_with() {
             answeringAfter(BLACK_HOLED_MS, settingCarrying(flagValue(true)));
-            final FeatureFlagProperties legs = new FeatureFlagProperties(
-                    server.baseUrl(), KEY, LABEL, SHORT_BUDGET, LOCAL_TEST);
-            final FeatureFlagProperties patient = new FeatureFlagProperties(
-                    server.baseUrl(), KEY, LABEL, PATIENT_BUDGET, LOCAL_TEST);
+            final FeatureFlagProperties legs = new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, SHORT_BUDGET);
+            final FeatureFlagProperties patient = new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, PATIENT_BUDGET);
             final AppConfigurationFlagReader reader = new AppConfigurationFlagReader(patient,
                     clientOn(AppConfigurationFlagReader.httpClientFor(legs), legs));
 
@@ -641,7 +638,8 @@ class AppConfigurationFlagReaderTest {
 
                 assertThat(log.renderings())
                         .noneMatch(line -> line.contains(STORE_TEXT_MARKER)
-                                || line.contains(server.baseUrl()));
+                                || line.contains(server.baseUrl())
+                                || line.contains(FIXED_TEST_SECRET));
             }
         }
     }
