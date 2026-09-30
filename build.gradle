@@ -136,7 +136,7 @@ dependencies {
 
   // Security: pin transitive tomcat-embed-core to patched version (CVE-2026-41293, -43512, et al.)
   // Brought in transitively via spring-boot-starter-web; >=11.0.0-M1,<11.0.22 are vulnerable
-  implementation 'org.apache.tomcat.embed:tomcat-embed-core:11.0.25'
+  implementation 'org.apache.tomcat.embed:tomcat-embed-core:11.0.26'
 }
 
 // Guard against any legacy javax.jms slipping onto the classpath alongside Spring Boot 4's jakarta.jms.
