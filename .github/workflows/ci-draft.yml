@@ -11,6 +11,9 @@ on:
       - master
       - main
       - 'team/**'
+  # Dispatched by post-merge-catch-up.yml for a merge the push event never announced (one the
+  # Actions token performed), and publishes exactly as a push would.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +32,6 @@ jobs:
       HMCTS_ADO_PAT: ${{ secrets.HMCTS_CP_ADO_PAT }}
     with:
       environment: dev
-      is_publish: ${{ github.event_name == 'push' }}
-      trigger_docker: ${{ github.event_name == 'push' }}
-      trigger_deploy: ${{ github.event_name == 'push' }}
+      is_publish: ${{ github.event_name != 'pull_request' }}
+      trigger_docker: ${{ github.event_name != 'pull_request' }}
+      trigger_deploy: ${{ github.event_name != 'pull_request' }}

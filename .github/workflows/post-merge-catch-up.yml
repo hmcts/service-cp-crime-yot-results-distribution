@@ -1,0 +1,61 @@
+name: Post-merge catch-up
+
+# A merge performed with the Actions token - which is how auto-merge-dependabot.yml merges every
+# Dependabot PR - does not trigger `push` workflows on main: GitHub creates no workflow run for an
+# event the GITHUB_TOKEN caused. So after a Dependabot merge, Build and Publish (Non-Release),
+# CodeQL and the Secrets Scanner did not run on main at all, and no main artefact or image was
+# built for the bump until the next human push.
+#
+# workflow_dispatch is the documented exception - a dispatch always creates a run, whoever asks -
+# so this looks at the head of main every quarter hour (and after any merged PR whose close event
+# does reach it), and dispatches each of the three workflows that has no run for that commit yet.
+# A run that already exists, whatever its outcome, is left alone: this catches up, it does not
+# retry.
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: post-merge-catch-up
+  cancel-in-progress: false
+
+jobs:
+  dispatch-missing:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch every main workflow that has not run for the head of main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # A merge by a person triggers the push runs itself; on that path, wait for them to be
+          # registered before deciding they are missing.
+          if [ "$EVENT" = "pull_request" ]; then
+            sleep 120
+          fi
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          echo "head of main: $head"
+          for workflow in ci-draft.yml codeql.yml secrets-scanner.yml; do
+            runs=$(gh run list --repo "$REPO" --workflow "$workflow" --branch main --limit 20 \
+                     --json headSha --jq "[.[] | select(.headSha == \"$head\")] | length")
+            if [ "$runs" -gt 0 ]; then
+              echo "$workflow: $runs run(s) for $head, nothing to do"
+            else
+              gh workflow run "$workflow" --repo "$REPO" --ref main
+              echo "$workflow: no run for $head, dispatched"
+            fi
+          done
