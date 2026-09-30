@@ -1317,7 +1317,8 @@ them read it the same way they read everything else.
 - **Feature flag**: `com.azure:azure-data-appconfiguration`, authorised by the
   estate's App Configuration connection string - the value the WildFly contexts
   read, from Vault `secret/<env>/<stack>/cpp_feature_manager_connection_string_url`
-  (on STE, `steccm01`'s), set in the deployment's values by its ansible. Not
+  (on STE, `steccm01`'s), set in the deployment's values by its ansible with
+  `Endpoint=` prefixed where the Vault value lacks it. Not
   the Key Vault secret `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, which
   on STE holds only the store's URL (5.2.0); a deployment MAY return to it
   through the CSI driver once it holds a full connection string. Key

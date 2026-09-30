@@ -107,14 +107,17 @@ is an ask of its owner and is tracked outside this repository.
 
 The deployment gives `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` the value the WildFly
 contexts read, from the same Vault path, rendered into the Helm values by the deployment's ansible -
-the mechanism these values already use for the Redis key and the system user id. No code changes:
+the mechanism these values already use for the Redis key and the system user id - with `Endpoint=`
+prefixed at render time where the value lacks it. No code changes:
 the setting, its binding and every refusal of FR-001-FR-007 are unchanged, and the service still
 fails closed on a string it cannot parse.
 
 - **FR-008**: The deployed value of `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` is the
   estate's App Configuration connection string from Vault
   `secret/<env>/<stack>/cpp_feature_manager_connection_string_url` (on STE, `steccm01`'s), set in
-  the deployment's values - not the Key Vault secret. It is still never committed to this
+  the deployment's values - not the Key Vault secret - prefixed `Endpoint=` where the Vault value
+  lacks it, since the SDK and this service's validator both require it and neither is loosened to
+  accept a bare URL. It is still never committed to this
   repository, never defaulted, and never logged, echoed or quoted (FR-006).
 - **FR-009**: When the Key Vault secret holds a full connection string, the deployment MAY return
   to it through the CSI driver; that is a values change in the infrastructure repository, and this
