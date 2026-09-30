@@ -33,8 +33,8 @@ import uk.gov.hmcts.cp.yotresultsdistribution.application.FeatureFlagReader;
  * the flag say" on a pod that cannot see it.
  *
  * <p><strong>One way to authorise the read: the App Configuration connection string</strong>
- * (constitution 5.1.0). On a deployed pod it is the estate's shared one, injected from Key Vault -
- * no App Configuration role can be assigned to this service's identity, so the workload-identity
+ * (constitution 5.2.0). On a deployed pod it is the estate's one, the value the WildFly contexts
+ * read from Vault, set in the deployment's values - no App Configuration role can be assigned to this service's identity, so the workload-identity
  * read it replaced could never have been granted. On the compose loop it is the published local
  * pair, which {@link PropertiesValidator} refuses anywhere a real flag is read. Both sign with HMAC
  * rather than a bearer token, so the one reader reads a plain-HTTP stub exactly as it reads the real

@@ -89,11 +89,13 @@ notification enabled against production data outside cutover.
   deployed by **Flux** using the shared **`springboot-app`** Helm chart.
 - **Secrets** come from **Azure Key Vault via the CSI driver, with workload identity**. No static
   keys, no committed connection strings, no secret in a Helm value or an environment default.
-  **One sanctioned exception** (constitution 5.1.0): the cutover flag is read with the estate's shared
-  App Configuration connection string, `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING` in Key Vault
-  (the secret resultsvalidator reads), injected as `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`
-  - because no App Configuration role can be assigned to this service's identity through
-  `ccm-namespace`. It is still never committed, never defaulted, and never logged or echoed. The
+  **One sanctioned exception** (constitution 5.2.0): the cutover flag is read with the estate's App
+  Configuration connection string - the value the WildFly contexts read, from Vault
+  `secret/<env>/<stack>/cpp_feature_manager_connection_string_url` - set as
+  `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` in the deployment's values, because no App
+  Configuration role can be assigned to this service's identity through `ccm-namespace`. Not the Key
+  Vault secret `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`: on STE it holds only the store's URL.
+  It is still never committed, never defaulted, and never logged or echoed. The
   published local pair committed in `docker-compose.yml` is not a key: it authorises nothing, and
   start-up refuses it wherever a real flag is read.
 - The STE wiring (helmsman entry, values, queue terraform, MI exports) lives in the sibling infra
