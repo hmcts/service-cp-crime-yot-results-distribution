@@ -94,8 +94,11 @@ on two counts:
   from HashiCorp Vault, `secret/ste/steccm01/cpp_feature_manager_connection_string_url`, rendered
   by the deployment's ansible into the `standaloneXml` bindings (`cpp-aks-deploy`
   `ansible/group_vars/ste/common.yaml.j2`) and mounted from a ConfigMap. `DefaultAzureFeatureFetcher`
-  splits it into Endpoint, Id and Secret and signs with the last two, so that value is a full
-  connection string - the only known-good one on STE.
+  splits it on `;` into three positional parts and signs with the last two. The value is
+  `<store URL>;Id=...;Secret=...` - the first part is the bare URL, without `Endpoint=`, which the
+  legacy strips if present and so never needed; the SDK requires it. With the prefix added, it is
+  the only known-good connection string on STE (confirmed on steccm41, 2026-10-01: Id and a
+  strict-Base64 Secret present, first part the store's URL).
 
 The Key Vault secret sits behind a private link, and nothing in the estate writes it; correcting it
 is an ask of its owner and is tracked outside this repository.
