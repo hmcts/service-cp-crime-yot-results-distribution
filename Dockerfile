@@ -5,9 +5,11 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE:-eclipse-temurin:25-jre}
 
-# install curl for debugging
+# install curl for debugging; take openssl past the base image's for CVE-2026-84782 until the
+# base image is rebuilt with it
 RUN apt-get update \
     && apt-get install -y curl \
+    && apt-get install -y --only-upgrade openssl libssl3t64 \
     && rm -rf /var/lib/apt/lists/*
 
 # run as non-root ... group and user "app"
