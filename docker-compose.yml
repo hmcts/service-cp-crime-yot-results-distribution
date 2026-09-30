@@ -66,14 +66,12 @@ services:
       # downstream endpoints, the e-mail template id and the broker - which is the whole reason
       # they are all named here rather than left to be discovered at 18:00.
       YOTRESULTSDISTRIBUTION_GENERATION_ENABLED: "true"
-      # The REAL App Configuration reader, pointed at the WireMock `kv` stub. local-test and not
-      # STUB: what runs here is the deployed reader, the deployed SDK client and the deployed
-      # fail-closed parsing, with only the identity swapped for a published pair the stub does not
-      # check - the SDK sends a credential's token over TLS alone, so a pod's own identity cannot
-      # read a plain-HTTP stand-in at all. Startup refuses this value against a real
-      # .azconfig.io store or on a pod with a Service Bus namespace.
-      YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL: local-test
-      APPCONFIG_ENDPOINT: http://wiremock:8080
+      # The REAL App Configuration reader, pointed at the WireMock `kv` stub, with the published
+      # local pair and not STUB: what runs here is the deployed reader, the deployed SDK client and
+      # the deployed fail-closed parsing, signed with a pair no store authorises and the stub does
+      # not check. NOT A SECRET: Secret= is Base64 of "not-a-secret". Startup refuses this pair
+      # against a real .azconfig.io store or on a pod with a Service Bus namespace.
+      YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING: "Endpoint=http://wiremock:8080;Id=0-l0-s0:yotresultsdistributionlocal;Secret=bm90LWEtc2VjcmV0" # gitleaks:allow
       # The label the committed mappings answer under (docker/wiremock/README.md).
       STACK_LABEL: LOCAL
       # The framework file service's own database, which the PDF payload is written straight into

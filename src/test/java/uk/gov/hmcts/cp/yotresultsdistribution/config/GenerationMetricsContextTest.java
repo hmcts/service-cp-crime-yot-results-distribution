@@ -44,7 +44,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
     "yotresultsdistribution.generation.fileservice-mode=LIVE",
     "yotresultsdistribution.generation.flag-mode=LIVE",
     "yotresultsdistribution.fileservice.url=jdbc:postgresql://localhost:5432/fileservice",
-    "yotresultsdistribution.feature.endpoint=https://appconfig.internal",
+    "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==",
     "yotresultsdistribution.feature.label=ste86",
     "yotresultsdistribution.endpoints.systemdocgenerator=http://systemdocgenerator.internal:8080",
     "yotresultsdistribution.endpoints.notificationnotify=http://notificationnotify.internal:8080",

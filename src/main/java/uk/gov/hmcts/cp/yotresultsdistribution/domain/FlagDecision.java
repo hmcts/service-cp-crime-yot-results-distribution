@@ -46,13 +46,13 @@ public sealed interface FlagDecision {
      */
     enum UnreadableReason {
 
-        /** Generation is enabled and no App Configuration endpoint was configured. */
+        /** No App Configuration connection string was configured. */
         NOT_CONFIGURED("unreadable-not-configured"),
 
         /** The store answered, and holds no setting under the configured key and label. */
         NOT_FOUND("unreadable-not-found"),
 
-        /** The store refused this pod's identity. */
+        /** The store refused the connection string's key - revoked, rotated or not this store's. */
         ACCESS_DENIED("unreadable-access-denied"),
 
         /** The read did not answer inside its budget. */

@@ -9,7 +9,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static uk.gov.hmcts.cp.yotresultsdistribution.config.FeatureFlagProperties.Credential.LOCAL_TEST;
 
 import com.azure.core.http.HttpClient;
 import com.azure.core.http.netty.NettyAsyncHttpClientBuilder;
@@ -48,11 +47,10 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
  * this suite's stub, so what runs is {@code getConfigurationSetting(key, label)} over App
  * Configuration's own {@code kv} resource - the request the deployed pod makes, down to the
  * URL-encoded key in the path and the label in the query - and not a hand-rolled HTTP call standing
- * in for it. Only the credential differs: a token credential refuses a plain-{@code http} endpoint
- * outright ("token credentials require a URL using the HTTPS protocol scheme"), so the stub is
- * addressed with a connection string carrying a fixed, invented test secret. The deployed reader
- * uses {@code WorkloadIdentityCredential} (research §3); which credential signs the request changes
- * nothing about the resource, the key, the label or the answer, which is what this suite is about.
+ * in for it. The client is built the way the deployed pod's is, from a connection string
+ * (constitution 5.1.0); only the pair differs - a fixed, invented test secret here, the estate's
+ * key from Key Vault there - and which pair signs the request changes nothing about the resource,
+ * the key, the label or the answer, which is what this suite is about.
  *
  * <p><strong>Three answers and never a fourth.</strong> {@link FlagDecision} is
  * {@code ON | OFF | UNREADABLE(reason)} and the port promises it never throws, so every case here
@@ -154,8 +152,7 @@ class AppConfigurationFlagReaderTest {
     private static AppConfigurationFlagReader readerFor(
             final String key, final String label, final Duration budget) {
         final FeatureFlagProperties properties =
-                new FeatureFlagProperties(
-                        server.baseUrl(), key, label, budget, LOCAL_TEST);
+                new FeatureFlagProperties(storeConnectionString(), key, label, budget);
         return new AppConfigurationFlagReader(properties, clientFor(properties));
     }
 
@@ -169,8 +166,7 @@ class AppConfigurationFlagReaderTest {
      */
     private static ConfigurationClient clientFor(final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(new NettyAsyncHttpClientBuilder()
                         .responseTimeout(properties.timeout())
@@ -188,8 +184,7 @@ class AppConfigurationFlagReaderTest {
     private static ConfigurationClient clientOn(
             final HttpClient httpClient, final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(httpClient)
                 .buildClient();
@@ -210,11 +205,15 @@ class AppConfigurationFlagReaderTest {
      */
     private static ConfigurationClient unboundedClientFor(final FeatureFlagProperties properties) {
         return new ConfigurationClientBuilder()
-                .connectionString("Endpoint=" + properties.endpoint()
-                        + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET)
+                .connectionString(properties.connectionString())
                 .retryOptions(new RetryOptions(new FixedDelayOptions(0, Duration.ZERO)))
                 .httpClient(new NettyAsyncHttpClientBuilder().build())
                 .buildClient();
+    }
+
+    /** The stub's connection string, signed with the fixed test pair. */
+    private static String storeConnectionString() {
+        return "Endpoint=" + server.baseUrl() + ";Id=" + FIXED_TEST_ID + ";Secret=" + FIXED_TEST_SECRET;
     }
 
     /** The store's answer for a setting that is there, carrying {@code value} verbatim. */
@@ -369,13 +368,13 @@ class AppConfigurationFlagReaderTest {
         }
 
         /**
-         * The platform ask is an {@code App Configuration Data Reader} role assignment for this
-         * pod's identity (design §8). Until it lands, every read is refused - and it must be
-         * refused as its own cause, or the first night of the cutover looks like an empty store.
+         * A store that refuses the key - revoked, rotated, or never valid for this store - refuses
+         * every read, and it must be refused as its own cause, or the night after a key rotation
+         * looks like an empty store.
          */
         @ParameterizedTest(name = "{0} is access denied")
         @ValueSource(ints = {401, 403})
-        @DisplayName("a store that refuses this pod's identity is unreadable, access denied")
+        @DisplayName("a store that refuses the connection string's key is unreadable, access denied")
         void a_store_that_refuses_this_identity_is_unreadable_access_denied(final int status) {
             answering(status, "{\"status\":" + status + "}");
 
@@ -458,6 +457,19 @@ class AppConfigurationFlagReaderTest {
         private static final Duration PATIENT_BUDGET = Duration.ofSeconds(3);
 
         /**
+         * Halfway between the client's budget and the reader's outer deadline: the line that says
+         * which of the two ended a read.
+         *
+         * <p>This case asks <em>which</em> bound fired, not how closely the client kept to its
+         * own, so it is not held to {@link #JITTER}: the first call on a freshly built HTTP client
+         * pays for its class loading and its connection pool, which a shared CI runner has been
+         * seen to stretch past two jitters. The deadline itself is still pinned to one jitter by
+         * the case above.
+         */
+        private static final Duration CLIENT_OR_READER =
+                SHORT_BUDGET.plus(PATIENT_BUDGET.minus(SHORT_BUDGET).dividedBy(2));
+
+        /**
          * The nightly job asks this question first and does nothing until it is answered, so a read
          * that outlasts its budget is a run that has not started: at 18:00 the difference between a
          * skipped run and a stalled one is an alert nobody gets. The configured timeout is
@@ -471,8 +483,7 @@ class AppConfigurationFlagReaderTest {
         void a_black_holed_store_answers_inside_the_budget() {
             answeringAfter(BLACK_HOLED_MS, settingCarrying(flagValue(true)));
             final FeatureFlagProperties properties =
-                    new FeatureFlagProperties(
-                            server.baseUrl(), KEY, LABEL, SHORT_BUDGET, LOCAL_TEST);
+                    new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, SHORT_BUDGET);
             final AppConfigurationFlagReader reader =
                     new AppConfigurationFlagReader(properties, unboundedClientFor(properties));
 
@@ -500,19 +511,17 @@ class AppConfigurationFlagReaderTest {
          * separately here and the case reads how long the answer took: at the client's budget it is
          * the client that ended it, and the reader's own deadline was never reached.
          *
-         * <p>Both credentials build their client through the factory this asserts on, which is what
-         * makes the {@code local-test} client the deployed one in this respect as well as in the
-         * key, the label, the fail-closed parsing and the outer deadline.
+         * <p>The live wiring builds its client through the factory this asserts on, which is what
+         * makes the compose loop's client the deployed one in this respect as well as in the key,
+         * the label, the fail-closed parsing and the outer deadline.
          */
         @Test
         @DisplayName("the client the adapter builds ends a black-holed read at its own budget, not "
                 + "at the reader's outer deadline")
         void the_adapters_client_ends_a_black_holed_read_at_the_budget_it_was_built_with() {
             answeringAfter(BLACK_HOLED_MS, settingCarrying(flagValue(true)));
-            final FeatureFlagProperties legs = new FeatureFlagProperties(
-                    server.baseUrl(), KEY, LABEL, SHORT_BUDGET, LOCAL_TEST);
-            final FeatureFlagProperties patient = new FeatureFlagProperties(
-                    server.baseUrl(), KEY, LABEL, PATIENT_BUDGET, LOCAL_TEST);
+            final FeatureFlagProperties legs = new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, SHORT_BUDGET);
+            final FeatureFlagProperties patient = new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, PATIENT_BUDGET);
             final AppConfigurationFlagReader reader = new AppConfigurationFlagReader(patient,
                     clientOn(AppConfigurationFlagReader.httpClientFor(legs), legs));
 
@@ -529,7 +538,7 @@ class AppConfigurationFlagReaderTest {
                             + "with - a client with no legs of its own would have been ended by "
                             + "the reader's outer deadline instead, having held the connection "
                             + "for it")
-                    .isLessThan(SHORT_BUDGET.plus(JITTER).plus(JITTER));
+                    .isLessThan(CLIENT_OR_READER);
         }
     }
 
@@ -641,7 +650,8 @@ class AppConfigurationFlagReaderTest {
 
                 assertThat(log.renderings())
                         .noneMatch(line -> line.contains(STORE_TEXT_MARKER)
-                                || line.contains(server.baseUrl()));
+                                || line.contains(server.baseUrl())
+                                || line.contains(FIXED_TEST_SECRET));
             }
         }
     }
