@@ -131,15 +131,13 @@ log "PASS: readiness reported UP within the ${READINESS_BUDGET_SECONDS}s budget"
 # rules.
 #
 # The reading is taken through the REAL reader, with no mode override at all. It used to need
-# `YOTRESULTSDISTRIBUTION_GENERATION_FLAG_MODE=STUB`, because the live reader authorises its App Configuration
-# read on the pod's workload identity - AZURE_CLIENT_ID, the tenant and the projected federated token
-# - and a compose container holds none of the three; a bearer credential is refused a plain-HTTP URL
-# by the SDK before a socket is opened, so pointing it at the WireMock stub was not an option either.
-# `yotresultsdistribution.feature.credential=local-test`, which docker-compose.yml sets on `app`, swaps that
-# identity for a published pair the stub does not check and leaves everything else deployed. So what
-# this step asserts is the whole path an operator uses: the endpoint, the deployed reader, the
-# deployed SDK client, the key in the path, the label in the query and the fail-closed reading of
-# the answer.
+# `YOTRESULTSDISTRIBUTION_GENERATION_FLAG_MODE=STUB`. It no longer does: the live reader authorises its App
+# Configuration read with a connection string (constitution 5.1.0), which signs with HMAC rather
+# than a bearer token and so reads a plain-HTTP stub. docker-compose.yml sets
+# YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING on `app` to the published local pair - one the
+# stub does not check and no real store authorises - and leaves everything else deployed. So what
+# this step asserts is the whole path an operator uses: the deployed reader, the deployed SDK
+# client, the key in the path, the label in the query and the fail-closed reading of the answer.
 log "calling GET ${FLAG_URL}"
 # In the `if` deliberately: errexit does not apply to a condition, so a failure is read and reported
 # here rather than ending the script with no line saying what was called. `--fail` so that a status

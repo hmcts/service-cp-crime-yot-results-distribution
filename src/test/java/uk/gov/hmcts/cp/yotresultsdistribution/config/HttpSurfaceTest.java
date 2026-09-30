@@ -14,7 +14,6 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -28,7 +27,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import tools.jackson.databind.JsonNode;
-import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
 
 /**
  * The whole HTTP surface of this service, asserted rather than assumed (constitution Principle III).
@@ -227,7 +225,6 @@ class HttpSurfaceTest {
      */
     @Nested
     @NestedTestConfiguration(NestedTestConfiguration.EnclosingConfiguration.OVERRIDE)
-    @ExtendWith(WorkloadIdentityStub.class)
     @SpringBootTest(properties = {
         "yotresultsdistribution.generation.enabled=true",
         "yotresultsdistribution.generation.sdg-mode=LIVE",
@@ -235,7 +232,7 @@ class HttpSurfaceTest {
         "yotresultsdistribution.generation.fileservice-mode=LIVE",
         "yotresultsdistribution.generation.flag-mode=LIVE",
         "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice",
-        "yotresultsdistribution.feature.endpoint=https://appconfig.internal",
+        "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==",
         "yotresultsdistribution.feature.label=ste86",
         "yotresultsdistribution.endpoints.systemdocgenerator=http://systemdocgenerator.internal:8080",
         "yotresultsdistribution.endpoints.notificationnotify=http://notificationnotify.internal:8080",
@@ -324,12 +321,11 @@ class HttpSurfaceTest {
      * wherever the service runs, keeping its {@code !test} profile gating and its LIVE/STUB mode
      * selection exactly as they were.
      *
-     * <p><strong>And no App Configuration endpoint is configured here on purpose.</strong> That is
-     * the shape a pod with no nightly job is deployed in - {@code PropertiesValidator} asks for the
-     * endpoint and the label only once generation is on - so the credential has no store to be
-     * built against and the three workload-identity variables a deployed pod is given are absent.
-     * The pod must start anyway, and the reading must be {@code UNREADABLE} with its own cause on
-     * it rather than a refusal.
+     * <p><strong>And no App Configuration connection string is configured here on purpose.</strong>
+     * That is the shape a pod with no nightly job may be deployed in - {@code PropertiesValidator}
+     * requires the connection string and the label only once generation is on - so the reader has
+     * no client to read through. The pod must start anyway, and the reading must be
+     * {@code UNREADABLE} with its own cause on it ({@code NOT_CONFIGURED}) rather than a refusal.
      *
      * <p>The two estate filters are off: what they do has suites of its own, and this case is about
      * which beans a pod holds and what the endpoint answers.
@@ -439,7 +435,6 @@ class HttpSurfaceTest {
      */
     @Nested
     @NestedTestConfiguration(NestedTestConfiguration.EnclosingConfiguration.OVERRIDE)
-    @ExtendWith(WorkloadIdentityStub.class)
     @SpringBootTest(properties = {
         "yotresultsdistribution.operations.enabled=false",
         "yotresultsdistribution.generation.enabled=true",
@@ -449,7 +444,7 @@ class HttpSurfaceTest {
         "yotresultsdistribution.generation.fileservice-mode=LIVE",
         "yotresultsdistribution.generation.flag-mode=LIVE",
         "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice",
-        "yotresultsdistribution.feature.endpoint=https://appconfig.internal",
+        "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==",
         "yotresultsdistribution.feature.label=ste86",
         "yotresultsdistribution.endpoints.systemdocgenerator=http://systemdocgenerator.internal:8080",
         "yotresultsdistribution.endpoints.notificationnotify=http://notificationnotify.internal:8080",

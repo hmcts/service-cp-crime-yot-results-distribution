@@ -1,0 +1,56 @@
+name: Update Dependabot branches
+
+# The main ruleset requires a branch to be up to date with main before it can merge, and
+# auto-merge-dependabot.yml enables auto-merge on every Dependabot PR. Neither GitHub's auto-merge
+# nor Dependabot itself brings a branch up to date when main moves, so every merge to main strands
+# the Dependabot PRs still open: approved, green, and BEHIND. This closes the loop - each push to
+# main (and, as a fallback, an hourly tick) updates every open Dependabot branch so its checks
+# re-run against the new main and auto-merge can complete.
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-dependabot-branches
+  cancel-in-progress: false
+
+jobs:
+  update-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update every open Dependabot PR that is behind main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          failed=0
+          numbers=$(gh pr list --repo "$REPO" --author 'app/dependabot' --state open \
+                      --base main --json number --jq '.[].number')
+          if [ -z "$numbers" ]; then
+            echo "no open Dependabot PRs"
+            exit 0
+          fi
+          for number in $numbers; do
+            # A branch that is already current is answered "already up to date" by gh, or 422
+            # "There are no new commits on the base branch" by the API; that is the one failure
+            # that is not one.
+            if output=$(gh pr update-branch "$number" --repo "$REPO" 2>&1); then
+              echo "PR #$number: $output"
+            elif echo "$output" | grep -qiE "no new commits on the base branch|already up.to.date"; then
+              echo "PR #$number: already up to date"
+            else
+              echo "::error::PR #$number: update failed - $output"
+              failed=1
+            fi
+          done
+          exit "$failed"
