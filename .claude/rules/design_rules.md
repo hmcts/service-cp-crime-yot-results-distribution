@@ -136,7 +136,8 @@ uk.gov.hmcts.cp.yotresultsdistribution
 │   ├── systemdocgenerator/ generate-document command client
 │   ├── notificationnotify/ send-email-notification command client
 │   ├── publicevents/       the Artemis public.event listener and envelope parsing
-│   ├── appconfig/          the Azure App Configuration flag reader
+│   ├── appconfig/          the Azure App Configuration flag reader, authorised by the estate's
+│   │                       shared connection string from Key Vault - never workload identity
 │   ├── report/             the exception report's two sinks: the structured events, and the
 │   │                       CSV-and-e-mail one
 │   ├── http/               the shared HTTP concerns the four clients above sit on

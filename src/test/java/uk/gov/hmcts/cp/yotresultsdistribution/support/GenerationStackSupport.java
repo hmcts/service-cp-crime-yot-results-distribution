@@ -55,10 +55,9 @@ import uk.gov.hmcts.cp.yotresultsdistribution.config.JacksonConfig;
  * stopped reached <em>no</em> socket - because "nothing was requested" is a claim about the one
  * server that would have received it.
  *
- * <p>The flag is read through a real {@code AppConfigurationFlagReader} over a real SDK client; only
- * the credential is a connection string rather than this pod's workload identity, because a token
- * endpoint is the one part of that read no suite can stand up (see
- * {@code GenerationStackConfiguration}).
+ * <p>The flag is read through the live wiring's own {@code AppConfigurationFlagReader} over a real
+ * SDK client, with a connection string exactly as a deployed pod is given one - only the pair is a
+ * fixed test value the stub does not check.
  *
  * <p>The file-service database is its own database inside the shared container, named apart from
  * {@code FileServicePayloadStoreIT}'s so the two suites can run in one JVM without one creating a
@@ -169,7 +168,8 @@ public final class GenerationStackSupport implements AutoCloseable {
         settings.put("yotresultsdistribution.generation.nn-mode", "LIVE");
         settings.put("yotresultsdistribution.generation.fileservice-mode", "LIVE");
         settings.put("yotresultsdistribution.generation.flag-mode", "LIVE");
-        settings.put("yotresultsdistribution.feature.endpoint", contexts.baseUrl());
+        settings.put("yotresultsdistribution.feature.connection-string",
+                "Endpoint=" + contexts.baseUrl() + ";Id=" + STORE_ID + ";Secret=" + STORE_SECRET);
         settings.put("yotresultsdistribution.feature.key", FLAG_KEY);
         settings.put("yotresultsdistribution.feature.label", FLAG_LABEL);
         settings.put("yotresultsdistribution.feature.timeout", "5s");
@@ -190,9 +190,6 @@ public final class GenerationStackSupport implements AutoCloseable {
         // Never connected to - embedded mode dials vm://0 - but startup requires a broker URL
         // wherever completion is event-driven, and it is right to.
         settings.put("spring.artemis.broker-url", "tcp://localhost:61616");
-        // The one bean these suites replace, and the reason: a workload-identity credential needs a
-        // token endpoint, which is the one leg of the flag read no fixture can stand up.
-        settings.put("spring.main.allow-bean-definition-overriding", "true");
         return settings;
     }
 
@@ -213,7 +210,7 @@ public final class GenerationStackSupport implements AutoCloseable {
      * @return the running context, to be closed by the caller
      */
     public static ConfigurableApplicationContext startService(final Map<String, String> settings) {
-        return new SpringApplicationBuilder(Application.class, GenerationStackConfiguration.class)
+        return new SpringApplicationBuilder(Application.class)
                 .web(WebApplicationType.NONE)
                 .run(settings.entrySet().stream()
                         .map(setting -> "--" + setting.getKey() + '=' + setting.getValue())

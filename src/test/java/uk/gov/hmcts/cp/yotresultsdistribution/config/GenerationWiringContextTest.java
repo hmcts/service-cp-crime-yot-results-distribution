@@ -23,13 +23,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
-import org.springframework.mock.env.MockEnvironment;
 import uk.gov.hmcts.cp.yotresultsdistribution.adapter.fileservice.FileServicePayloadStore;
 import uk.gov.hmcts.cp.yotresultsdistribution.adapter.publicevents.DocumentEventListener;
 import uk.gov.hmcts.cp.yotresultsdistribution.adapter.stub.StubDocumentRenderer;
@@ -49,7 +49,6 @@ import uk.gov.hmcts.cp.yotresultsdistribution.batch.StaleBatchReleaser;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision;
 import uk.gov.hmcts.cp.yotresultsdistribution.pipeline.PdfPayloadMapper;
 import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
-import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
 
 /**
  * The downstream half in a context that is actually a deployment's.
@@ -76,13 +75,11 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
  * assertion is that what the context resolved is the real adapter and not merely that something
  * resolved.
  *
- * <p>The identity variables the workload-identity credential is built from are supplied by
- * {@link WorkloadIdentityStub}, because this context is a deployed pod's and a deployed pod is given
- * all three by the AKS webhook. Nothing here reads a flag, opens a connection to App Configuration,
- * or touches either database: both pools initialise lazily and the schedule's first fire is hours
+ * <p>The flag is configured the way a deployed pod's is, with a connection string of the shape Key
+ * Vault injects. Nothing here reads a flag, opens a connection to App Configuration, or touches
+ * either database: both pools initialise lazily and the schedule's first fire is hours
  * away.
  */
-@ExtendWith(WorkloadIdentityStub.class)
 @SpringBootTest(properties = {
     GenerationWiringContextTest.GENERATION_ENABLED,
     GenerationWiringContextTest.SDG_MODE,
@@ -90,7 +87,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.WorkloadIdentityStub;
     GenerationWiringContextTest.FILESERVICE_MODE,
     GenerationWiringContextTest.FLAG_MODE,
     GenerationWiringContextTest.FILESERVICE_URL,
-    GenerationWiringContextTest.FLAG_ENDPOINT,
+    GenerationWiringContextTest.FLAG_CONNECTION_STRING,
     GenerationWiringContextTest.FLAG_LABEL,
     GenerationWiringContextTest.SDG_ENDPOINT,
     GenerationWiringContextTest.NN_ENDPOINT,
@@ -148,7 +145,8 @@ class GenerationWiringContextTest {
     static final String FILESERVICE_URL =
             "yotresultsdistribution.fileservice.url=jdbc:postgresql://fileservice.internal:5432/fileservice";
 
-    static final String FLAG_ENDPOINT = "yotresultsdistribution.feature.endpoint=https://appconfig.internal";
+    static final String FLAG_CONNECTION_STRING =
+            "yotresultsdistribution.feature.connection-string=Endpoint=https://appconfig.internal;Id=ste-id;Secret=c3RlLXNlY3JldA==";
 
     static final String FLAG_LABEL = "yotresultsdistribution.feature.label=ste86";
 
@@ -501,41 +499,17 @@ class GenerationWiringContextTest {
     }
 
     /**
-     * Which identity {@link LiveFeatureFlagConfig} authorises the flag read with, and what each one
-     * can therefore read.
+     * What {@link LiveFeatureFlagConfig} reads the flag with, and what it therefore reads.
      *
-     * <p>{@code yotresultsdistribution.feature.credential} chooses between the two, and the choice is
-     * invisible in the bean: both modes contribute the same {@code AppConfigurationFlagReader} over
-     * the same {@link FeatureFlagProperties}, and only the credential inside it differs. What
-     * distinguishes them is what each can read, so that is what is asserted - one endpoint, one
-     * stub, two modes, two outcomes.
-     *
-     * <p><strong>A bearer token is only ever sent over TLS.</strong> Azure's own
-     * {@code BearerTokenAuthenticationPolicy} refuses a request whose URL is not {@code https},
-     * before any socket is opened, which is exactly why {@code local-test} exists: a WireMock stand
-     * -in for App Configuration speaks plain HTTP, so a pod's workload identity cannot read one at
-     * all and the local loop had nothing but the STUB reader to fall back on. {@code local-test}
-     * authorises with a fixed, published HMAC identity instead - the same shape
-     * {@code GenerationStackConfiguration} and {@code AppConfigurationFlagReaderTest} already read
-     * through - so the real reader, the real SDK client and the real fail-closed parsing are all
-     * exercised against the compose stub.
-     *
-     * <p>The environment is a {@link MockEnvironment} rather than the process's own, so which of the
-     * three projected variables a case holds is the case's own statement and not
-     * {@link WorkloadIdentityStub}'s.
+     * <p>One reader, one way to authorise it: the App Configuration connection string, which on a
+     * deployed pod is the estate's shared one from Key Vault and on the compose loop is the
+     * published local pair. Both sign with HMAC rather than a bearer token, so the same reader, the
+     * same SDK client and the same fail-closed parsing read a plain-HTTP WireMock stub exactly as
+     * they read the real store - which is what is asserted: one stub, the real reader, the answer.
      */
     @Nested
-    @DisplayName("the credential the flag read is authorised with")
+    @DisplayName("the connection string the flag read is authorised with")
     class FlagCredential {
-
-        /** The pod's own client id, projected by the AKS workload-identity webhook. */
-        private static final String CLIENT_ID = "AZURE_CLIENT_ID";
-
-        /** The directory that identity lives in, projected by the same webhook. */
-        private static final String TENANT_ID = "AZURE_TENANT_ID";
-
-        /** Where the projected federated token is mounted. */
-        private static final String TOKEN_FILE = "AZURE_FEDERATED_TOKEN_FILE";
 
         /** The key the flag is read under, as every reader of this one lever spells it. */
         private static final String FLAG_KEY = ".appconfig.featureflag/YotResultsDistributionService";
@@ -549,6 +523,17 @@ class GenerationWiringContextTest {
         /** The media type App Configuration answers a key-value read with. */
         private static final String KV_MEDIA_TYPE =
                 "application/vnd.microsoft.appconfig.kv+json";
+
+        /** The published local pair's secret; Base64 of {@code not-a-secret}. */
+        private static final String LOCAL_SECRET = "bm90LWEtc2VjcmV0";
+
+        /** Invented, distinctive parts a refusal that quoted the value would be found by. */
+        private static final String NEVER_QUOTED_HOST = "ste-store-never-quoted.azconfig.io";
+
+        private static final String NEVER_QUOTED_ID = "ste-id-never-quoted";
+
+        private static final String NEVER_QUOTED_SECRET =
+                "bmV2ZXItcXVvdGVkLXNlY3JldA=="; // gitleaks:allow
 
         /** App Configuration's feature-flag JSON, as the vendored value schema declares it. */
         private static final String FLAG_ON = "{\\\"id\\\":\\\"YotResultsDistributionService\\\","
@@ -578,17 +563,16 @@ class GenerationWiringContextTest {
         }
 
         @Test
-        @DisplayName("local-test reads a plain-HTTP App Configuration stub, and asks for no pod")
-        void the_local_test_credential_should_read_the_compose_stub() {
+        @DisplayName("a connection string reads a plain-HTTP App Configuration stub")
+        void the_connection_string_should_read_the_compose_stub() {
             final FeatureFlagReader reader = new LiveFeatureFlagConfig().featureFlagReader(
-                    flagAt(store.baseUrl(), FeatureFlagProperties.Credential.LOCAL_TEST),
-                    new MockEnvironment());
+                    flagWith("Endpoint=" + store.baseUrl() + ";Id="
+                            + FeatureFlagProperties.PUBLISHED_LOCAL_ID + ";Secret=" + LOCAL_SECRET));
 
             assertThat(reader.read())
-                    .as("the whole point of the mode: the real reader, over the real SDK client, "
-                            + "against the stub the compose loop and the container smoke run "
-                            + "against - and on a laptop, which holds none of the three variables "
-                            + "the webhook projects")
+                    .as("the real reader, over the real SDK client, against the stub the compose "
+                            + "loop and the container smoke run against - and on a laptop, which "
+                            + "holds no identity at all")
                     .isEqualTo(FlagDecision.ON);
             assertThat(store.findAll(getRequestedFor(urlPathMatching(ANY_KEY_PATH))))
                     .as("and the store was actually asked, so the reading is a read and not a "
@@ -596,64 +580,65 @@ class GenerationWiringContextTest {
                     .isNotEmpty();
         }
 
-        /**
-         * <strong>[A]</strong> A characterisation of behaviour that already exists: the deployed
-         * credential is unchanged by the new setting, and Azure's refusal to send a bearer token
-         * over plain HTTP is the whole reason a second mode was needed. Green on introduction.
-         */
         @Test
-        @DisplayName("workload-identity cannot read one at all, which is why the mode exists")
-        void the_workload_identity_credential_should_not_reach_a_plain_http_store() {
-            final FeatureFlagReader reader = new LiveFeatureFlagConfig().featureFlagReader(
-                    flagAt(store.baseUrl(), FeatureFlagProperties.Credential.WORKLOAD_IDENTITY),
-                    podHoldingEveryProjectedVariable());
+        @DisplayName("no connection string reads nothing, and says it was never configured")
+        void no_connection_string_should_answer_not_configured() {
+            final FeatureFlagReader reader =
+                    new LiveFeatureFlagConfig().featureFlagReader(flagWith(""));
 
             assertThat(reader.read())
-                    .as("a bearer credential is refused on a URL that is not https, so the same "
-                            + "endpoint the mode above reads is unreadable on this one - and the "
-                            + "run would skip, fail-closed, exactly as it does on a store outage")
-                    .isInstanceOf(FlagDecision.Unreadable.class);
+                    .as("a pod with no store is a reading with a cause on it, not a start-up "
+                            + "refusal - GET /operations/flag is served on every pod")
+                    .isEqualTo(new FlagDecision.Unreadable(
+                            FlagDecision.UnreadableReason.NOT_CONFIGURED));
             assertThat(store.findAll(getRequestedFor(urlPathMatching(ANY_KEY_PATH))))
-                    .as("refused before the socket, not by the store: nothing was asked")
+                    .as("and nothing was asked")
                     .isEmpty();
         }
 
         /**
-         * <strong>[A]</strong> A characterisation of behaviour that already exists, pinned here
-         * because a new mode beside it is exactly how a refusal gets softened by accident: the
-         * deployed credential still refuses a pod holding two of the three. Green on introduction.
+         * A string the SDK cannot parse fails the reader's construction under the setting's name,
+         * quoting nothing.
+         *
+         * <p>{@code ConfigurationClientBuilder.connectionString} only stores the value;
+         * {@code buildClient()} parses it and throws
+         * {@code IllegalArgumentException("Could not parse 'connectionString' ... Actual:" + value)}
+         * - the whole string, secret included. The reader is built on every pod, generation on or
+         * off, and whether the validator ran first is bean order, which nothing guarantees. So the
+         * builder's own refusal must be one this service wrote: the setting named, no part of the
+         * value, and no cause attached to carry the SDK's message along with it.
          */
-        @Test
-        @DisplayName("workload-identity still refuses to start on a pod missing a projected "
-                + "variable")
-        void the_workload_identity_credential_should_still_refuse_an_incomplete_pod() {
-            final MockEnvironment incomplete = podHoldingEveryProjectedVariable();
-            incomplete.setProperty(TOKEN_FILE, "");
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID,
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Secret=" + NEVER_QUOTED_SECRET + ";Tag=x",
+            "Endpoint=https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID + ";Secret=not*base64!",
+            "Endpoint =https://" + NEVER_QUOTED_HOST + ";Id=" + NEVER_QUOTED_ID + ";Secret="
+                    + NEVER_QUOTED_SECRET,
+            "Endpoint=nope-" + NEVER_QUOTED_HOST + ":bad;Id=" + NEVER_QUOTED_ID + ";Secret="
+                    + NEVER_QUOTED_SECRET,
+        })
+        @DisplayName("a string the SDK cannot parse is refused under the setting, quoting nothing")
+        void an_unparseable_connection_string_should_be_refused_quoting_none_of_it(
+                final String connectionString) {
 
-            assertThatThrownBy(() -> new LiveFeatureFlagConfig().featureFlagReader(
-                    flagAt(store.baseUrl(), FeatureFlagProperties.Credential.WORKLOAD_IDENTITY),
-                    incomplete))
-                    .as("unchanged by the new mode: a deployed pod that had lost one of the three "
-                            + "would skip every night on an unreadable flag and look like a store "
-                            + "outage, so it does not start")
+            final FeatureFlagProperties properties = flagWith(connectionString);
+            final LiveFeatureFlagConfig config = new LiveFeatureFlagConfig();
+
+            assertThatThrownBy(() -> config.featureFlagReader(properties))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining(TOKEN_FILE);
+                    .hasMessageContaining("yotresultsdistribution.feature.connection-string")
+                    .hasMessageNotContaining(NEVER_QUOTED_SECRET)
+                    .hasMessageNotContaining(NEVER_QUOTED_ID)
+                    .hasMessageNotContaining(NEVER_QUOTED_HOST)
+                    .as("a cause would carry the SDK's message, which quotes the value")
+                    .hasNoCause();
         }
 
-        /** The flag settings, pointed at this case's store and asked for under one credential. */
-        private FeatureFlagProperties flagAt(
-                final String endpoint, final FeatureFlagProperties.Credential credential) {
+        /** The flag settings, read with this case's connection string. */
+        private FeatureFlagProperties flagWith(final String connectionString) {
             return new FeatureFlagProperties(
-                    endpoint, FLAG_KEY, FLAG_LABEL, Duration.ofSeconds(5), credential);
-        }
-
-        /** An environment holding exactly what the AKS webhook projects, and nothing else. */
-        private MockEnvironment podHoldingEveryProjectedVariable() {
-            final MockEnvironment pod = new MockEnvironment();
-            pod.setProperty(CLIENT_ID, "8f2c1d47-0b93-4e5a-9c31-6d0a7b4e2f18");
-            pod.setProperty(TENANT_ID, "531ff96d-0ae9-462a-8d2d-bec7c0b42082");
-            pod.setProperty(TOKEN_FILE, "/var/run/secrets/azure/tokens/azure-identity-token");
-            return pod;
+                    connectionString, FLAG_KEY, FLAG_LABEL, Duration.ofSeconds(5));
         }
     }
 }

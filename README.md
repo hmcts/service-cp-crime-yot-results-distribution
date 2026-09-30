@@ -338,9 +338,12 @@ disabled by default in a bare `bootRun`; enabling it demands the file-service da
 broker and the systemdocgenerator and notificationnotify endpoints, for the same reason. The `app`
 service does enable it, against the committed stubs - `wiremock` for systemdocgenerator,
 notificationnotify and Azure App Configuration, `fileservice-postgres` for the payload store,
-`artemis` for `public.event` - with `yotresultsdistribution.feature.credential=local-test`, which is what
-lets the real flag reader read a plain-HTTP stub at all; startup refuses that credential wherever
-the endpoint names a real store or the pod is deployed. See
+`artemis` for `public.event` - with `yotresultsdistribution.feature.connection-string` set to the
+published local pair (`Id=0-l0-s0:yotresultsdistributionlocal`), which authorises nothing and is
+what the WireMock stub answers; startup refuses that pair wherever the string's endpoint names a
+real store or the pod is deployed. A deployed pod reads the flag with the estate's App
+Configuration connection string from Key Vault (`YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`).
+See
 `specs/002-consolidate-progression-leg/quickstart.md` for the whole local loop.
 
 The emulator's queue definition lives in `docker/servicebus-emulator/config.json`; the `*IT` test

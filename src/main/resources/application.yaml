@@ -358,12 +358,18 @@ yotresultsdistribution:
     claim-lease: 15m
 
   feature:
-    # The App Configuration store this service reads the cutover flag from - the THIRD reader of one
-    # flag, after the producer and the legacy. The job reads it once per run, with no cache, and
-    # fails closed: OFF or unreadable means the run is skipped and counted, never that this service
-    # generates anyway. A secret-adjacent binding and never a value: the endpoint arrives from the
-    # deployment, and the empty default leaves a local run with no store to read.
-    endpoint: ${APPCONFIG_ENDPOINT:}
+    # The App Configuration connection string this service reads the cutover flag with - the THIRD
+    # reader of one flag, after the producer and the legacy. The job reads it once per run, with no
+    # cache, and fails closed: OFF or unreadable means the run is skipped and counted, never that
+    # this service generates anyway. It names the store (Endpoint=) and authorises the read (Id=,
+    # Secret=). A SECRET, and never a value here: a deployed pod is given the estate's shared one,
+    # APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING, from Key Vault through the CSI driver - the
+    # secret resultsvalidator reads - because no App Configuration role can be assigned to this
+    # service's identity (constitution 5.1.0). The empty default leaves a local run with no store to
+    # read. Startup REFUSES the compose loop's published local pair wherever its endpoint names a
+    # real .azconfig.io store or a Service Bus namespace says the pod is deployed, and never quotes
+    # the value in a refusal.
+    connection-string: ${YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING:}
     # The setting key, in App Configuration's feature-flag form. It is the SAME key the legacy JS
     # client reads, which is what makes the flag one lever rather than three: changing it here
     # without changing it there would leave two implementations disagreeing about the cutover.
@@ -374,18 +380,6 @@ yotresultsdistribution:
     # The whole budget for the read, and short on purpose: the flag gates the start of a run, and a
     # store that is slow must not hold the run open. A timeout is UNREADABLE, which is OFF.
     timeout: 2s
-    # workload-identity | local-test. Which identity the read above is authorised with, and the
-    # ONLY difference between the two: the reader, the SDK client, the key, the label, the budget
-    # and the fail-closed parsing are the deployed ones either way. workload-identity is the
-    # deployed value and the default - the client id, the tenant and the projected federated token
-    # the AKS webhook mounts, exactly the three facts the producer builds its Service Bus
-    # credential from. local-test is the local compose loop's and nowhere else's: the SDK sends a
-    # credential's token only over TLS, so the WireMock App Configuration stub cannot be read on a
-    # pod's identity at all, and this signs the read with a fixed, published pair the stub does not
-    # check instead. Startup REFUSES it wherever the endpoint names a real .azconfig.io store or a
-    # Service Bus namespace says the pod is deployed - a published pair no store authorises is a
-    # run skipped every night on a flag nobody could read.
-    credential: ${YOTRESULTSDISTRIBUTION_FEATURE_CREDENTIAL:workload-identity}
 
   fileservice:
     # The framework file service's own Postgres - one shared database per stack - written to

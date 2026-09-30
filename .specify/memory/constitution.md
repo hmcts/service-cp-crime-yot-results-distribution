@@ -1,6 +1,47 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 5.0.3 → 5.1.0
+Bump rationale: MINOR - the flag's credential is changed (2026-09-29). The
+                Technology Stack said the flag is read on the pod's workload
+                identity with an `App Configuration Data Reader` role. That
+                role cannot be granted: `ccm-namespace` resolves role names
+                through the cluster ConfigMap `azure-info/role-definition`,
+                which carries no App Configuration role, and the platform team
+                has no date for adding one. Every other reader of the estate's
+                flags (resultsvalidator, the WildFly contexts) authorises with
+                the shared connection string from Key Vault, so this service
+                does the same and the workload-identity read is removed rather
+                than kept beside it. No principle's wording changes; the
+                Cutover Rule (one flag, read once per run, fail-closed) is
+                untouched. MINOR rather than PATCH because a stack choice is
+                replaced and a static key is admitted where the stack said
+                none; not MAJOR because no principle is redefined.
+
+Proposed in: specs/006-appconfig-connection-string/spec.md. Pinned by
+`config/ConfigurationValidationTest.PublishedLocalPair`,
+`config/ConfigurationValidationTest.ConnectionStringPrivacy`,
+`config/ConfigurationValidationTest.GenerationDownstreams` (the connection
+string's shape and https refusals), `config/FeatureFlagPropertiesTest` and
+`config/GenerationWiringContextTest.FlagCredential`.
+
+Modified sections (this amendment): Technology Stack - the Feature flag and
+Secrets/identity bullets; Increments - 005 marked complete, 006 added as
+current. Nothing else; Principles I-VIII untouched. Clarified the same day,
+without a version bump (006 T007): the Secrets/identity bullet now names the
+published local pair committed in `docker-compose.yml` beside the sanctioned
+key, as 006 FR-005 already did - wording only, no rule changes.
+
+Templates / guidance reviewed:
+  - CLAUDE.md, README.md, .claude/rules/design_rules.md,
+    docker/wiremock/README.md                ⚠ UPDATED in the same commit -
+      each described the flag as read on workload identity, or forbade every
+      static key.
+  - specs/002-consolidate-progression-leg/*  ✅ left as history - research §3
+      records the decision this amendment reverses.
+  - .specify/templates/*                     ✅ compatible - no change.
+
+Previous amendment (5.0.2 → 5.0.3):
 Version change: 5.0.2 → 5.0.3
 Bump rationale: PATCH - the owned OpenAPI document is named (2026-09-21). The
                 principle called it `src/main/resources/openapi.yaml`; the file
@@ -1239,9 +1280,13 @@ them read it the same way they read everything else.
 - **Second datasource**: the shared framework `fileservice` Postgres,
   `INSERT` on `metadata` and `content` only, credentials via Key Vault CSI; a
   readiness input only while a run is in progress.
-- **Feature flag**: `com.azure:azure-data-appconfiguration` + workload
-  identity (`App Configuration Data Reader`), key
+- **Feature flag**: `com.azure:azure-data-appconfiguration`, authorised by the
+  estate's shared App Configuration connection string
+  (`APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, from Key Vault via the CSI
+  driver - the secret resultsvalidator reads), key
   `.appconfig.featureflag/YotResultsDistributionService`, label = stack, 2 s timeout.
+  The connection string is never committed, never defaulted, and never reaches
+  a log, an exception message, a `toString()` or a response (Principle VII).
 - **HTTP surface**: Spring Boot Actuator — health, readiness/liveness,
   metrics — **and** the operations API under `/operations/**`. No business
   endpoints (Principle III). Since increment 005 the seven operator actions are
@@ -1265,7 +1310,12 @@ them read it the same way they read everything else.
   queue + DLQ depth; alerts on DLQ > 0 and on failures sustained for
   15 minutes. Expect a high COMPLETED-but-not-submitted rate: two of the four
   no-op reasons are this flow's most common legitimate outcomes.
-- **Secrets/identity**: workload identity + Key Vault CSI.
+- **Secrets/identity**: workload identity + Key Vault CSI. The App
+  Configuration connection string is the one static key this service holds, and
+  it arrives the same way every other secret does - Key Vault, CSI, never a
+  committed value or an environment default. The one connection string that is
+  committed, the published local pair in `docker-compose.yml`, authorises
+  nothing and is refused wherever a real flag is read (006 FR-005).
 - **Deployment**: AKS via the standard Flux route. Since increment 002 this
   service **owns the schedule, the render request and the e-mail fan-out**;
   it contains **no PDF rendering code** (systemdocgenerator renders the
@@ -1329,7 +1379,7 @@ them read it the same way they read everything else.
   learned about still has nothing invented about it - it is failed through the
   store rather than through the sink. **No `doc/DEFECT-FIXES.md` row is added
   or amended.**
-- **005 "operations-rest-api" — current.** The six operations commands become
+- **005 "operations-rest-api" — complete.** The six operations commands become
   seven `/operations/**` endpoints and the CLI is removed. The REST layer is an
   inbound adapter in `uk.gov.hmcts.cp.yotresultsdistribution.api` that calls the same
   application services the CLI classes called, moving no logic and adding no
@@ -1346,6 +1396,15 @@ them read it the same way they read everything else.
   `/operations/**`, the usersgroups path for the identity client and the
   Artemis audit connection land in the infrastructure repositories**: the CLI
   is gone, so a pod deployed without them has no operational surface at all.
+- **006 "appconfig-connection-string" — current.** The cutover flag is read
+  with the estate's shared App Configuration connection string from Key Vault
+  (`yotresultsdistribution.feature.connection-string`) instead of the pod's
+  workload identity, which no App Configuration role can be assigned to through
+  `ccm-namespace`; `feature.endpoint` and `feature.credential` are removed. The
+  one lever is unchanged - same key, same label, read once per run, no cache,
+  fail-closed. The string is refused at start-up wherever it is set and cannot
+  be parsed, and is never quoted in a refusal, a log line or a rendering of the
+  settings. **No `doc/DEFECT-FIXES.md` row is added or amended.**
 
 ## Development Workflow & Quality Gates
 
@@ -1424,4 +1483,4 @@ retained as quick-reference material and MUST be kept in sync.
   needs the same written sign-off the old parity regime demanded, before
   merge. C-numbers are stable: renumber never, append only.
 
-**Version**: 5.0.3 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-21
+**Version**: 5.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-29

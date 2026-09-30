@@ -1,0 +1,6 @@
+# Invented Base64 test values (e.g. base64("secret-that-must-never-leak")), introduced by the
+# commits named below and marked `gitleaks:allow` where they now stand. A fingerprint is bound
+# to its commit, so these cover only history; new findings are not silenced by this file.
+3acb0bb7c7f6922923fd980f45a70e5a5a77f093:src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/config/GenerationWiringContextTest.java:generic-api-key:535
+34ac99353bb231de8141b7b5680fc2125662fe69:src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/config/ConfigurationValidationTest.java:generic-api-key:101
+34ac99353bb231de8141b7b5680fc2125662fe69:src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/config/FeatureFlagPropertiesTest.java:generic-api-key:21

@@ -1,18 +1,13 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.adapter.appconfig;
 
-import com.azure.core.credential.TokenCredential;
 import com.azure.core.exception.ClientAuthenticationException;
 import com.azure.core.exception.HttpResponseException;
 import com.azure.core.exception.ResourceNotFoundException;
 import com.azure.core.http.HttpClient;
-import com.azure.core.http.policy.FixedDelayOptions;
-import com.azure.core.http.policy.RetryOptions;
 import com.azure.core.util.HttpClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClient;
-import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.data.appconfiguration.models.ConfigurationSetting;
 import java.net.SocketTimeoutException;
-import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +34,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision.UnreadableReas
  *
  * <p><strong>It never throws</strong>, which is the port's contract and the reason this adapter
  * exists rather than an SDK call at the call site: a store that is absent, one that refuses this
- * pod's identity, one that is merely slow and one that answers with something this service cannot
+ * service's key, one that is merely slow and one that answers with something this service cannot
  * read are four different {@link FlagDecision.Unreadable} causes, each bounded, and every one of
  * them means the run is skipped. Nothing about the SDK's exceptions reaches the caller, and nothing
  * of the store's text reaches a counter label or the log index.
@@ -53,7 +48,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision.UnreadableReas
  * <p><strong>"The whole of the read" is meant literally, and the budget is the outer
  * deadline.</strong> Every leg the HTTP client can see - connect, write, read, response - carries
  * the budget, and the call itself is made under an outer bound of exactly the budget, because the
- * legs the client cannot see are real: a credential the identity endpoint answers slowly, a
+ * legs the client cannot see are real: a DNS lookup that hangs, a
  * handshake that stalls after the connection is accepted, a pool with nothing free in it. The job
  * asks this question before it does anything else and waits on the answer, so a read that outlasts
  * the budget is not a slow read, it is a nightly run that never started - and at 18:00 that is
@@ -81,11 +76,7 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
     /** The same mapper contract every other read in this service is parsed under. */
     private static final ObjectMapper MAPPER = JacksonConfig.contractObjectMapper();
 
-    /** The read is the whole budget, so the SDK is asked once and never asked again. */
-    private static final RetryOptions NO_RETRIES =
-            new RetryOptions(new FixedDelayOptions(0, Duration.ZERO));
-
-    /** The endpoint, the key, the stack label and the read's budget all come from here. */
+    /** The key, the stack label and the read's budget all come from here. */
     private final FeatureFlagProperties properties;
 
     /**
@@ -93,34 +84,16 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
      *
      * <p>Null is not an oversight and not a failure to be raised at construction: a deployment that
      * names no store is {@link UnreadableReason#NOT_CONFIGURED}, which is a skipped run with a cause
-     * on it, and {@code PropertiesValidator} has already refused the case that matters - generation
-     * enabled with no endpoint - before this class is built.
+     * on it. Generation enabled with no connection string is refused at start-up by
+     * {@code PropertiesValidator}; this class does not depend on that having run first.
      */
     private final ConfigurationClient client;
-
-    /**
-     * Creates the reader the deployed pod uses, over the identity that pod holds.
-     *
-     * <p>The client is built here from {@code properties.endpoint()}, the credential and
-     * {@code properties.timeout()}, because the adapter owns the SDK types - that is what makes it
-     * the adapter. A deployment naming no endpoint gets no client and every read answers
-     * {@link UnreadableReason#NOT_CONFIGURED}; the credential itself, and the refusal to start
-     * without one, belong to {@code LiveFeatureFlagConfig}, which is the wiring that asked for a
-     * live reader.
-     *
-     * @param properties where the flag is read from, and under which key, label and budget
-     * @param credential the identity the store authorises the read against
-     */
-    public AppConfigurationFlagReader(
-            final FeatureFlagProperties properties, final TokenCredential credential) {
-        this(properties, clientFor(properties, credential));
-    }
 
     /**
      * Creates the reader over a client somebody else built.
      *
      * <p>The adapter owns the SDK type - that is what makes it the adapter - so taking the client
-     * rather than only the endpoint costs the design nothing and lets the read be exercised as the
+     * rather than only the connection string costs the design nothing and lets the read be exercised as the
      * SDK call it is: {@code AppConfigurationFlagReaderTest} (T026) hands in a client pointed at a
      * stub of App Configuration's {@code kv} resource, so the key in the path, the label in the
      * query and the mapping of every answer onto a decision are all asserted against the real
@@ -136,39 +109,16 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
     }
 
     /**
-     * The client the deployed pod reads through: this stack's store, on this pod's identity.
+     * The HTTP client a flag read is made through, bounded on every leg by the configured budget.
      *
      * <p><strong>Every leg carries the budget, not just the response.</strong> A response timeout
      * bounds the wait for an answer to a request that was sent; it says nothing about a connection
      * that is never established, a request that cannot be written, or a body that arrives a byte at
-     * a time. Each of those is a way the one lever's read can hang, and each of them at 18:00 is a
-     * run that has not started rather than a run that was skipped, so all four take
-     * {@code yotresultsdistribution.feature.timeout}. None of them is set longer than that, because the same
-     * value is the outer deadline the whole read is bounded at: a leg allowed more than the deadline
-     * could only ever be ended by the bound outside it. The read is one attempt - the client retries
-     * nothing - so there is no schedule for the four to add up across.
-     */
-    private static ConfigurationClient clientFor(
-            final FeatureFlagProperties properties, final TokenCredential credential) {
-        if (properties.endpoint() == null || properties.endpoint().isBlank()) {
-            return null;
-        }
-        return new ConfigurationClientBuilder()
-                .endpoint(properties.endpoint())
-                .credential(credential)
-                .retryOptions(NO_RETRIES)
-                .httpClient(httpClientFor(properties))
-                .buildClient();
-    }
-
-    /**
-     * The HTTP client a flag read is made through, bounded on every leg by the configured budget.
-     *
-     * <p>Public and here rather than inline above, because there are two credentials and one client:
-     * {@code LiveFeatureFlagConfig} builds the {@code local-test} client from a connection string,
-     * since a token credential cannot be sent over the compose stub's plain HTTP at all, and
-     * everything else about that reader is meant to be the deployed one - the budget on all four
-     * legs included. One factory, so the two cannot drift apart.
+     * a time. Each of those is a way the one lever's read can hang, so all four take
+     * {@code yotresultsdistribution.feature.timeout}, and none is set longer, because the same value is the
+     * outer deadline the whole read is bounded at. Public, because {@code LiveFeatureFlagConfig}
+     * builds the connection-string client through it - one factory, so the deployed pod and the
+     * compose loop cannot drift apart.
      *
      * @param properties where the flag is read from, and under which budget
      * @return the client, with connect, read, write and response all held to the budget
@@ -193,8 +143,8 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
      * The read, held to the budget as a whole rather than to the budget of its slowest leg.
      *
      * <p>The client's four timeouts bound the parts of a call the HTTP layer can see; this bounds
-     * the call. Between the two sit the legs it cannot: a credential the identity endpoint answers
-     * slowly, a TLS handshake that stalls after the connection is accepted, a pool with nothing free
+     * the call. Between the two sit the legs it cannot: a DNS lookup that
+     * hangs, a TLS handshake that stalls after the connection is accepted, a pool with nothing free
      * in it. Any of them makes the read outlast a budget every one of its legs respected, and the
      * consequence is not a slow read but a nightly run that has not started - which at 18:00 looks
      * exactly like a healthy stack with nothing to generate.
@@ -290,9 +240,9 @@ public class AppConfigurationFlagReader implements FeatureFlagReader {
      * Which bounded cause a failed read is recorded under.
      *
      * <p>Four causes and four different things to go and fix at 18:00: a setting nobody has written,
-     * a role assignment this pod has not been given, a store that did not answer in time and
-     * everything else. The 401 and 403 the SDK reports as its own authentication type are the
-     * platform ask (design §8) not yet landed, and a store that is merely slow has to be legible as
+     * a key the store no longer accepts, a store that did not answer in time and everything else.
+     * The 401 and 403 the SDK reports as its own authentication type are a connection string that
+     * was revoked or rotated under this pod, and a store that is merely slow has to be legible as
      * slowness rather than as an outage.
      */
     private static UnreadableReason causeOf(final RuntimeException failure) {
