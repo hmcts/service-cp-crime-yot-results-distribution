@@ -97,11 +97,21 @@ on two counts:
   splits it on `;` into three positional parts and signs with the last two. The value is
   `<store URL>;Id=...;Secret=...` - the first part is the bare URL, without `Endpoint=`, which the
   legacy strips if present and so never needed; the SDK requires it. With the prefix added, it is
-  the only known-good connection string on STE (confirmed on steccm41, 2026-10-01: Id and a
-  strict-Base64 Secret present, first part the store's URL).
+  the only known-good connection string on STE (follow-up confirmation on steccm41, 2026-10-01,
+  after this addendum's approval: Id and a strict-Base64 Secret present, first part the store's
+  URL).
 
 The Key Vault secret sits behind a private link, and nothing in the estate writes it; correcting it
 is an ask of its owner and is tracked outside this repository.
+
+**Re-checked 2026-10-01 (follow-up confirmation).** A reading on 2026-08-23, during the informant
+register's flag work, found the secret in the Vault value's shape (`<store URL>;Id=...;Secret=...`,
+missing only `Endpoint=`). Re-checked on 2026-10-01, it is not a usable connection string, so it has
+been overwritten since; the steccm36 refusal was not only the missing prefix. Platform Operations
+have been asked to correct it. The ask covers more than this service: the legacy informant-register
+function app (`FEATURE_MANAGER_CONNECTION_STRING` in the results-distribution templates) reads the
+same object and treats any lookup failure as "run legacy", so the `InformantRegisterService`
+cutover flag is silently held on legacy across STE until it is corrected.
 
 ### Decision
 
@@ -121,11 +131,13 @@ fails closed on a string it cannot parse.
   repository, never defaulted, and never logged, echoed or quoted (FR-006).
 - **FR-009**: When the Key Vault secret holds a full connection string, the deployment MAY return
   to it through the CSI driver; that is a values change in the infrastructure repository, and this
-  addendum's exception lapses with it.
+  addendum's exception lapses for the connection string with it. The Vault path is per environment:
+  each environment's overlay supplies its own `<env>/<stack>`, never STE's.
 
 ### Constitution amendment (Governance step 1)
 
 Technology Stack, 5.1.0 → 5.2.0 (MINOR): the Feature flag bullet names the Vault path the WildFly
-contexts read instead of the Key Vault secret, and the Secrets/identity bullet admits that this one
-key is set in a deployment values file - the same exposure the WildFly contexts' `standalone.xml`
-ConfigMap already carries. No principle's wording changes; the Cutover Rule is untouched.
+contexts read instead of the Key Vault secret, and the Secrets/identity bullet admits Vault-rendered
+values as a class - this key, the managed Redis access key and the system user id, all set in the
+deployment's `env` - stating their exposure: the Deployment spec and the Helm release, the same as the
+WildFly contexts' `standalone.xml` ConfigMap and wider than CSI. No principle's wording changes; the Cutover Rule is untouched.

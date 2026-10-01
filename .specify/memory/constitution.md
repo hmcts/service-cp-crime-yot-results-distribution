@@ -13,8 +13,9 @@ Bump rationale: MINOR - the flag's connection string changes source
                 `secret/ste/steccm01/cpp_feature_manager_connection_string_url`
                 through the deployment's ansible. This service now takes the
                 same value the same way, set in its deployment values. That
-                admits a secret in a values file, which the Secrets/identity
-                bullet forbade - hence MINOR, not PATCH. No principle's wording
+                admits Vault-rendered values as a class - the connection
+                string, the Redis access key and the system user id - which
+                the Secrets/identity bullet forbade - hence MINOR, not PATCH. No principle's wording
                 changes; the Cutover Rule (one flag, read once per run,
                 fail-closed) is untouched, and no code changes.
 
@@ -1318,7 +1319,9 @@ them read it the same way they read everything else.
   estate's App Configuration connection string - the value the WildFly contexts
   read, from Vault `secret/<env>/<stack>/cpp_feature_manager_connection_string_url`
   (on STE, `steccm01`'s), set in the deployment's values by its ansible with
-  `Endpoint=` prefixed where the Vault value lacks it. Not
+  `Endpoint=` prefixed where the Vault value lacks it. The path is per
+  environment: each environment's overlay names its own `<env>/<stack>`, and a
+  later SIT or PRD onboarding MUST NOT copy the STE one. Not
   the Key Vault secret `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, which
   on STE holds only the store's URL (5.2.0); a deployment MAY return to it
   through the CSI driver once it holds a full connection string. Key
@@ -1348,13 +1351,22 @@ them read it the same way they read everything else.
   queue + DLQ depth; alerts on DLQ > 0 and on failures sustained for
   15 minutes. Expect a high COMPLETED-but-not-submitted rate: two of the four
   no-op reasons are this flow's most common legitimate outcomes.
-- **Secrets/identity**: workload identity + Key Vault CSI. The App
-  Configuration connection string is the one static key this service holds, and
-  the one secret set in a deployment values file rather than mounted by CSI
-  (5.2.0): the deployment's ansible renders it from Vault, as it does for the
-  WildFly contexts' `standalone.xml` bindings, so it is exposed no more widely
-  than theirs. It is never a committed value or an environment default, and
-  never logged, echoed or quoted. The one connection string that is
+- **Secrets/identity**: workload identity + Key Vault CSI, with one admitted
+  class beside it (5.2.0): **Vault-rendered values** - secrets the
+  deployment's ansible renders from HashiCorp Vault into the Helm values' `env`,
+  as it does for the WildFly contexts' `standalone.xml` bindings. Three are in
+  that class, and a fourth needs an amendment: the App Configuration connection
+  string (`YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`), the managed
+  Redis primary access key (`YOTRESULTSDISTRIBUTION_PAYLOAD_REDIS_PASSWORD`) and
+  the system user id (`YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID`). The first two
+  are static keys. As plain `env` values they land in the Deployment spec and
+  the Helm release, so they are readable by anyone who can `get deployments`
+  or read the release in the namespace, not only by Secret readers - the same
+  exposure as the WildFly `standalone.xml` ConfigMap, and wider than CSI.
+  Sourcing them through `secretKeyRef` from a chart-created Secret, or moving
+  them to CSI, narrows it and needs no amendment. None of them is ever a
+  committed value or an environment default, and none is logged, echoed or
+  quoted. The one connection string that is
   committed, the published local pair in `docker-compose.yml`, authorises
   nothing and is refused wherever a real flag is read (006 FR-005).
 - **Deployment**: AKS via the standard Flux route. Since increment 002 this

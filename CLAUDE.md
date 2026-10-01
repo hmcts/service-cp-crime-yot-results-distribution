@@ -95,6 +95,9 @@ notification enabled against production data outside cutover.
   `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` in the deployment's values, because no App
   Configuration role can be assigned to this service's identity through `ccm-namespace`. Not the Key
   Vault secret `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`: on STE it holds only the store's URL.
+  It is one of three **Vault-rendered values** the deployment's ansible sets in `env` (with the
+  Redis access key and the system user id), so it is readable from the Deployment spec and the Helm
+  release - wider than CSI. Each environment's overlay names its own Vault path; never copy STE's.
   It is still never committed, never defaulted, and never logged or echoed. The
   published local pair committed in `docker-compose.yml` is not a key: it authorises nothing, and
   start-up refuses it wherever a real flag is read.

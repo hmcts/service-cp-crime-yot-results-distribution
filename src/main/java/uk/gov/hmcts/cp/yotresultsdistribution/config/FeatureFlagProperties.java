@@ -14,8 +14,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * and both become required once generation is enabled.
  *
  * <p><strong>The connection string is the estate's App Configuration key</strong> (constitution
- * 5.2.0): on a deployed pod, the value the WildFly contexts read, from Vault, set in the deployment's
- * values - because no App Configuration role can be assigned to this service's identity. It names the store itself ({@code Endpoint=}) and authorises the read ({@code Id=},
+ * 5.2.0): on a deployed pod, the value the WildFly contexts read, from Vault, set in the
+ * deployment's values - because no App Configuration role can be assigned to this service's
+ * identity. It names the store itself ({@code Endpoint=}) and authorises the read ({@code Id=},
  * {@code Secret=}), so there is no separate endpoint to disagree with it. It is the one static key
  * this service holds, and nothing prints it: {@link #toString()} says only whether it is set.
  *
