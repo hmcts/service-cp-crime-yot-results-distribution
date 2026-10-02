@@ -342,7 +342,8 @@ notificationnotify and Azure App Configuration, `fileservice-postgres` for the p
 published local pair (`Id=0-l0-s0:yotresultsdistributionlocal`), which authorises nothing and is
 what the WireMock stub answers; startup refuses that pair wherever the string's endpoint names a
 real store or the pod is deployed. A deployed pod reads the flag with the estate's App
-Configuration connection string from Key Vault (`YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`).
+Configuration connection string (`YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`) - the value the
+WildFly contexts read, from Vault, set in the deployment's values.
 See
 `specs/002-consolidate-progression-leg/quickstart.md` for the whole local loop.
 

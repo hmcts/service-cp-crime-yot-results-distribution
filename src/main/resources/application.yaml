@@ -362,13 +362,12 @@ yotresultsdistribution:
     # reader of one flag, after the producer and the legacy. The job reads it once per run, with no
     # cache, and fails closed: OFF or unreadable means the run is skipped and counted, never that
     # this service generates anyway. It names the store (Endpoint=) and authorises the read (Id=,
-    # Secret=). A SECRET, and never a value here: a deployed pod is given the estate's shared one,
-    # APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING, from Key Vault through the CSI driver - the
-    # secret resultsvalidator reads - because no App Configuration role can be assigned to this
-    # service's identity (constitution 5.1.0). The empty default leaves a local run with no store to
-    # read. Startup REFUSES the compose loop's published local pair wherever its endpoint names a
-    # real .azconfig.io store or a Service Bus namespace says the pod is deployed, and never quotes
-    # the value in a refusal.
+    # Secret=). A SECRET, and never a value here: a deployed pod is given the estate's one - the
+    # value the WildFly contexts read, from Vault, set in the deployment's values - because no App
+    # Configuration role can be assigned to this service's identity (constitution 5.2.0). The empty
+    # default leaves a local run with no store to read. Startup REFUSES the compose loop's published
+    # local pair wherever its endpoint names a real .azconfig.io store or a Service Bus namespace
+    # says the pod is deployed, and never quotes the value in a refusal.
     connection-string: ${YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING:}
     # The setting key, in App Configuration's feature-flag form. It is the SAME key the legacy JS
     # client reads, which is what makes the flag one lever rather than three: changing it here
