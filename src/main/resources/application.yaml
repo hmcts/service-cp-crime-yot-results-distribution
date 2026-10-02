@@ -766,3 +766,17 @@ logging:
   # MDC provider that puts requestId and hearingId on every line.
   level:
     root: INFO
+    # Not a quietening of a failure. The flag client is built with no retries, and azure-core's
+    # RetryPolicy then writes "Retry attempts have been exhausted" at INFO after every response -
+    # a 200 included, because zero attempts left is exhausted by its arithmetic - which the
+    # recorded-flag renewal turns into a steady stream of lines announcing a failure that did not
+    # happen. A failed attempt is still written: the policy writes its exception at ERROR, and
+    # AppConfigurationFlagReader writes its own bounded WARN, once per decision.
+    # Two things this does not change, and one it does. A read abandoned at its deadline is
+    # interrupted, and the SDK still writes that interruption at ERROR as the read unwinds: it
+    # follows a reason=unreadable-timed-out WARN and is the same failure, not a second one. And the
+    # logger is the class's, not the flag client's: every azure-core HTTP pipeline in the JVM shares
+    # it, so the identity pipeline DefaultAzureCredential builds loses its INFO "Retrying" lines too
+    # - a token endpoint that is flaky but eventually answers is no longer said, while one that
+    # finally fails still is, at ERROR.
+    com.azure.core.http.policy.RetryPolicy: WARN
