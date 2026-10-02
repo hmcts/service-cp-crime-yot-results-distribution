@@ -1,6 +1,41 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 5.1.0 → 5.2.0
+Bump rationale: MINOR - the flag's connection string changes source
+                (2026-09-30). 5.1.0 named the Key Vault secret
+                `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`; the first deploy
+                (steccm36) found that it holds only the store's URL, with no Id
+                or Secret, and the service rightly refused to start on it.
+                resultsvalidator, its only other reader, rejects it too and
+                fails open (every flag reads enabled); the WildFly contexts
+                never read it - they take the full connection string from Vault
+                `secret/ste/steccm01/cpp_feature_manager_connection_string_url`
+                through the deployment's ansible. This service now takes the
+                same value the same way, set in its deployment values. That
+                admits Vault-rendered values as a class - the connection
+                string, the Redis access key and the system user id - which
+                the Secrets/identity bullet forbade - hence MINOR, not PATCH. No principle's wording
+                changes; the Cutover Rule (one flag, read once per run,
+                fail-closed) is untouched, and no code changes.
+
+Proposed in: specs/006-appconfig-connection-string/spec.md, "Addendum
+(2026-09-30)". Pinned by the same tests as 5.1.0 - the setting, its binding
+and its refusals are unchanged.
+
+Modified sections (this amendment): Technology Stack - the Feature flag and
+Secrets/identity bullets; Increments - the 006 entry. Nothing else;
+Principles I-VIII untouched.
+
+Templates / guidance reviewed:
+  - CLAUDE.md, README.md, .claude/rules/design_rules.md,
+    src/main/resources/application.yaml, and the Javadoc of
+    FeatureFlagProperties and LiveFeatureFlagConfig
+                                             ⚠ UPDATED in the same commit -
+      each named the Key Vault secret as the source.
+  - .specify/templates/*                     ✅ compatible - no change.
+
+Previous amendment (5.0.3 → 5.1.0):
 Version change: 5.0.3 → 5.1.0
 Bump rationale: MINOR - the flag's credential is changed (2026-09-29). The
                 Technology Stack said the flag is read on the pod's workload
@@ -1281,9 +1316,15 @@ them read it the same way they read everything else.
   `INSERT` on `metadata` and `content` only, credentials via Key Vault CSI; a
   readiness input only while a run is in progress.
 - **Feature flag**: `com.azure:azure-data-appconfiguration`, authorised by the
-  estate's shared App Configuration connection string
-  (`APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, from Key Vault via the CSI
-  driver - the secret resultsvalidator reads), key
+  estate's App Configuration connection string - the value the WildFly contexts
+  read, from Vault `secret/<env>/<stack>/cpp_feature_manager_connection_string_url`
+  (on STE, `steccm01`'s), set in the deployment's values by its ansible with
+  `Endpoint=` prefixed where the Vault value lacks it. The path is per
+  environment: each environment's overlay names its own `<env>/<stack>`, and a
+  later SIT or PRD onboarding MUST NOT copy the STE one. Not
+  the Key Vault secret `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING`, which
+  on STE holds only the store's URL (5.2.0); a deployment MAY return to it
+  through the CSI driver once it holds a full connection string. Key
   `.appconfig.featureflag/YotResultsDistributionService`, label = stack, 2 s timeout.
   The connection string is never committed, never defaulted, and never reaches
   a log, an exception message, a `toString()` or a response (Principle VII).
@@ -1310,10 +1351,22 @@ them read it the same way they read everything else.
   queue + DLQ depth; alerts on DLQ > 0 and on failures sustained for
   15 minutes. Expect a high COMPLETED-but-not-submitted rate: two of the four
   no-op reasons are this flow's most common legitimate outcomes.
-- **Secrets/identity**: workload identity + Key Vault CSI. The App
-  Configuration connection string is the one static key this service holds, and
-  it arrives the same way every other secret does - Key Vault, CSI, never a
-  committed value or an environment default. The one connection string that is
+- **Secrets/identity**: workload identity + Key Vault CSI, with one admitted
+  class beside it (5.2.0): **Vault-rendered values** - secrets the
+  deployment's ansible renders from HashiCorp Vault into the Helm values' `env`,
+  as it does for the WildFly contexts' `standalone.xml` bindings. Three are in
+  that class, and a fourth needs an amendment: the App Configuration connection
+  string (`YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING`), the managed
+  Redis primary access key (`YOTRESULTSDISTRIBUTION_PAYLOAD_REDIS_PASSWORD`) and
+  the system user id (`YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID`). The first two
+  are static keys. As plain `env` values they land in the Deployment spec and
+  the Helm release, so they are readable by anyone who can `get deployments`
+  or read the release in the namespace, not only by Secret readers - the same
+  exposure as the WildFly `standalone.xml` ConfigMap, and wider than CSI.
+  Sourcing them through `secretKeyRef` from a chart-created Secret, or moving
+  them to CSI, narrows it and needs no amendment. None of them is ever a
+  committed value or an environment default, and none is logged, echoed or
+  quoted. The one connection string that is
   committed, the published local pair in `docker-compose.yml`, authorises
   nothing and is refused wherever a real flag is read (006 FR-005).
 - **Deployment**: AKS via the standard Flux route. Since increment 002 this
@@ -1397,8 +1450,9 @@ them read it the same way they read everything else.
   Artemis audit connection land in the infrastructure repositories**: the CLI
   is gone, so a pod deployed without them has no operational surface at all.
 - **006 "appconfig-connection-string" — current.** The cutover flag is read
-  with the estate's shared App Configuration connection string from Key Vault
-  (`yotresultsdistribution.feature.connection-string`) instead of the pod's
+  with the estate's App Configuration connection string
+  (`yotresultsdistribution.feature.connection-string`; from Vault, as the
+  WildFly contexts read it, since the 2026-09-30 addendum) instead of the pod's
   workload identity, which no App Configuration role can be assigned to through
   `ccm-namespace`; `feature.endpoint` and `feature.credential` are removed. The
   one lever is unchanged - same key, same label, read once per run, no cache,
@@ -1483,4 +1537,4 @@ retained as quick-reference material and MUST be kept in sync.
   needs the same written sign-off the old parity regime demanded, before
   merge. C-numbers are stable: renumber never, append only.
 
-**Version**: 5.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-29
+**Version**: 5.2.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-30

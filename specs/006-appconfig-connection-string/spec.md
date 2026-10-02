@@ -73,3 +73,71 @@ static key this service holds. No principle's wording changes.
 - The App Configuration role assignment, and any workload-identity fallback.
 - `doc/DEFECT-FIXES.md` - C16 still holds: nothing credential-shaped is committed beyond the
   published local pair, which authorises nothing.
+
+## Addendum (2026-09-30): the connection string comes from Vault, not Key Vault
+
+**Status**: Approved (design owner, 2026-09-30). Constitution 5.1.0 → 5.2.0 (MINOR).
+
+### What the first deploy found
+
+The first deploy of this increment (steccm36) refused to start: the reader's construction reported
+`yotresultsdistribution.feature.connection-string could not be parsed`. The Key Vault secret this
+increment was built on, `APP-CONFIG-FEATURE-MANAGER-CONNECTION-STRING` in `KV-STE-CCM-01`, holds
+**only the store's URL** (`https://nle-ccp01-appconfig.azconfig.io`) - no `Id=`, no `Secret=`. It
+is the value a workload-identity reader wants, not a connection string. The Context above was wrong
+on two counts:
+
+- **resultsvalidator does not read the flag with it.** Its parser rejects the value, logs one WARN
+  (`Invalid feature connection string, feature toggle will default to enabled`) and answers every
+  flag `getOrDefault(name, true)` - it fails open, so it has never read a flag on STE.
+- **The WildFly contexts never read that secret.** They receive `java:global/featureManagerConnectionString`
+  from HashiCorp Vault, `secret/ste/steccm01/cpp_feature_manager_connection_string_url`, rendered
+  by the deployment's ansible into the `standaloneXml` bindings (`cpp-aks-deploy`
+  `ansible/group_vars/ste/common.yaml.j2`) and mounted from a ConfigMap. `DefaultAzureFeatureFetcher`
+  splits it on `;` into three positional parts and signs with the last two. The value is
+  `<store URL>;Id=...;Secret=...` - the first part is the bare URL, without `Endpoint=`, which the
+  legacy strips if present and so never needed; the SDK requires it. With the prefix added, it is
+  the only known-good connection string on STE (follow-up confirmation on steccm41, 2026-10-01,
+  after this addendum's approval: Id and a strict-Base64 Secret present, first part the store's
+  URL).
+
+The Key Vault secret sits behind a private link, and nothing in the estate writes it; correcting it
+is an ask of its owner and is tracked outside this repository.
+
+**Re-checked 2026-10-01 (follow-up confirmation).** A reading on 2026-08-23, during the informant
+register's flag work, found the secret in the Vault value's shape (`<store URL>;Id=...;Secret=...`,
+missing only `Endpoint=`). Re-checked on 2026-10-01, it is not a usable connection string, so it has
+been overwritten since; the steccm36 refusal was not only the missing prefix. Platform Operations
+have been asked to correct it. The ask covers more than this service: the legacy informant-register
+function app (`FEATURE_MANAGER_CONNECTION_STRING` in the results-distribution templates) reads the
+same object and treats any lookup failure as "run legacy", so the `InformantRegisterService`
+cutover flag is silently held on legacy across STE until it is corrected.
+
+### Decision
+
+The deployment gives `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` the value the WildFly
+contexts read, from the same Vault path, rendered into the Helm values by the deployment's ansible -
+the mechanism these values already use for the Redis key and the system user id - with `Endpoint=`
+prefixed at render time where the value lacks it. No code changes:
+the setting, its binding and every refusal of FR-001-FR-007 are unchanged, and the service still
+fails closed on a string it cannot parse.
+
+- **FR-008**: The deployed value of `YOTRESULTSDISTRIBUTION_FEATURE_CONNECTION_STRING` is the
+  estate's App Configuration connection string from Vault
+  `secret/<env>/<stack>/cpp_feature_manager_connection_string_url` (on STE, `steccm01`'s), set in
+  the deployment's values - not the Key Vault secret - prefixed `Endpoint=` where the Vault value
+  lacks it, since the SDK and this service's validator both require it and neither is loosened to
+  accept a bare URL. It is still never committed to this
+  repository, never defaulted, and never logged, echoed or quoted (FR-006).
+- **FR-009**: When the Key Vault secret holds a full connection string, the deployment MAY return
+  to it through the CSI driver; that is a values change in the infrastructure repository, and this
+  addendum's exception lapses for the connection string with it. The Vault path is per environment:
+  each environment's overlay supplies its own `<env>/<stack>`, never STE's.
+
+### Constitution amendment (Governance step 1)
+
+Technology Stack, 5.1.0 → 5.2.0 (MINOR): the Feature flag bullet names the Vault path the WildFly
+contexts read instead of the Key Vault secret, and the Secrets/identity bullet admits Vault-rendered
+values as a class - this key, the managed Redis access key and the system user id, all set in the
+deployment's `env` - stating their exposure: the Deployment spec and the Helm release, the same as the
+WildFly contexts' `standalone.xml` ConfigMap and wider than CSI. No principle's wording changes; the Cutover Rule is untouched.
