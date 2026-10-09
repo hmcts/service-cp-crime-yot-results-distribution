@@ -2288,8 +2288,7 @@ class RegisterGenerationJobTest {
      *
      * <ul>
      *   <li>one line, with the same fields, carrying what the run had done when it stopped - which
-     *       for a run that never read anything is a night of zeroes and for one that stopped part
-     *       way through requesting is the batches it had already accounted for;</li>
+     *       for a run that never read anything is a night of zeroes;</li>
      *   <li>a line of its own naming what stopped it, so the report is not read as a night that
      *       simply had nothing to do;</li>
      *   <li>the failure still leaves the run, because a reported failure that was also swallowed
@@ -2299,6 +2298,13 @@ class RegisterGenerationJobTest {
      *       before it assembled knows nothing at all and must not overwrite last night's reading
      *       with a zero it has not earned.</li>
      * </ul>
+     *
+     * <p><strong>And what does not stop it (defect fix P5, amended).</strong> A batch whose own
+     * request throws - a store outage on one of its marks, or anything else at all - is that
+     * batch's trouble and not the night's: it is counted PENDING, said at ERROR by class, counted
+     * on {@code yotresultsdistribution_generation_request_unfinished_total}, and left for the next
+     * run's stale-batch pass, while the run goes on to the court centres behind it. The cases
+     * below that arrange a request to throw assert exactly that.
      */
     @Nested
     @DisplayName("a run that stopped part way")
@@ -2308,19 +2314,21 @@ class RegisterGenerationJobTest {
         private static final String OUTAGE = "the register store did not answer";
 
         /**
-         * The line the mixed night can write once its second batch stops the run.
+         * The line the mixed night writes when its second batch's request throws.
          *
-         * <p>One batch requested and its registers accounted for, the two days it passed over and
-         * the registers waiting under them known before any of it, and nothing chased. The snapshot
-         * is still taken: the identities were known the moment the assembler answered, so a run that
-         * stopped part way can still say what the store makes of the batches it did stamp.
+         * <p>Defect fix P5: one court centre's trouble is not a night's. The batch whose request
+         * threw is counted PENDING - its row is left for the next run's stale-batch pass to fail and
+         * give back - and the night carries on to the third, whose stamp is refused and which is
+         * PENDING too. Every register the night read is in exactly one count, so the line still adds
+         * up; nothing was asked of the renderer for either PENDING batch.
          */
         private static final String AS_FAR_AS_IT_GOT = RUN_EVENT
                 + NORMALISED_RUN_ID + THE_SCHEDULE_ASKED
-                + " gate=proceed reason=flag-on batches=1 requested=1 generating=1 failed=0"
-                + " pending=0 deferred=2 rows=" + (GENERATING_ROWS + WAITING_ROWS)
+                + " gate=proceed reason=flag-on batches=3 requested=1 generating=1 failed=0"
+                + " pending=2 deferred=2 rows=" + THE_MIXED_NIGHTS_ROWS
                 + " rows_generating=" + GENERATING_ROWS
-                + " rows_failed=0 rows_pending=0 rows_deferred=" + WAITING_ROWS
+                + " rows_failed=0 rows_pending=" + (FAILING_ROWS + UNSTAMPABLE_ROWS)
+                + " rows_deferred=" + WAITING_ROWS
                 + NOTHING_SETTLED_YET
                 + " released_batches=" + RELEASED_BATCHES
                 + " released_registers=" + RELEASED_REGISTERS
@@ -2328,20 +2336,19 @@ class RegisterGenerationJobTest {
                 + " duration_ms=60000";
 
         /**
-         * The line a night whose one render left and whose store then refused can still write.
+         * The line a night whose one render left and whose store then refused writes.
          *
-         * <p>One render away and no batch accounted for, which is the divergence worth reading:
-         * the requesting leg never answered about this batch, so it is under none of the three
-         * states and its registers are in none of the row counts, and the count of what was sent
-         * is the only field on the line that says the night reached systemdocgenerator at all. A
-         * line reporting {@code requested=0} here would have an operator concluding that nothing
-         * was asked for on the one night a document is coming back to a service that has no idea
-         * it asked.
+         * <p>One render away and the batch counted PENDING: the requesting leg never answered about
+         * it, so its row stands wherever the store left it and the next run's stale-batch pass is
+         * what settles it. The count of what was sent still says the night reached
+         * systemdocgenerator - a line reporting {@code requested=0} here would have an operator
+         * concluding nothing was asked for on the one night a document is coming back.
          */
         private static final String A_RENDER_AWAY_AND_NOTHING_ACCOUNTED = RUN_EVENT
                 + NORMALISED_RUN_ID + THE_SCHEDULE_ASKED
-                + " gate=proceed reason=flag-on batches=0 requested=1 generating=0 failed=0"
-                + " pending=0 deferred=0 rows=0 rows_generating=0 rows_failed=0 rows_pending=0"
+                + " gate=proceed reason=flag-on batches=1 requested=1 generating=0 failed=0"
+                + " pending=1 deferred=0 rows=" + ACTIVE.size()
+                + " rows_generating=0 rows_failed=0 rows_pending=" + ACTIVE.size()
                 + " rows_deferred=0" + NOTHING_SETTLED_YET + NOTHING_RELEASED_ON_THE_LINE
                 + " duration_ms=0";
 
@@ -2358,7 +2365,7 @@ class RegisterGenerationJobTest {
          * looked at, and the two deferred keys were known before any of it. A report that could
          * only be written at the end would carry none of that.
          */
-        private void aRunStoppedWhileRequesting() {
+        private void aNightOneOfWhoseRequestsThrew() {
             final List<RegisterBatch> night = aMixedNight();
             when(service.request(eq(night.get(1)), any(), any()))
                     .thenThrow(new IllegalStateException(OUTAGE));
@@ -2380,17 +2387,99 @@ class RegisterGenerationJobTest {
         }
 
         @Test
-        void a_run_that_stopped_part_way_should_leave_the_line_the_night_had_got_to() {
-            aRunStoppedWhileRequesting();
+        void a_batch_whose_request_threw_should_be_pending_and_the_night_should_carry_on() {
+            aNightOneOfWhoseRequestsThrew();
 
             try (CapturedLog log = CapturedLog.capturing(RegisterGenerationJob.class)) {
-                whatStoppedTheRun();
+                softly.assertThat(whatStoppedTheRun())
+                        .as("P5: one court centre's trouble is not a night's, whatever it threw")
+                        .isNull();
 
                 softly.assertThat(normalisedRunLines(log))
-                        .as("one batch was requested, two court centre days were passed over and "
-                                + "nothing was chased; a run has to be able to say how far it got, "
-                                + "because the batches it did stamp are waiting on somebody now")
+                        .as("the batch that threw is pending for the next run, the night went on "
+                                + "to the batch behind it, and every register is still in exactly "
+                                + "one count")
                         .containsExactly(AS_FAR_AS_IT_GOT);
+            }
+        }
+
+        @Test
+        void the_batch_behind_one_whose_request_threw_anything_should_still_be_requested() {
+            final RegisterBatch throwing = batch();
+            final RegisterBatch following = batch();
+            aNightHolding(throwing, following);
+            everyRequestIsAccepted();
+            // doThrow, not when(...).thenThrow: when() would call the accepting answer stubbed just
+            // above with a null batch while arranging this one.
+            doThrow(new IllegalArgumentException("a defect nobody anticipated"))
+                    .when(service).request(eq(throwing), any(), any());
+
+            final RunReport report = run();
+
+            verify(service).request(eq(following), any(), any());
+            softly.assertThat(reported(report, RunReport::outcomes))
+                    .as("not only a store outage: any runtime failure of one batch's request is "
+                            + "that batch's, and the one behind it is asked for as usual")
+                    .isEqualTo(Map.of(BatchStatus.GENERATING, 1, BatchStatus.PENDING, 1));
+        }
+
+        @Test
+        void a_request_that_threw_because_the_run_was_interrupted_should_end_the_run() {
+            final RegisterBatch interrupted = batch();
+            final RegisterBatch following = batch();
+            aNightHolding(interrupted, following);
+            everyRequestIsAccepted();
+            final IllegalStateException stopping =
+                    new IllegalStateException("the pool is shutting down");
+            doAnswer(call -> {
+                Thread.currentThread().interrupt();
+                throw stopping;
+            }).when(service).request(eq(interrupted), any(), any());
+
+            try {
+                softly.assertThat(whatStoppedTheRun())
+                        .as("a shutdown is not one batch's trouble: walking the rest of the night "
+                                + "on an interrupted thread would raise an alert per batch for a "
+                                + "routine pod stop, so the run leaves as it did before P5's "
+                                + "isolation")
+                        .isSameAs(stopping);
+                verify(service, never()).request(eq(following), any(), any());
+                softly.assertThat(registry.find(GenerationMetrics.GENERATION_REQUEST_UNFINISHED)
+                                .counter())
+                        .as("and nothing is counted as a batch that did not finish")
+                        .isNull();
+            } finally {
+                Thread.interrupted();
+            }
+        }
+
+        @Test
+        void a_batch_whose_request_threw_should_move_a_counter_something_can_alert_on() {
+            aNightOneOfWhoseRequestsThrew();
+
+            run();
+
+            softly.assertThat(registry.find(GenerationMetrics.GENERATION_REQUEST_UNFINISHED)
+                            .counter())
+                    .as("a night that carried on past a batch is still a batch that did not "
+                            + "finish, and a log line is not an alerting surface")
+                    .isNotNull()
+                    .extracting(Counter::count)
+                    .isEqualTo(1.0);
+        }
+
+        @Test
+        void a_batch_whose_request_threw_should_be_named_by_class_and_never_by_its_words() {
+            aNightOneOfWhoseRequestsThrew();
+
+            try (CapturedLog log = CapturedLog.capturing(RegisterGenerationJob.class)) {
+                run();
+
+                softly.assertThat(log.messages())
+                        .as("the class says what kind of failure it was; the message belongs to "
+                                + "whatever raised it and is where a connection string turns up")
+                        .anyMatch(line -> line.contains(IllegalStateException.class.getName()))
+                        .noneMatch(line -> line.contains(OUTAGE));
             }
         }
 
@@ -2399,8 +2488,8 @@ class RegisterGenerationJobTest {
          *
          * <p>{@code RunReport.Settled} documents that {@code notified <= generated <= generating}
          * is not an invariant, and this is the case it names: a batch whose render was accepted and
-         * whose verdict was lost with the run is in none of the requesting leg's three counts, and
-         * the completion legs can still settle it before the line is written. Nothing asserted it,
+         * whose request then threw is counted PENDING by the requesting leg, and the completion legs
+         * can still settle it before the line is written. Nothing asserted it,
          * so the exception lived only in a javadoc - which is how a reader comes to write an alert
          * on the inequality, or to "fix" the code until it holds and take the divergence with it.
          *
@@ -2535,20 +2624,19 @@ class RegisterGenerationJobTest {
         }
 
         @Test
-        void a_render_the_store_then_refused_should_still_stop_the_run() {
+        void a_render_the_store_then_refused_should_not_stop_the_run() {
             aRenderThatLeftBeforeTheStoreRefused("mark a batch requested");
 
             softly.assertThat(whatStoppedTheRun())
-                    .as("counting the render changes nothing about the failure: a store outage is "
-                            + "reported and rethrown, because the schedule and the operations "
-                            + "command decide what to do next from the throw")
-                    .isInstanceOf(StoreUnavailableException.class)
-                    .hasMessage("the store could not be reached to mark a batch requested");
+                    .as("a store that would not take one batch's mark costs that batch, which the "
+                            + "next run's stale-batch pass settles, and not the court centres "
+                            + "behind it (P5)")
+                    .isNull();
         }
 
         @Test
         void a_run_that_stopped_while_requesting_should_still_gauge_what_it_had_assembled() {
-            aRunStoppedWhileRequesting();
+            aNightOneOfWhoseRequestsThrew();
 
             whatStoppedTheRun();
 

@@ -69,6 +69,8 @@ public class GenerationMetrics {
             "yotresultsdistribution_public_events_ignored_total";
     public static final String GENERATION_UNRECORDED =
             "yotresultsdistribution_generation_unrecorded_total";
+    public static final String GENERATION_REQUEST_UNFINISHED =
+            "yotresultsdistribution_generation_request_unfinished_total";
     public static final String BATCH_SWEEP_FAILURES =
             "yotresultsdistribution_batch_sweep_failures_total";
     public static final String OLDEST_RECORDED_UNBATCHED_AGE =
@@ -555,6 +557,19 @@ public class GenerationMetrics {
      */
     public void headerEnvelopeMismatchIgnored() {
         counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, HEADER_ENVELOPE_MISMATCH).increment();
+    }
+
+    /**
+     * Counts a batch whose request did not finish, which the run carried on past.
+     *
+     * <p>Defect fix P5: one court centre's trouble is not a night's, so a batch whose request
+     * throws - a store outage on one of its marks, or anything else - is left PENDING for the next
+     * run's stale-batch pass and the run goes on. The run line counts it among {@code pending};
+     * this is the reading an alert fires on: a night of these is a failing collaborator or a
+     * defect, not a deadline. A batch whose stamp was refused is not counted here.
+     */
+    public void generationRequestUnfinished() {
+        counter(GENERATION_REQUEST_UNFINISHED).increment();
     }
 
     /**

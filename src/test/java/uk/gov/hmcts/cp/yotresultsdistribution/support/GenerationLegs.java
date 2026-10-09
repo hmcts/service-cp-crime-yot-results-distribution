@@ -478,6 +478,7 @@ public final class GenerationLegs implements AutoCloseable {
         whateverItAnswers(job::run);
 
         aNightThatStoppedPartWay();
+        aNightOneOfWhoseRequestsDidNotFinish();
         aNightWhoseOwnBatchesCouldNotBeReadBack();
     }
 
@@ -498,6 +499,24 @@ public final class GenerationLegs implements AutoCloseable {
         when(store.batchesNamed(any())).thenThrow(new StoreUnavailableException(
                 "the store could not be reached to read a run's own batches back by identity",
                 new IllegalStateException("the connection pool is empty")));
+        whateverItAnswers(job::run);
+    }
+
+    /**
+     * The night one batch's request threw and the run carried on past it.
+     *
+     * <p>The store will not take the batch's payload id, so its request leaves through a throw; the
+     * run counts it, says so by class, and goes on (defect fix P5). The line names the batch and
+     * the class of what was raised - never the store's own words.
+     */
+    private void aNightOneOfWhoseRequestsDidNotFinish() {
+        readyToGenerate();
+        when(store.assemble(any(RegisterBatch.class), anyList())).thenReturn(pending());
+        when(store.batched(BATCH_ID)).thenReturn(List.of(register(List.of(recipient()))));
+        doThrow(new StoreUnavailableException(
+                "the store could not be reached to mint a batch's payload id",
+                new IllegalStateException("the connection pool is empty")))
+                .when(store).markPayloadMinted(any(), any());
         whateverItAnswers(job::run);
     }
 
