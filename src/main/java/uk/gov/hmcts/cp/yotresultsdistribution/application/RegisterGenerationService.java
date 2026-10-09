@@ -371,8 +371,8 @@ public class RegisterGenerationService {
      * taken as one: GENERATED or anything after it, or FAILED by an event. A batch still PENDING
      * or GENERATING, one failed by this service's own verdict, or one with no row at all was not
      * overtaken by anything, so the refusal is the defect it always was and is rethrown unchanged.
-     * A store that cannot be read here ends the run as an outage anywhere else does, carrying the
-     * refusal it was asked about.
+     * A store that cannot be read here leaves the request as an outage anywhere else in it does,
+     * carrying the refusal it was asked about.
      *
      * @param batch   the batch whose mark was refused
      * @param refused what the store raised

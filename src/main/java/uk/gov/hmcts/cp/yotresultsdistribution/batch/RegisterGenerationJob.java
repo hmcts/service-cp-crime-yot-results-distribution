@@ -398,24 +398,36 @@ public class RegisterGenerationJob {
      * up in, so the batch is counted PENDING and the night carries on to the court centres behind
      * it. That isolation is defect fix P5's other half: one court centre's trouble is not a night's.
      *
+     * <p><strong>Nor does a batch whose request did not finish.</strong> The same rule, one step
+     * later and for anything the requesting leg throws: a store that will not take one of the
+     * batch's marks, a client that raises something nobody classified, a defect. The batch is
+     * counted PENDING, said at ERROR by class only, and counted on
+     * {@code yotresultsdistribution_generation_request_unfinished_total}; its row is left where the
+     * store holds it - PENDING or GENERATING, or wherever an outcome has since put it - and the
+     * next run's stale-batch pass fails and releases whatever is still in flight, which is how its
+     * registers are retried. Nothing is swallowed: the batch's ending is decided by that pass, and
+     * the counter is what an alert fires on. The one throw that is not a batch's is a shutdown: a
+     * request that fails on an interrupted thread ends the run, as any failure did before, because
+     * every batch behind it would fail the same way.
+     *
      * <p><strong>A batch whose render was asked for is counted where the call was made.</strong>
-     * The requesting leg announces that to the tally as it makes the call, so a store that will not
-     * write the batch's ending down - which takes the whole run out through a throw - cannot make a
-     * render that did leave this service disappear from the night's account.
+     * The requesting leg announces that to the tally as it makes the call, so a batch whose request
+     * then threw - and is counted PENDING, never asked for - still has its render on the night's
+     * account.
      *
      * @param assembled the batch the assembler decided on, beside the registers it groups
      * @param deadline  the run's requesting bound
      * @param progress  the night's own account, told as the render is asked for and before
      *                  anything is concluded about it
      * @return what this batch ended the requesting leg as, which for a batch that could not be
-     *         written down is PENDING under no reason at all: nothing was asked of the renderer and
-     *         there is no row for a reason to have been written to
+     *         written down, or whose request did not finish, is PENDING under no reason at all
      */
-    // PMD.AvoidCatchingGenericException: the stamp refuses through IllegalStateException and the
-    // store translates an outage into its own unchecked type; both mean the same thing here - this
-    // batch was not written down - and a narrower catch would leave one of them ending the run.
-    // PMD.OnlyOneReturn: the two exits are the two things that can happen to a batch, and each says
-    // so where it is decided; funnelling them through one would turn a verdict into a flag carried
+    // PMD.AvoidCatchingGenericException: the stamp refuses through IllegalStateException, the
+    // requesting leg can throw anything its collaborators raise, and the store translates an
+    // outage into its own unchecked type; all of them mean the same thing here - this
+    // batch is left for the next run - and a narrower catch would leave one of them ending the run.
+    // PMD.OnlyOneReturn: the three exits are the three things that can happen to a batch, and each
+    // says so where it is decided; funnelling them through one would turn a verdict into a flag carried
     // past the call that must not be made once it exists.
     @SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.OnlyOneReturn"})
     private BatchOutcome requested(final AssembledBatch assembled, final Deadline deadline,
@@ -429,7 +441,21 @@ public class RegisterGenerationJob {
                     assembled.batch().batchId(), notStamped.getClass().getName());
             return new BatchOutcome(assembled.batch().batchId(), BatchStatus.PENDING, null, false);
         }
-        return service.request(batch, deadline, progress);
+        try {
+            return service.request(batch, deadline, progress);
+        } catch (RuntimeException unfinished) {
+            if (Thread.currentThread().isInterrupted()) {
+                // A shutdown, not this batch's trouble: every batch behind it would fail the same
+                // way and raise an alert each for a routine pod stop, so the run leaves.
+                throw unfinished;
+            }
+            metrics.generationRequestUnfinished();
+            LOG.error("The request for batch {} did not finish, so it is counted PENDING, left to "
+                            + "the next run's stale-batch pass, and the run continues to the next "
+                            + "batch. cause={}",
+                    batch.batchId(), unfinished.getClass().getName());
+            return new BatchOutcome(batch.batchId(), BatchStatus.PENDING, null, false);
+        }
     }
 
     /**
