@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.reset;
@@ -585,6 +586,7 @@ public final class GenerationLegs implements AutoCloseable {
         aRenderNothingAnswered();
         aRenderThatWouldNotFitTheBudget();
         aRenderTheGeneratorAccepted();
+        aRenderWhoseOutcomeOvertookItsMark();
         aWaitBetweenAttemptsThatWasInterrupted();
     }
 
@@ -622,6 +624,23 @@ public final class GenerationLegs implements AutoCloseable {
     private void aRenderTheGeneratorAccepted() {
         aBatchOfOneRegister();
         renderCommandAnswering(HttpStatus.ACCEPTED.value());
+        whateverItAnswers(() -> generation.request(pending(), deadline(), RenderProgress.NONE));
+    }
+
+    /**
+     * The render whose document the listener applied before this leg could mark it requested.
+     *
+     * <p>The store refuses the mark, the leg reads the batch back and finds an outcome there, and
+     * says so in a line that names the batch and the state it stands at - both bounded.
+     */
+    private void aRenderWhoseOutcomeOvertookItsMark() {
+        aBatchOfOneRegister();
+        renderCommandAnswering(HttpStatus.ACCEPTED.value());
+        doThrow(new IllegalStateException("batch " + BATCH_ID
+                + " may not move from GENERATED to GENERATING"))
+                .when(store).markRequested(any(), any());
+        when(store.batchesNamed(any())).thenReturn(List.of(
+                batch(BatchStatus.GENERATED, UUID.randomUUID(), UUID.randomUUID())));
         whateverItAnswers(() -> generation.request(pending(), deadline(), RenderProgress.NONE));
     }
 
@@ -1201,7 +1220,7 @@ public final class GenerationLegs implements AutoCloseable {
 
     /** A file service that will not take the CSV, in its own words and with a cause of its own. */
     private void doRefuseTheText() {
-        org.mockito.Mockito.doThrow(new PayloadStoreUnavailableException(
+        doThrow(new PayloadStoreUnavailableException(
                         "the file service could not be reached to write the report's content row"))
                 .when(payloadFileStore).storeText(any(UUID.class), any(String.class),
                         any(uk.gov.hmcts.cp.yotresultsdistribution.application.PayloadMetadata.class));
@@ -1481,7 +1500,7 @@ public final class GenerationLegs implements AutoCloseable {
     }
 
     private void doRefuseThePayload() {
-        org.mockito.Mockito.doThrow(new PayloadStoreUnavailableException(
+        doThrow(new PayloadStoreUnavailableException(
                         "the file service could not be reached to write the payload's content row"))
                 .when(payloadFileStore).store(any(UUID.class),
                         any(tools.jackson.databind.JsonNode.class),
@@ -1489,7 +1508,7 @@ public final class GenerationLegs implements AutoCloseable {
     }
 
     private void doRefuseTheInsert() {
-        org.mockito.Mockito.doThrow(new StoreRefusedRowException(
+        doThrow(new StoreRefusedRowException(
                         "a notification row for this batch and address is already held"))
                 .when(notifications).insert(any(RegisterNotification.class));
     }
