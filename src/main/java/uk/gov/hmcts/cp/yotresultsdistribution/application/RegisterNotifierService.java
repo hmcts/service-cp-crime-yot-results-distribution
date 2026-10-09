@@ -164,13 +164,16 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.RegisterNotificationRe
  * as one notifier's work. The tally inside the settlement statement sits outside that statement's
  * own ACCEPTED fence for the same reason.
  *
- * <p><strong>Notification is asked once per batch, because the mark that precedes it is.</strong>
+ * <p><strong>Notification may be asked more than once per batch, and is sent once.</strong>
  * {@code markGenerated} is a compare-and-set, so of two mechanisms racing to move one batch to
- * GENERATED only one wins and only that one goes on to notify. A batch whose notification could not
- * be made at all - the store went away mid-run - is left standing at GENERATED with the failure
- * reported by whoever drove the outcome, which is what {@code notify-register --batch} exists for:
- * a redelivered {@code document-available} is recognised rather than re-applied, so it is not a
- * second chance to send. That batch is visible while it stands there -
+ * GENERATED only one wins the mark; but a redelivered {@code document-available} that finds the
+ * batch still GENERATED hands it on again (defect fix P1, amended), because a notification that
+ * finished would have moved it on. One e-mail per team is this class's guarantee: the claim admits
+ * one caller per batch, a recipient keeps the one row it was minted, and an ACCEPTED row is never
+ * asked for again. A batch whose notification could not be made at all - the store went away
+ * mid-run - is therefore retried by the broker's redelivery, and an operator's
+ * {@code POST /operations/batches/{batchId}/notify} recovers it otherwise. That batch is visible
+ * while it stands there -
  * {@code yotresultsdistribution_oldest_generated_age} is the reading that says a batch has held its document
  * since before anybody was worried - and either entry point recovers it, because both are
  * re-entrant.
@@ -534,12 +537,11 @@ public class RegisterNotifierService {
      * and writing that over a batch addressed to a Youth Offending Team all along ends the night
      * claiming there was nobody to tell, terminally, where no later resend could revisit it.
      *
-     * <p><strong>GENERATED is recoverable, and nothing recovers it unasked.</strong> Either entry
-     * point re-derives the owed set from the records and mints the row the store has no record of,
-     * so what recovers the batch is an operator's explicit {@code notify-register --batch}
-     * resend. The outcome sink is not that call either: it drives one notify per transition into
-     * GENERATED and suppresses the callback for a batch already there, so no event redelivery
-     * revisits the batch. Nor is the run's stale-batch pass: it never touches a GENERATED batch at
+     * <p><strong>GENERATED is recoverable.</strong> Either entry point re-derives the owed set from
+     * the records and mints the row the store has no record of, so an operator's explicit
+     * {@code POST /operations/batches/{batchId}/notify} recovers the batch, and so does a
+     * redelivered {@code document-available}, which hands a batch still GENERATED to the notifier
+     * again (defect fix P1, amended). The run's stale-batch pass does not: it never touches a GENERATED batch at
      * any age, because that batch holds a document somebody is owed e-mails about and failing it
      * would throw the document away. What names such a batch is
      * {@code yotresultsdistribution_oldest_generated_age}, the reading that says a batch has been standing
@@ -564,8 +566,8 @@ public class RegisterNotifierService {
                 + "and the batch is not settled: a tally over the rows that are left would settle "
                 + "it on an incomplete account of what was sent, and a batch of one vanished row "
                 + "would be settled as having had nobody to tell. It stays where it stands until an "
-                + "operator resends it with notify-register --batch; nothing recovers it unasked, "
-                + "and the batch-age reading names it and settles nothing.",
+                + "operator resends it or the announcement is offered again; the batch-age "
+                + "reading names it and settles nothing.",
                 batchId);
         final NotificationSummary seen = tally(notifications.findByBatchId(batchId));
         return NotificationSummary.incomplete(
