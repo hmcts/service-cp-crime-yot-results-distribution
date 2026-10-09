@@ -182,6 +182,18 @@ public class GenerationMetrics {
     public static final String TERMINAL_BATCH = "terminal-batch";
 
     /**
+     * The {@code reason} label of a document announced again for a batch still GENERATED whose
+     * hand-on to the notifier failed for a reason another delivery cannot clear.
+     *
+     * <p>A store outage is rethrown and the broker offers the event again; anything else would
+     * fail the same way on every delivery of a durable subscription, so the event is acknowledged
+     * and counted here. The batch stays GENERATED, where
+     * {@code yotresultsdistribution_oldest_generated_age}, the 07:00 report and an operator's
+     * {@code POST /operations/batches/{batchId}/notify} find it. Nought on a healthy estate.
+     */
+    public static final String NOTIFICATION_NOT_RETRIED = "notification-not-retried";
+
+    /**
      * The {@code reason} label of a delivery whose body would not parse at all.
      *
      * <p>The four readings above are all taken from an envelope this service read: they say what a
@@ -459,6 +471,14 @@ public class GenerationMetrics {
      */
     public void terminalBatchIgnored() {
         counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, TERMINAL_BATCH).increment();
+    }
+
+    /**
+     * Counts a document announced again for a GENERATED batch that could not be handed to the
+     * notifier again and was acknowledged rather than offered for ever.
+     */
+    public void notificationNotRetried() {
+        counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, NOTIFICATION_NOT_RETRIED).increment();
     }
 
     /**

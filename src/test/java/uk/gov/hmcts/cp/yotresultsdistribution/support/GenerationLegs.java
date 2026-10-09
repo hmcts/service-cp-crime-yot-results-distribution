@@ -767,6 +767,7 @@ public final class GenerationLegs implements AutoCloseable {
         anOutcomeForABatchNothingHolds();
         anOutcomeAboutAnotherPayload();
         anOutcomeThatArrivedTwice();
+        aDocumentForABatchStillGenerated();
         anOutcomeTheStateMachineDoesNotDraw();
         anOutcomeThatClosesTheRoundTrip();
         anOutcomeWhoseRoundTripCouldNotBeRead();
@@ -789,6 +790,20 @@ public final class GenerationLegs implements AutoCloseable {
         holding(batch(BatchStatus.FAILED, PAYLOAD_FILE_ID, null));
         whateverItAnswers(() -> sink.generationFailed(BATCH_ID, PAYLOAD_FILE_ID,
                 PersonalDataMarkers.GENERATOR_REASON, AT, CompletedBy.EVENT));
+    }
+
+    /**
+     * A document announced again for a batch whose notification never finished: not re-stamped,
+     * handed on, and said in a line that names the batch and its state only - and, where the
+     * second hand-on fails in a way no redelivery clears, acknowledged with a WARN by class and a
+     * count under {@code notification-not-retried}.
+     */
+    private void aDocumentForABatchStillGenerated() {
+        holding(batch(BatchStatus.GENERATED, PAYLOAD_FILE_ID, DOCUMENT_FILE_ID));
+        when(batches.claimForNotification(any(UUID.class), any(UUID.class)))
+                .thenReturn(NotificationClaim.ABSENT);
+        whateverItAnswers(() -> sink.documentAvailable(BATCH_ID, PAYLOAD_FILE_ID,
+                DOCUMENT_FILE_ID, AT, CompletedBy.EVENT));
     }
 
     private void anOutcomeTheStateMachineDoesNotDraw() {
