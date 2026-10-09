@@ -19,6 +19,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.config.GenerationMetrics;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CallerIdentity;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.CompletedBy;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.Deadline;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FailureClassification;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.GenerationFailedException;
@@ -338,9 +339,93 @@ public class RegisterGenerationService {
     private BatchOutcome renderAccepted(final RegisterBatch batch,
             final UUID payloadFileId) {
         metrics.generationRequested(ACCEPTED_STATUS);
-        store.markRequested(batch.batchId(), payloadFileId);
+        try {
+            store.markRequested(batch.batchId(), payloadFileId);
+        } catch (IllegalStateException refused) {
+            return overtaken(batch, refused);
+        }
         LOG.info("systemdocgenerator accepted the render request for batch {}, which now waits for "
                 + "its document on the public-event topic.", batch.batchId());
+        return accepted(batch);
+    }
+
+    /**
+     * Answers a batch whose mark the store refused because an outcome got to it first.
+     *
+     * <p><strong>Defect fix P5's isolation, held against the listener.</strong> This
+     * leg is not the only writer of a batch between PENDING and GENERATING: the public-event
+     * listener runs beside the run on every pod, so a render systemdocgenerator finishes before its
+     * 202 arrives - or a request whose 202 was lost while this leg retried - is marked GENERATED or
+     * FAILED by the listener first, and the mark made here is then one the state machine refuses.
+     * Thrown, that refusal ended the night for every court centre behind this one.
+     *
+     * <p>An outcome exists only for a request systemdocgenerator accepted, so a batch that has one
+     * is answered as the accepted request it was - GENERATING, the requesting leg's own view - and
+     * what it came to is the settled snapshot's to report, read from the store like every other
+     * batch the listener finished during the run. Nothing is counted on the terminal series here,
+     * exactly as nothing is when the listener's outcome follows a mark that landed: a document is
+     * counted by the notifier when the batch's teams have been told, and a {@code generation-failed}
+     * ending is counted by neither.
+     *
+     * <p>The refusal is asked about rather than assumed, and only an ending an outcome writes is
+     * taken as one: GENERATED or anything after it, or FAILED by an event. A batch still PENDING
+     * or GENERATING, one failed by this service's own verdict, or one with no row at all was not
+     * overtaken by anything, so the refusal is the defect it always was and is rethrown unchanged.
+     * A store that cannot be read here ends the run as an outage anywhere else does, carrying the
+     * refusal it was asked about.
+     *
+     * @param batch   the batch whose mark was refused
+     * @param refused what the store raised
+     * @return GENERATING, where an outcome is what refused the mark
+     * @throws IllegalStateException the refusal itself, where no outcome explains it
+     */
+    // PMD.AvoidCatchingGenericException: the read-back is asked only to explain a refusal, and
+    // whatever stops it - the store's own outage type or anything the driver raised - leaves
+    // unchanged; the catch exists only to keep the refusal on it as evidence.
+    @SuppressWarnings("PMD.AvoidCatchingGenericException")
+    private BatchOutcome overtaken(final RegisterBatch batch, final IllegalStateException refused) {
+        final List<RegisterBatch> held;
+        try {
+            held = store.batchesNamed(List.of(batch.batchId()));
+        } catch (RuntimeException unread) {
+            unread.addSuppressed(refused);
+            throw unread;
+        }
+        final BatchStatus now = held.stream()
+                .findFirst()
+                .filter(RegisterGenerationService::endedByAnOutcome)
+                .map(RegisterBatch::status)
+                .orElseThrow(() -> refused);
+        LOG.info("The outcome for batch {} reached it before this run's own mark, so the batch "
+                + "stands at {} and the run continues to the next batch.", batch.batchId(), now);
+        return accepted(batch);
+    }
+
+    /**
+     * Whether a batch stands where only an outcome event can have put it.
+     *
+     * <p>GENERATED and every state after it are written only once a document exists. FAILED is
+     * written by this class as well, so it counts only where the row names the event as the
+     * mechanism that learned it.
+     *
+     * @param batch the batch as the store holds it
+     * @return whether an outcome is what moved it
+     */
+    private static boolean endedByAnOutcome(final RegisterBatch batch) {
+        return switch (batch.status()) {
+            case PENDING, GENERATING -> false;
+            case FAILED -> batch.completedBy() == CompletedBy.EVENT;
+            case GENERATED, NOTIFIED, PARTIALLY_NOTIFIED, NOTIFIED_NOBODY -> true;
+        };
+    }
+
+    /**
+     * The requesting leg's answer for a render systemdocgenerator accepted.
+     *
+     * @param batch the batch whose render was accepted
+     * @return GENERATING, with the request recorded as having left this service
+     */
+    private static BatchOutcome accepted(final RegisterBatch batch) {
         return new BatchOutcome(batch.batchId(), BatchStatus.GENERATING, null, true);
     }
 
@@ -414,6 +499,10 @@ public class RegisterGenerationService {
      * the ending of a request that was made and answered nothing and of a batch no attempt could be
      * started for, and the caller is the only thing that knows which of those it is.
      *
+     * <p>A batch an outcome has already reached is not failed over it: a document that came back
+     * for a request whose 202 was lost proves the request was accepted, so the refusal the store
+     * raises for that batch is answered by {@link #overtaken} rather than thrown.
+     *
      * @param batch  the batch that failed
      * @param reason the bounded reason it is failed under
      * @param sent   whether the render request had left this service by then
@@ -421,7 +510,15 @@ public class RegisterGenerationService {
      */
     private BatchOutcome failed(final RegisterBatch batch, final BatchFailureReason reason,
             final boolean sent) {
-        store.markFailed(batch.batchId(), reason, null, null);
+        try {
+            store.markFailed(batch.batchId(), reason, null, null);
+        } catch (IllegalStateException refused) {
+            // Only a request that left this service can have an outcome to be overtaken by.
+            if (!sent) {
+                throw refused;
+            }
+            return overtaken(batch, refused);
+        }
         metrics.batchCompleted(BatchStatus.FAILED);
         return new BatchOutcome(batch.batchId(), BatchStatus.FAILED, reason, sent);
     }
