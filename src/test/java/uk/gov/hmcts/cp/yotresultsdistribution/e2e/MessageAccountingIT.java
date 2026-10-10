@@ -165,6 +165,8 @@ class MessageAccountingIT {
         registry.add("spring.datasource.username", PostgresTestSupport::username);
         registry.add("spring.datasource.password", PostgresTestSupport::password);
         registry.add("yotresultsdistribution.servicebus.connection-string", () -> connectionString);
+        registry.add(ServiceTestSupport.REDELIVERY_BACKOFF,
+                () -> ServiceTestSupport.SHORT_REDELIVERY_BACKOFF);
         ServiceTestSupport.stubPayloadSource(registry);
         // Both identities: the service refuses to start a live client without one, and no suite here
         // reaches progression or the results query.

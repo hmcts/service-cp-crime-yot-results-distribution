@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.inbound;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -20,8 +21,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -43,6 +46,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.ReasonCode;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RecordedFlagState;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RunClaim;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException;
+import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
 import uk.gov.hmcts.cp.yotresultsdistribution.support.QueueHealthTestSupport;
 import uk.gov.hmcts.cp.yotresultsdistribution.support.StoreGateTestSupport;
 
@@ -315,6 +319,292 @@ class MessageListenerSettlementTest {
             verify(context).abandon();
             verify(context, never()).complete();
             assertSettledExactlyOnce(context);
+        }
+    }
+
+    /**
+     * The hold before a hand-back (production-readiness audit F-04).
+     *
+     * <p>The queue offers an abandoned message again at once, so without a hold the five deliveries
+     * a transient failure is entitled to are spent in the seconds a downstream redeploy takes, and
+     * the request is parked for a person to replay. The hold is served <em>before</em> the abandon,
+     * while the lock is still being renewed, because a delivery that is waiting is a delivery no
+     * other pod can be handed.
+     */
+    @Nested
+    @DisplayName("a delivery handed back after a failure that may clear")
+    class HeldBeforeHandingBack {
+
+        /** Every hold served, with the settlements already made on the delivery when it began. */
+        private final List<List<String>> settlementsWhenHeld = new CopyOnWriteArrayList<>();
+
+        private final List<Duration> held = new CopyOnWriteArrayList<>();
+
+        private final List<Duration> schedule = List.of(
+                Duration.ofSeconds(15), Duration.ofSeconds(30),
+                Duration.ofSeconds(60), Duration.ofSeconds(120));
+
+        /** The back-off's monotonic clock, moved only by the cases that are about it. */
+        private final AtomicLong clock = new AtomicLong(1_000_000_000L);
+
+        private YotResultsDistributionMessageListener holding(
+                final ServiceBusReceivedMessageContext context, final StoreGate gate,
+                final RedeliveryBackoff.Pause also) {
+            final RedeliveryBackoff backoff = new RedeliveryBackoff(schedule, Duration.ofMinutes(5),
+                    duration -> {
+                        settlementsWhenHeld.add(settlementsOn(context));
+                        held.add(duration);
+                        also.pause(duration);
+                    }, clock::get);
+            return new YotResultsDistributionMessageListener(
+                    parser, pipeline, metrics, QueueHealthTestSupport.unwatched(), gate,
+                    MAX_DELIVERY_COUNT, null, backoff);
+        }
+
+        private YotResultsDistributionMessageListener holding(
+                final ServiceBusReceivedMessageContext context) {
+            return holding(context, StoreGateTestSupport.open(), duration -> {});
+        }
+
+        @AfterEach
+        void clearTheInterrupt() {
+            // The interrupted case leaves the flag set on purpose; the next case must not inherit it.
+            Thread.interrupted();
+        }
+
+        @Test
+        void a_transient_failure_should_be_held_for_its_delivery_count_before_it_is_abandoned() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            holding(context).onMessage(context);
+
+            assertThat(held)
+                    .as("the second delivery (count 1) waits the schedule's second entry")
+                    .containsExactly(Duration.ofSeconds(30));
+            assertThat(settlementsWhenHeld)
+                    .as("the hold is served while the delivery is still locked, never after")
+                    .containsExactly(List.of());
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_claim_another_runner_holds_should_be_held_too() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.CLAIM_NOT_ACQUIRED));
+
+            holding(context).onMessage(context);
+
+            assertThat(held).containsExactly(Duration.ofSeconds(30));
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_run_that_failed_unexpectedly_should_be_held_too() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            when(pipeline.process(any(DistributionCommand.class), any(DeliveryIdentity.class),
+                any(RecordedFlagState.class)))
+                    .thenThrow(new IllegalStateException("nothing anticipated this"));
+
+            holding(context).onMessage(context);
+
+            assertThat(held).containsExactly(Duration.ofSeconds(30));
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_store_that_went_away_should_be_handed_back_at_once() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            when(pipeline.process(any(DistributionCommand.class), any(DeliveryIdentity.class),
+                any(RecordedFlagState.class)))
+                    .thenThrow(new StoreUnavailableException(
+                            "the processed log cannot be reached",
+                            new DataAccessResourceFailureException("connection refused")));
+
+            holding(context).onMessage(context);
+
+            assertThat(held)
+                    .as("intake is being stopped; a held callback would only delay the stop")
+                    .isEmpty();
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void an_interrupted_hold_should_still_hand_the_delivery_back_exactly_once() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            holding(context, StoreGateTestSupport.open(), duration -> {
+                throw new InterruptedException();
+            }).onMessage(context);
+
+            assertThat(held).hasSize(1);
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+            assertThat(Thread.currentThread().isInterrupted())
+                    .as("the processor asked this thread to stop, and must still be able to see it")
+                    .isTrue();
+        }
+
+        @Test
+        void an_interrupted_hold_should_not_cost_the_abandon_its_call() {
+            // The real SDK settles through a blocking call that refuses an interrupted thread.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final List<Boolean> interruptedDuringAbandon = new CopyOnWriteArrayList<>();
+            doAnswer(invocation -> {
+                interruptedDuringAbandon.add(Thread.currentThread().isInterrupted());
+                return null;
+            }).when(context).abandon();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            holding(context, StoreGateTestSupport.open(), duration -> {
+                throw new InterruptedException();
+            }).onMessage(context);
+
+            assertThat(interruptedDuringAbandon)
+                    .as("the abandon is made on a thread whose interrupt is set aside for it")
+                    .containsExactly(false);
+            assertThat(Thread.currentThread().isInterrupted())
+                    .as("and the interrupt is put back once the abandon has been made")
+                    .isTrue();
+        }
+
+        @Test
+        void the_final_permitted_delivery_should_not_be_held() {
+            // The broker parks it the moment it is handed back; a hold there buys nothing.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            when(context.getMessage().getDeliveryCount()).thenReturn((long) MAX_DELIVERY_COUNT - 1);
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.CLAIM_NOT_ACQUIRED));
+
+            holding(context).onMessage(context);
+
+            assertThat(held).isEmpty();
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_hold_that_fails_should_still_hand_the_delivery_back_exactly_once() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            holding(context, StoreGateTestSupport.open(), duration -> {
+                throw new IllegalStateException("a clock nobody expected to throw");
+            }).onMessage(context);
+
+            assertThat(held).hasSize(1);
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void the_run_itself_should_count_against_what_the_lock_has_left_for_the_hold() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            when(context.getMessage().getDeliveryCount()).thenReturn(3L);
+            when(pipeline.process(any(DistributionCommand.class), any(DeliveryIdentity.class),
+                any(RecordedFlagState.class)))
+                    .thenAnswer(invocation -> {
+                        clock.addAndGet(Duration.ofMinutes(4).toNanos());
+                        return new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE);
+                    });
+
+            holding(context).onMessage(context);
+
+            assertThat(held)
+                    .as("five minutes of renewal, four spent running from arrival, thirty kept for "
+                            + "the settlement - the clock is read when the delivery arrives")
+                    .containsExactly(Duration.ofSeconds(30));
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_gate_that_failed_instead_of_answering_should_be_held_too() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+
+            holding(context, StoreGateTestSupport.unanswerable(), duration -> {}).onMessage(context);
+
+            assertThat(held).containsExactly(Duration.ofSeconds(30));
+            verify(context).abandon();
+            verifyNoInteractions(pipeline);
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_closed_store_gate_should_be_handed_back_at_once() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+
+            holding(context, StoreGateTestSupport.closed(), duration -> {}).onMessage(context);
+
+            assertThat(held).isEmpty();
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_delivery_whose_count_cannot_be_read_for_the_hold_should_be_handed_back_unheld() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(context.getMessage())
+                    .thenReturn(message)
+                    .thenThrow(new IllegalStateException("the delivery has already been disposed"));
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            holding(context).onMessage(context);
+
+            assertThat(held).isEmpty();
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_hold_that_fails_should_be_named_by_class_and_never_by_its_words() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Abandon(ReasonCode.REFERENCE_DATA_UNAVAILABLE));
+
+            try (CapturedLog log = CapturedLog.capturing(YotResultsDistributionMessageListener.class)) {
+                holding(context, StoreGateTestSupport.open(), duration -> {
+                    throw new IllegalStateException("words a library chose");
+                }).onMessage(context);
+
+                assertThat(log.renderings())
+                        .anySatisfy(line -> assertThat(line)
+                                .contains("The hold before the hand-back failed")
+                                .contains(IllegalStateException.class.getName())
+                                .contains(ReasonCode.REFERENCE_DATA_UNAVAILABLE.code()))
+                        .noneSatisfy(line -> assertThat(line).contains("words a library chose"));
+            }
+        }
+
+        @Test
+        void a_decision_to_run_that_reached_settlement_should_not_be_held() {
+            // A defect path, not a hand-back the guard chose: it is returned as it always was.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Run(new RunClaim(
+                    "RESULTS", requestId, "owner", UUID.randomUUID(), MESSAGE_ID)));
+
+            holding(context).onMessage(context);
+
+            assertThat(held).isEmpty();
+            verify(context).abandon();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_delivery_it_acknowledges_or_parks_should_never_be_held() {
+            final ServiceBusReceivedMessageContext acknowledged = validDelivery();
+            pipelineDecides(new GuardDecision.Complete(ReasonCode.RUN_COMPLETED));
+            holding(acknowledged).onMessage(acknowledged);
+
+            final ServiceBusReceivedMessageContext parked = validDelivery();
+            pipelineDecides(new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            holding(parked).onMessage(parked);
+
+            assertThat(held).isEmpty();
         }
     }
 

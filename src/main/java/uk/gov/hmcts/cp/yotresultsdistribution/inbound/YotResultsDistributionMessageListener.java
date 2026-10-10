@@ -7,6 +7,7 @@ import com.azure.messaging.servicebus.ServiceBusFailureReason;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
+import java.time.Duration;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,12 @@ public class YotResultsDistributionMessageListener {
 
     private static final Logger LOG = LoggerFactory.getLogger(YotResultsDistributionMessageListener.class);
 
+    /**
+     * The one PMD rule this class is entitled to break, at every boundary that owes a delivery its
+     * settlement whatever was thrown; each use says why beside it.
+     */
+    private static final String CATCHES_ANYTHING = "PMD.AvoidCatchingGenericException";
+
     private static final String SOURCE = "source";
     private static final String REQUEST_ID = "requestId";
     private static final String HEARING_ID = "hearingId";
@@ -95,6 +102,9 @@ public class YotResultsDistributionMessageListener {
      * command {@link RecordedFlagState#UNKNOWN}, which is exactly what "nobody read it" means.
      */
     private final RecordedFlagStateSource flagStates;
+
+    /** How long a delivery is held before it is handed back to a queue that has no back-off. */
+    private final RedeliveryBackoff backoff;
 
     /**
      * Creates the listener for a pod that reads no cutover flag.
@@ -139,6 +149,33 @@ public class YotResultsDistributionMessageListener {
             final StoreGate storeGate,
             final int maxDeliveryCount,
             final RecordedFlagStateSource flagStates) {
+        this(parser, pipeline, metrics, health, storeGate, maxDeliveryCount, flagStates,
+                RedeliveryBackoff.NONE);
+    }
+
+    /**
+     * Creates the listener with the hold it serves before every hand-back it may delay.
+     *
+     * @param parser           reads the body into the validated command
+     * @param pipeline         the use case every valid request is run through
+     * @param metrics          the instrument surface settlements are counted on
+     * @param health           where a refused or accepted settlement is reported as transport news
+     * @param storeGate        the processed-log precondition every delivery passes through
+     * @param maxDeliveryCount the queue's own delivery budget, mirrored in configuration
+     * @param flagStates       what an arriving command is labelled with, or {@code null} where this
+     *                         deployment has no flag reader to label it from
+     * @param backoff          how long a delivery is held before it is handed back
+     */
+    // The seven above and the hold: the hand-back is this class's settlement, so its timing is too.
+    public YotResultsDistributionMessageListener(
+            final DistributionCommandParser parser,
+            final DistributionPipeline pipeline,
+            final ProcessingMetrics metrics,
+            final ServiceBusHealthIndicator health,
+            final StoreGate storeGate,
+            final int maxDeliveryCount,
+            final RecordedFlagStateSource flagStates,
+            final RedeliveryBackoff backoff) {
         this.parser = parser;
         this.pipeline = pipeline;
         this.metrics = metrics;
@@ -146,6 +183,7 @@ public class YotResultsDistributionMessageListener {
         this.storeGate = storeGate;
         this.maxDeliveryCount = maxDeliveryCount;
         this.flagStates = flagStates;
+        this.backoff = backoff;
     }
 
     /**
@@ -154,8 +192,9 @@ public class YotResultsDistributionMessageListener {
      * @param context the delivery, and the settlement calls it permits
      */
     public void onMessage(final ServiceBusReceivedMessageContext context) {
+        final long received = backoff.started();
         try {
-            settle(context, decisionFor(context));
+            settle(context, decisionFor(context), received);
         } finally {
             clearCorrelation();
         }
@@ -179,7 +218,7 @@ public class YotResultsDistributionMessageListener {
      * there is exactly one honest answer — hand it back — and the only question left is whether it
      * is reported.
      */
-    @SuppressWarnings("PMD.AvoidCatchingGenericException")
+    @SuppressWarnings(CATCHES_ANYTHING)
     // Total on purpose, and it is the outermost of the two. What it protects against is precisely
     // the failure nothing anticipated: a narrower catch here would be a list of the ways the gate
     // has failed so far, and the delivery would be lost to the first way it had not.
@@ -284,7 +323,7 @@ public class YotResultsDistributionMessageListener {
      * <p>Nothing escapes: a decision is the only thing this method can produce, which is what makes
      * the settlement below unconditional.
      */
-    @SuppressWarnings("PMD.AvoidCatchingGenericException")
+    @SuppressWarnings(CATCHES_ANYTHING)
     // Deliberate, and narrow: this is the boundary that owns the delivery's settlement. An exception
     // escaping here would leave the message locked with no settlement attempt — the silent loss the
     // whole design exists to prevent — so the catch is total and each branch still logs at ERROR and
@@ -446,9 +485,12 @@ public class YotResultsDistributionMessageListener {
      * pod's, which is the multi-node skew the data model's single-time-authority rule exists to
      * rule out, and a pod running ahead would skip settlements the broker was still willing to
      * accept, completed work included.
+     *
+     * <p>A hand-back is held first ({@link #holdBeforeHandingBack}), because the queue offers an
+     * abandoned message again at once and has no back-off of its own.
      */
-    private void settle(
-            final ServiceBusReceivedMessageContext context, final GuardDecision decision) {
+    private void settle(final ServiceBusReceivedMessageContext context,
+            final GuardDecision decision, final long received) {
         switch (decision) {
             case GuardDecision.Complete acknowledged -> {
                 if (accepted(SettlementOperation.COMPLETE, context::complete)) {
@@ -456,7 +498,8 @@ public class YotResultsDistributionMessageListener {
                 }
             }
             case GuardDecision.Abandon handedBack -> {
-                if (accepted(SettlementOperation.ABANDON, context::abandon)) {
+                holdBeforeHandingBack(context, handedBack.reason(), received);
+                if (acceptedSettingAnInterruptAside(context)) {
                     LOG.info("Delivery returned for redelivery. reason={}",
                             handedBack.reason().code());
                 }
@@ -493,6 +536,79 @@ public class YotResultsDistributionMessageListener {
         }
     }
 
+    /**
+     * Holds a delivery for its place in the back-off schedule before it is handed back
+     * (production-readiness audit F-04).
+     *
+     * <p>Without the hold the queue's five deliveries are spent in the seconds a downstream redeploy
+     * takes, and a request whose only fault was arriving during it is parked for a person to replay.
+     * Every hand-back is held - a transient failure, a claim another runner holds, a fault nothing
+     * anticipated - except a store outage: intake is already being asked to stop, the delivery was
+     * not examined, and a held callback would only delay the stop.
+     *
+     * <p>Not served on the final permitted delivery, which the broker parks as soon as it is handed
+     * back. The cost is deliberate and bounded: a held delivery holds one of the
+     * {@code max-concurrent-calls} callback slots, so two requests failing for reasons of their own
+     * slow the queue behind them by at most one hold each. A pod stopped mid-hold loses nothing - the
+     * run's state is already recorded and its claim released - and the lock lapses into the
+     * redelivery the abandon would have made.
+     *
+     * <p>Total, because what follows it is the settlement this delivery is owed: a hold that failed
+     * in a way nobody anticipated is reported by type and the delivery is handed back unheld, which
+     * is exactly what happened before the hold existed. The delivery count is read here rather than
+     * carried from the run because a hand-back can come from the gate, before any message was read.
+     */
+    @SuppressWarnings(CATCHES_ANYTHING)
+    // Total on purpose, as decisionFor is: the abandon below must be attempted whatever this throws,
+    // and a narrower catch would be a list of the ways a hold has failed so far.
+    private void holdBeforeHandingBack(final ServiceBusReceivedMessageContext context,
+            final ReasonCode reason, final long received) {
+        try {
+            if (reason != ReasonCode.STORE_UNAVAILABLE) {
+                hold(context.getMessage().getDeliveryCount(), reason, received);
+            }
+        } catch (RuntimeException holdFailed) {
+            LOG.error("The hold before the hand-back failed; handing the delivery back unheld. "
+                    + "type={} reason={}", holdFailed.getClass().getName(), reason.code());
+        }
+    }
+
+    /**
+     * The hand-back itself, made on a thread whose interrupt is set aside for the one call.
+     *
+     * <p>An interrupted hold puts the interrupt back on the thread, and the SDK settles through a
+     * blocking call that refuses an interrupted thread outright: the abandon would fail, be reported
+     * as the broker refusing a settlement, and move the queue's health on a local shutdown. The
+     * interrupt is therefore cleared for the call and restored after it, whatever the call did.
+     */
+    private boolean acceptedSettingAnInterruptAside(final ServiceBusReceivedMessageContext context) {
+        final boolean interrupted = Thread.interrupted();
+        try {
+            return accepted(SettlementOperation.ABANDON, context::abandon);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void hold(final long deliveryCount, final ReasonCode reason, final long received) {
+        // The final permitted delivery is parked by the broker the moment it is handed back, so a
+        // hold there delays the dead-letter and buys nothing.
+        final Duration delay = deliveryCount >= (long) maxDeliveryCount - 1
+                ? Duration.ZERO
+                : backoff.delayFor(deliveryCount, received);
+        if (!delay.isZero()) {
+            LOG.info("Holding the delivery before handing it back; the queue offers an abandoned "
+                            + "message again at once. reason={} deliveryCount={} backoff={}",
+                    reason.code(), deliveryCount, delay);
+            if (!backoff.hold(delay)) {
+                LOG.warn("The hold before the hand-back was interrupted; handing the delivery back "
+                        + "now. reason={}", reason.code());
+            }
+        }
+    }
+
     private static DeadLetterOptions optionsFor(final GuardDecision.DeadLetter parked) {
         return new DeadLetterOptions()
                 .setDeadLetterReason(parked.reason().label())
@@ -525,7 +641,7 @@ public class YotResultsDistributionMessageListener {
      * @param brokerCall the settlement call, and only the settlement call
      * @return whether the broker accepted it
      */
-    @SuppressWarnings("PMD.AvoidCatchingGenericException")
+    @SuppressWarnings(CATCHES_ANYTHING)
     // The SDK reports a refused settlement as a ServiceBusException, but the failure that matters
     // here is "the call did not happen", whatever type carried that news. A narrower catch would let
     // an unanticipated one escape with the delivery unaccounted for and no instrument describing it.

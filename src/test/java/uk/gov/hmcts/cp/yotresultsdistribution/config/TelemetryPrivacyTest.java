@@ -1382,6 +1382,26 @@ class TelemetryPrivacyTest {
         }
 
         /**
+         * The flag client is built with no retries, and azure-core's {@code RetryPolicy} then
+         * writes "Retry attempts have been exhausted" at INFO after <em>every</em> response, a
+         * {@code 200} included, because zero attempts left is exhausted by its arithmetic, and the
+         * recorded-flag renewal turns that into a steady stream of lines announcing a failure that
+         * did not happen. A failed attempt is still written: the policy writes its exception at
+         * ERROR, and the reader writes its own bounded WARN, once per decision. The level is the
+         * class's logger, so every azure-core HTTP pipeline in the JVM - the identity one included -
+         * loses its INFO retry lines with it; the comment beside the setting says what that costs.
+         */
+        @Test
+        @DisplayName("holds the SDK's retry policy at WARN, so a successful flag read is not a "
+                + "line claiming retries were exhausted")
+        void should_hold_the_sdk_retry_policy_at_warn() throws Exception {
+            final String logging = loggingSectionOf(Files.readString(
+                    Path.of("src", "main", "resources", "application.yaml")));
+
+            assertThat(logging).contains("com.azure.core.http.policy.RetryPolicy: WARN");
+        }
+
+        /**
          * The settings in the shipped {@code logging:} block, from its key to the end of the
          * document, with the comments taken out.
          *
@@ -1575,7 +1595,8 @@ class TelemetryPrivacyTest {
                 new YotResultsDistributionProperties.Intake(Duration.ofMinutes(10)),
                 new YotResultsDistributionProperties.Servicebus(
                         connectionString, null, "yotresultsdistribution.requests", 2, MAX_DELIVERY_COUNT,
-                        Duration.ofMinutes(5), Duration.ofSeconds(60)),
+                        Duration.ofMinutes(5), Duration.ofSeconds(60),
+                        List.of(Duration.ofSeconds(15))),
                 new YotResultsDistributionProperties.Claim(Duration.ofMinutes(5), RUN_DEADLINE),
                 new YotResultsDistributionProperties.Notification(Duration.ofMinutes(15)),
                 new YotResultsDistributionProperties.Store(Duration.ofSeconds(10)),

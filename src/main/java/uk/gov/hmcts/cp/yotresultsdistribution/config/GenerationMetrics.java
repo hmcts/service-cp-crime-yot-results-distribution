@@ -69,6 +69,8 @@ public class GenerationMetrics {
             "yotresultsdistribution_public_events_ignored_total";
     public static final String GENERATION_UNRECORDED =
             "yotresultsdistribution_generation_unrecorded_total";
+    public static final String GENERATION_REQUEST_UNFINISHED =
+            "yotresultsdistribution_generation_request_unfinished_total";
     public static final String BATCH_SWEEP_FAILURES =
             "yotresultsdistribution_batch_sweep_failures_total";
     public static final String OLDEST_RECORDED_UNBATCHED_AGE =
@@ -178,6 +180,18 @@ public class GenerationMetrics {
      * fact inside a notification series.
      */
     public static final String TERMINAL_BATCH = "terminal-batch";
+
+    /**
+     * The {@code reason} label of a document announced again for a batch still GENERATED whose
+     * hand-on to the notifier failed for a reason another delivery cannot clear.
+     *
+     * <p>A store outage is rethrown and the broker offers the event again; anything else would
+     * fail the same way on every delivery of a durable subscription, so the event is acknowledged
+     * and counted here. The batch stays GENERATED, where
+     * {@code yotresultsdistribution_oldest_generated_age}, the 07:00 report and an operator's
+     * {@code POST /operations/batches/{batchId}/notify} find it. Nought on a healthy estate.
+     */
+    public static final String NOTIFICATION_NOT_RETRIED = "notification-not-retried";
 
     /**
      * The {@code reason} label of a delivery whose body would not parse at all.
@@ -460,6 +474,14 @@ public class GenerationMetrics {
     }
 
     /**
+     * Counts a document announced again for a GENERATED batch that could not be handed to the
+     * notifier again and was acknowledged rather than offered for ever.
+     */
+    public void notificationNotRetried() {
+        counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, NOTIFICATION_NOT_RETRIED).increment();
+    }
+
+    /**
      * Counts a public event that reached this service's subscription and belongs to somebody else.
      *
      * <p>The topic is the estate's, and progression's still-deployed leg renders through the same
@@ -555,6 +577,19 @@ public class GenerationMetrics {
      */
     public void headerEnvelopeMismatchIgnored() {
         counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, HEADER_ENVELOPE_MISMATCH).increment();
+    }
+
+    /**
+     * Counts a batch whose request did not finish, which the run carried on past.
+     *
+     * <p>Defect fix P5: one court centre's trouble is not a night's, so a batch whose request
+     * throws - a store outage on one of its marks, or anything else - is left PENDING for the next
+     * run's stale-batch pass and the run goes on. The run line counts it among {@code pending};
+     * this is the reading an alert fires on: a night of these is a failing collaborator or a
+     * defect, not a deadline. A batch whose stamp was refused is not counted here.
+     */
+    public void generationRequestUnfinished() {
+        counter(GENERATION_REQUEST_UNFINISHED).increment();
     }
 
     /**

@@ -1,6 +1,7 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.config;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -89,6 +90,11 @@ public record YotResultsDistributionProperties(
      * @param maxAutoLockRenewDuration must outlive any legitimate run
      * @param healthStaleness          age past which an unresolved error with no traffic stops being
      *                                 reported as an outage
+     * @param redeliveryBackoff        how long a delivery is held before it is handed back, indexed
+     *                                 by the broker's zero-based delivery count (the last entry
+     *                                 serves every count beyond the list); the queue redelivers an
+     *                                 abandoned message at once, so without it a short downstream
+     *                                 outage spends the whole delivery budget in seconds
      */
     public record Servicebus(
             String connectionString,
@@ -97,7 +103,8 @@ public record YotResultsDistributionProperties(
             @DefaultValue("2") int maxConcurrentCalls,
             @DefaultValue("5") int maxDeliveryCount,
             @DefaultValue("5m") Duration maxAutoLockRenewDuration,
-            @DefaultValue("60s") Duration healthStaleness) {
+            @DefaultValue("60s") Duration healthStaleness,
+            @DefaultValue({"15s", "30s", "60s", "120s"}) List<Duration> redeliveryBackoff) {
     }
 
     /**

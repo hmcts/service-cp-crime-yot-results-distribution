@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.reset;
@@ -477,6 +478,7 @@ public final class GenerationLegs implements AutoCloseable {
         whateverItAnswers(job::run);
 
         aNightThatStoppedPartWay();
+        aNightOneOfWhoseRequestsDidNotFinish();
         aNightWhoseOwnBatchesCouldNotBeReadBack();
     }
 
@@ -497,6 +499,24 @@ public final class GenerationLegs implements AutoCloseable {
         when(store.batchesNamed(any())).thenThrow(new StoreUnavailableException(
                 "the store could not be reached to read a run's own batches back by identity",
                 new IllegalStateException("the connection pool is empty")));
+        whateverItAnswers(job::run);
+    }
+
+    /**
+     * The night one batch's request threw and the run carried on past it.
+     *
+     * <p>The store will not take the batch's payload id, so its request leaves through a throw; the
+     * run counts it, says so by class, and goes on (defect fix P5). The line names the batch and
+     * the class of what was raised - never the store's own words.
+     */
+    private void aNightOneOfWhoseRequestsDidNotFinish() {
+        readyToGenerate();
+        when(store.assemble(any(RegisterBatch.class), anyList())).thenReturn(pending());
+        when(store.batched(BATCH_ID)).thenReturn(List.of(register(List.of(recipient()))));
+        doThrow(new StoreUnavailableException(
+                "the store could not be reached to mint a batch's payload id",
+                new IllegalStateException("the connection pool is empty")))
+                .when(store).markPayloadMinted(any(), any());
         whateverItAnswers(job::run);
     }
 
@@ -585,6 +605,7 @@ public final class GenerationLegs implements AutoCloseable {
         aRenderNothingAnswered();
         aRenderThatWouldNotFitTheBudget();
         aRenderTheGeneratorAccepted();
+        aRenderWhoseOutcomeOvertookItsMark();
         aWaitBetweenAttemptsThatWasInterrupted();
     }
 
@@ -622,6 +643,23 @@ public final class GenerationLegs implements AutoCloseable {
     private void aRenderTheGeneratorAccepted() {
         aBatchOfOneRegister();
         renderCommandAnswering(HttpStatus.ACCEPTED.value());
+        whateverItAnswers(() -> generation.request(pending(), deadline(), RenderProgress.NONE));
+    }
+
+    /**
+     * The render whose document the listener applied before this leg could mark it requested.
+     *
+     * <p>The store refuses the mark, the leg reads the batch back and finds an outcome there, and
+     * says so in a line that names the batch and the state it stands at - both bounded.
+     */
+    private void aRenderWhoseOutcomeOvertookItsMark() {
+        aBatchOfOneRegister();
+        renderCommandAnswering(HttpStatus.ACCEPTED.value());
+        doThrow(new IllegalStateException("batch " + BATCH_ID
+                + " may not move from GENERATED to GENERATING"))
+                .when(store).markRequested(any(), any());
+        when(store.batchesNamed(any())).thenReturn(List.of(
+                batch(BatchStatus.GENERATED, UUID.randomUUID(), UUID.randomUUID())));
         whateverItAnswers(() -> generation.request(pending(), deadline(), RenderProgress.NONE));
     }
 
@@ -729,6 +767,7 @@ public final class GenerationLegs implements AutoCloseable {
         anOutcomeForABatchNothingHolds();
         anOutcomeAboutAnotherPayload();
         anOutcomeThatArrivedTwice();
+        aDocumentForABatchStillGenerated();
         anOutcomeTheStateMachineDoesNotDraw();
         anOutcomeThatClosesTheRoundTrip();
         anOutcomeWhoseRoundTripCouldNotBeRead();
@@ -751,6 +790,20 @@ public final class GenerationLegs implements AutoCloseable {
         holding(batch(BatchStatus.FAILED, PAYLOAD_FILE_ID, null));
         whateverItAnswers(() -> sink.generationFailed(BATCH_ID, PAYLOAD_FILE_ID,
                 PersonalDataMarkers.GENERATOR_REASON, AT, CompletedBy.EVENT));
+    }
+
+    /**
+     * A document announced again for a batch whose notification never finished: not re-stamped,
+     * handed on, and said in a line that names the batch and its state only - and, where the
+     * second hand-on fails in a way no redelivery clears, acknowledged with a WARN by class and a
+     * count under {@code notification-not-retried}.
+     */
+    private void aDocumentForABatchStillGenerated() {
+        holding(batch(BatchStatus.GENERATED, PAYLOAD_FILE_ID, DOCUMENT_FILE_ID));
+        when(batches.claimForNotification(any(UUID.class), any(UUID.class)))
+                .thenReturn(NotificationClaim.ABSENT);
+        whateverItAnswers(() -> sink.documentAvailable(BATCH_ID, PAYLOAD_FILE_ID,
+                DOCUMENT_FILE_ID, AT, CompletedBy.EVENT));
     }
 
     private void anOutcomeTheStateMachineDoesNotDraw() {
@@ -1201,7 +1254,7 @@ public final class GenerationLegs implements AutoCloseable {
 
     /** A file service that will not take the CSV, in its own words and with a cause of its own. */
     private void doRefuseTheText() {
-        org.mockito.Mockito.doThrow(new PayloadStoreUnavailableException(
+        doThrow(new PayloadStoreUnavailableException(
                         "the file service could not be reached to write the report's content row"))
                 .when(payloadFileStore).storeText(any(UUID.class), any(String.class),
                         any(uk.gov.hmcts.cp.yotresultsdistribution.application.PayloadMetadata.class));
@@ -1481,7 +1534,7 @@ public final class GenerationLegs implements AutoCloseable {
     }
 
     private void doRefuseThePayload() {
-        org.mockito.Mockito.doThrow(new PayloadStoreUnavailableException(
+        doThrow(new PayloadStoreUnavailableException(
                         "the file service could not be reached to write the payload's content row"))
                 .when(payloadFileStore).store(any(UUID.class),
                         any(tools.jackson.databind.JsonNode.class),
@@ -1489,7 +1542,7 @@ public final class GenerationLegs implements AutoCloseable {
     }
 
     private void doRefuseTheInsert() {
-        org.mockito.Mockito.doThrow(new StoreRefusedRowException(
+        doThrow(new StoreRefusedRowException(
                         "a notification row for this batch and address is already held"))
                 .when(notifications).insert(any(RegisterNotification.class));
     }

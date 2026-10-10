@@ -12,6 +12,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CompletedBy;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RegisterBatch;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException;
 import uk.gov.hmcts.cp.yotresultsdistribution.persistence.RegisterBatchRepository;
 
 /**
@@ -48,7 +49,8 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.RegisterBatchRepositor
  * naming a correlation no batch answers to is counted and ignored; an outcome whose payload is not
  * the one its batch was requested for is counted and ignored, because an event that contradicts
  * itself is the one shape that could complete the wrong batch; an outcome for a batch already
- * standing where it would put it has nothing left to record; and an outcome that would move a batch
+ * standing where it would put it has nothing left to record - except that a document for a batch
+ * still GENERATED is handed to the notifier again; and an outcome that would move a batch
  * along an arrow the data-model diagram does not draw - a document arriving for a batch the run
  * has already given up on and released, say - leaves that batch exactly where it is and is
  * reported
@@ -81,9 +83,17 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.RegisterBatchRepositor
  * document that exists and has been sent to nobody is the state defect fix P1 is about, and the
  * moment the batch has one is the moment its Youth Offending Teams can be told; so the GENERATED
  * mark and {@link RegisterNotifierService#notify} are one step of one code path. It follows the
- * mark rather than replacing it, so the compare-and-set is what decides that exactly one of two
- * racing deliveries goes on to send: a batch already standing at GENERATED is recognised above and
- * never notified twice.
+ * mark rather than replacing it, so the compare-and-set decides which of two racing deliveries
+ * stamps the batch.
+ *
+ * <p><strong>And a batch still standing at GENERATED is handed on again (P1, amended).</strong> The
+ * mark commits on its own transaction, so a notification that throws after it cannot be rolled
+ * back with the event: the broker offers the event again and finds the batch already GENERATED.
+ * A notification that finished moves the batch past GENERATED, so one still standing there may
+ * have teams nobody has told, and the redelivery hands it to the notifier rather than
+ * acknowledging it as already applied. One e-mail per team is the notifier's guarantee, not this
+ * class's: its claim admits one caller per batch, a recipient keeps the one row it was minted,
+ * and an ACCEPTED row is never asked for again.
  */
 public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
 
@@ -127,12 +137,19 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      * store writes {@code completed_by} in the statement that moves the batch, so there is no second
      * moment to write it in.
      *
-     * <p>And then the recipients are told, in the same step and on this thread. The mark is what
-     * decides whether the notification happens at all - it refuses where another mechanism has
-     * already moved the batch, and this never runs - so exactly one of two racing announcements
-     * sends the e-mails. The batch this answers with is the one the mark moved, and nothing at all
-     * where no mark was made, which is what makes the hand-on follow the decision rather than the
-     * arrival.
+     * <p>And then the recipients are told, in the same step and on this thread: after the mark,
+     * which refuses where another mechanism has already moved the batch, or - for a batch the
+     * announcement finds already GENERATED - instead of it, because a notification that finished
+     * would have moved the batch on (P1, amended). One e-mail per team is the notifier's
+     * guarantee in either case: its claim admits one caller per batch.
+     *
+     * <p><strong>The second hand-on is bounded.</strong> A failure on the first is rethrown and
+     * the broker offers the event again, which is the retry. A failure on the second is rethrown
+     * only where another delivery could clear it - a store outage; anything else would fail the
+     * same way on every delivery of a durable subscription and hold the pod's one consumer in a
+     * loop, so it is counted under {@code notification-not-retried}, said by class at WARN, and
+     * acknowledged. The batch stays GENERATED, where its age gauge, the morning report and an
+     * operator's resend find it.
      */
     @Override
     public void documentAvailable(final UUID correlationId, final UUID payloadFileId,
@@ -141,7 +158,44 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
         apply(correlationId, payloadFileId, BatchStatus.GENERATED,
                 batch -> store.markGenerated(batch.batchId(), documentFileId, generatedAt,
                         completedBy))
-                .ifPresent(generated -> notifier.notify(generated.batchId()));
+                .ifPresent(this::handOn);
+    }
+
+    /**
+     * Hands a batch with a document to the notifier: the first time after its mark, and again
+     * where the announcement found it already GENERATED.
+     *
+     * @param batch the batch as it stood when the announcement was applied
+     */
+    private void handOn(final RegisterBatch batch) {
+        if (batch.status() == BatchStatus.GENERATED) {
+            handOnAgain(batch.batchId());
+        } else {
+            notifier.notify(batch.batchId());
+        }
+    }
+
+    /**
+     * The second hand-on, which is the one bounded: see {@link #documentAvailable}.
+     *
+     * @param batchId the batch the announcement found already GENERATED
+     */
+    // PMD.AvoidCatchingGenericException: whatever the notifier raises other than a store outage
+    // is a failure no redelivery clears; a narrower catch would leave the classes it does not
+    // name looping on the subscription.
+    @SuppressWarnings("PMD.AvoidCatchingGenericException")
+    private void handOnAgain(final UUID batchId) {
+        try {
+            notifier.notify(batchId);
+        } catch (StoreUnavailableException outage) {
+            throw outage;
+        } catch (RuntimeException notTold) {
+            metrics.notificationNotRetried();
+            LOG.warn("Batch {} could not be handed to the notifier again and another delivery "
+                            + "would fail the same way, so the announcement is acknowledged and "
+                            + "the batch stays GENERATED for an operator's resend. cause={}",
+                    batchId, notTold.getClass().getName());
+        }
     }
 
     /**
@@ -175,15 +229,16 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      * a batch lives beside the method that received it and what an outcome has to survive to be
      * applied at all lives in exactly one place for both.
      *
-     * <p>What it answers is the batch the mark actually moved, so that a step which may only
-     * follow a mark - telling the recipients - is written where it cannot be reached any other way.
+     * <p>What it answers is the batch the mark actually moved, or a batch a document found already
+     * GENERATED, so that telling the recipients is written where it cannot be reached any other
+     * way.
      *
      * @param correlationId the batch identity the outcome named, which the contract allows to be
      *                      absent
      * @param payloadFileId the payload the outcome is about, which the contract requires
      * @param outcome       the state this outcome would put the batch in
      * @param mark          the store call that puts it there
-     * @return the batch this outcome moved, or empty where it moved none
+     * @return the batch this outcome moved or found still GENERATED, or empty
      */
     private Optional<RegisterBatch> apply(final UUID correlationId, final UUID payloadFileId,
             final BatchStatus outcome, final Consumer<RegisterBatch> mark) {
@@ -210,7 +265,8 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      * @param payloadFileId the payload the outcome is about
      * @param outcome       the state this outcome would put the batch in
      * @param mark          the store call that puts it there
-     * @return the batch this outcome moved, or empty where the two identifiers disagree
+     * @return the batch this outcome moved or found still GENERATED, or empty where the two
+     *         identifiers disagree
      */
     private Optional<RegisterBatch> applyToTheBatchItNamed(final RegisterBatch batch,
             final UUID payloadFileId, final BatchStatus outcome,
@@ -229,7 +285,9 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
     /**
      * What an outcome does to the batch it was attributed to: nothing, nothing, or the mark.
      *
-     * <p>The three branches in the order they are worth reading. A batch already standing where the
+     * <p>The branches in the order they are worth reading. A document for a batch already
+     * GENERATED is not re-stamped but is answered with the batch, so the caller hands it to the
+     * notifier again - see the class's note on why. Any other batch already standing where the
      * outcome would put it is the redelivery a durable subscription is for, and it is at DEBUG
      * because it is expected. A move the state machine does not draw is not: it is a late outcome
      * for a batch already ended - a document for one the run gave up on and released, or a second
@@ -252,19 +310,27 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      * and before whatever the caller does with the answer. The mark is what closes the round trip,
      * so the reading belongs to it: taken any later it would be lost whenever the step after it
      * threw, this batch standing where the outcome put it by then and every redelivery being
-     * recognised in the first branch rather than re-stamped. Taking it here costs nothing on the
-     * redelivery path, because that path is this method's first branch and marks nothing.
+     * answered without a re-stamp. Taking it here costs nothing on the redelivery path, because
+     * neither of the branches a redelivery reaches marks anything.
      *
      * @param batch   the batch the outcome was attributed to, as it stood when it was read
      * @param outcome the state this outcome would put it in
      * @param mark    the store call that puts it there
-     * @return the batch this outcome moved, or empty where it was left where it stood
+     * @return the batch this outcome moved or found still GENERATED, or empty where it was left
+     *         where it stood
      */
     private Optional<RegisterBatch> applyTo(final RegisterBatch batch, final BatchStatus outcome,
             final Consumer<RegisterBatch> mark) {
 
         final Optional<RegisterBatch> marked;
-        if (batch.status() == outcome) {
+        if (batch.status() == outcome && outcome == BatchStatus.GENERATED) {
+            // Not re-stamped, but handed on: a notification that finished moves the batch past
+            // GENERATED, so one still standing here may have teams nobody has told.
+            LOG.info("Batch {} already stands at {}, so it is not re-stamped; it is handed to the "
+                    + "notifier, which tells only the teams still owed an e-mail.",
+                    batch.batchId(), outcome);
+            marked = Optional.of(batch);
+        } else if (batch.status() == outcome) {
             countIfAlreadyEnded(batch);
             LOG.debug("Batch {} already stands at {}, so the outcome that has just arrived for it "
                     + "again is recognised rather than re-stamped.", batch.batchId(), outcome);
@@ -287,10 +353,10 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
     /**
      * Counts an outcome that arrived for a batch this service had already ended.
      *
-     * <p><strong>Ended, and not merely unmoved.</strong> Both branches above leave the batch where
-     * it stands, and only one of them is the drop FR-008 is about. A redelivered
-     * {@code document-available} for a batch standing at GENERATED is a batch mid-journey being
-     * told something it already knows - expected, at DEBUG, and nought to alert on. A batch in a
+     * <p><strong>Ended, and not merely unmoved.</strong> Both branches that call this leave the
+     * batch where it stands, and only an ended batch is the drop FR-008 is about. A batch
+     * mid-journey is not counted (a {@code document-available} for one still GENERATED does not
+     * reach here at all: it is handed to the notifier again). A batch in a
      * state the machine draws no move out of is the other thing: its night is over, its registers
      * are in tonight's batch if a run gave them back, and the outcome now arriving is exactly what
      * would otherwise send a Youth Offending Team a second register for one court centre and

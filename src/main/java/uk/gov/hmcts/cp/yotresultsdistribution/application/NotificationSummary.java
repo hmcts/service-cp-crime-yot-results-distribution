@@ -86,10 +86,9 @@ public record NotificationSummary(
      * <p>The tally is the rows as they stand and the state is where the batch stands, and neither
      * is a verdict: a settlement the store had no row for means one of this batch's recipients is
      * unaccounted for, so a tally over the rows that are left would settle the batch on an
-     * incomplete account of what was sent. The batch is therefore left where it is, and only an
-     * operator's explicit {@code notify-register --batch} resend recovers it: the outcome sink
-     * drives one notify call per transition into GENERATED and suppresses the callback for a batch
-     * already there, so nothing revisits it unasked. {@code yotresultsdistribution_oldest_generated_age}
+     * incomplete account of what was sent. The batch is therefore left where it is, and an
+     * operator's explicit {@code POST /operations/batches/{batchId}/notify} recovers it, as does a
+     * redelivered {@code document-available}, which hands a batch still GENERATED on again. {@code yotresultsdistribution_oldest_generated_age}
      * names such a batch and ages it; a reading settles nothing.
      *
      * @param accepted how many of the batch's rows stood accepted when the cycle stopped

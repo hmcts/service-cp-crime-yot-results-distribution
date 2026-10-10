@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import ch.qos.logback.classic.Level;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -178,6 +179,10 @@ class ConfigurationValidationTest {
                         .isEqualTo(Duration.ofMinutes(5));
                 assertThat(properties.servicebus().healthStaleness())
                         .isEqualTo(Duration.ofSeconds(60));
+                assertThat(properties.servicebus().redeliveryBackoff())
+                        .as("the queue redelivers an abandoned message at once; this is the only wait")
+                        .containsExactly(Duration.ofSeconds(15), Duration.ofSeconds(30),
+                                Duration.ofSeconds(60), Duration.ofSeconds(120));
 
                 assertThat(properties.claim().lease()).isEqualTo(Duration.ofMinutes(5));
                 assertThat(properties.claim().processingDeadline()).isEqualTo(Duration.ofMinutes(4));
@@ -408,6 +413,72 @@ class ConfigurationValidationTest {
                     "yotresultsdistribution.claim.processing-deadline=4m",
                     "yotresultsdistribution.servicebus.max-auto-lock-renew-duration=PT4M30S").run(context ->
                             assertThat(context).hasNotFailed());
+        }
+    }
+
+    /**
+     * The hold before a hand-back must be one the delivery's lock can survive (audit F-04).
+     */
+    @Nested
+    @DisplayName("the redelivery back-off must fit inside the lock renewal")
+    class RedeliveryBackoffAgainstLockRenewal {
+
+        @Test
+        void a_schedule_inside_the_renewal_should_start() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.redelivery-backoff=1s,PT4M30S").run(context -> {
+                        assertThat(context).hasNotFailed();
+                        assertThat(context.getBean(YotResultsDistributionProperties.class)
+                                .servicebus().redeliveryBackoff())
+                                .isEqualTo(List.of(Duration.ofSeconds(1), Duration.ofSeconds(270)));
+                    });
+        }
+
+        @Test
+        void an_entry_longer_than_the_renewal_less_the_margin_should_fail_startup() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.redelivery-backoff=15s,PT4M31S")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining("yotresultsdistribution.servicebus.redelivery-backoff")
+                                .hasMessageContaining(
+                                        "yotresultsdistribution.servicebus.max-auto-lock-renew-duration");
+                    });
+        }
+
+        @Test
+        void a_zero_entry_should_fail_startup() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.redelivery-backoff=15s,0s")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining("yotresultsdistribution.servicebus.redelivery-backoff");
+                    });
+        }
+
+        @Test
+        void a_negative_entry_should_fail_startup() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.redelivery-backoff=15s,-1s")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining("yotresultsdistribution.servicebus.redelivery-backoff");
+                    });
+        }
+
+        @Test
+        void an_empty_schedule_should_fail_startup() {
+            // Empty is the defect itself: every hand-back offered again at once.
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.redelivery-backoff=")
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining("yotresultsdistribution.servicebus.redelivery-backoff");
+                    });
         }
     }
 
