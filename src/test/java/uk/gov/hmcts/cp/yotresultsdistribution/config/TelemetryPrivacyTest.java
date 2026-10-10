@@ -1595,7 +1595,8 @@ class TelemetryPrivacyTest {
                 new YotResultsDistributionProperties.Intake(Duration.ofMinutes(10)),
                 new YotResultsDistributionProperties.Servicebus(
                         connectionString, null, "yotresultsdistribution.requests", 2, MAX_DELIVERY_COUNT,
-                        Duration.ofMinutes(5), Duration.ofSeconds(60)),
+                        Duration.ofMinutes(5), Duration.ofSeconds(60),
+                        List.of(Duration.ofSeconds(15))),
                 new YotResultsDistributionProperties.Claim(Duration.ofMinutes(5), RUN_DEADLINE),
                 new YotResultsDistributionProperties.Notification(Duration.ofMinutes(15)),
                 new YotResultsDistributionProperties.Store(Duration.ofSeconds(10)),

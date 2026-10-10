@@ -14,6 +14,7 @@ import com.azure.messaging.servicebus.models.SubQueue;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -107,6 +108,12 @@ class DeliveryExhaustionIT {
 
     private static final String DELIVERY_RECEIVED = "Delivery received.";
 
+    /**
+     * The hold before each hand-back, short enough to keep the suite quick and long enough to be
+     * told apart from the emulator's own redelivery, which offers an abandoned message again at once.
+     */
+    private static final Duration HOLD = Duration.ofSeconds(2);
+
     private static String connectionString;
 
     /**
@@ -137,6 +144,9 @@ class DeliveryExhaustionIT {
     /** The processed-log row as each run of this request saw it at the moment it started. */
     private final List<Row> runStartedWith = new CopyOnWriteArrayList<>();
 
+    /** When each run of this request started, on the monotonic clock. */
+    private final List<Long> runStartedAt = new CopyOnWriteArrayList<>();
+
     private CapturedLog deliveryLog;
 
     @DynamicPropertySource
@@ -146,6 +156,8 @@ class DeliveryExhaustionIT {
         registry.add("spring.datasource.username", PostgresTestSupport::username);
         registry.add("spring.datasource.password", PostgresTestSupport::password);
         registry.add("yotresultsdistribution.servicebus.connection-string", () -> connectionString);
+        registry.add("yotresultsdistribution.servicebus.redelivery-backoff",
+                () -> String.join(",", Collections.nCopies(4, HOLD.toString())));
         ServiceTestSupport.stubPayloadSource(registry);
         registry.add("yotresultsdistribution.progression.system-user-id",
                 () -> ServiceTestSupport.SYSTEM_USER_ID);
@@ -176,6 +188,7 @@ class DeliveryExhaustionIT {
     private JsonNode payloadFor(final InvocationOnMock invocation) {
         final DistributionCommand command = invocation.getArgument(0);
         if (requestId.equals(command.requestId())) {
+            runStartedAt.add(System.nanoTime());
             runStartedWith.add(
                     ProcessedLogTestSupport.requireRow(ProcessedLogTestSupport.SOURCE, requestId));
             if (!payloadAvailable.get()) {
@@ -267,6 +280,7 @@ class DeliveryExhaustionIT {
                 .peekFor(exhausting, SubQueue.DEAD_LETTER_QUEUE).isPresent());
 
         assertEveryFailedDeliveryWasRecorded();
+        assertEveryHandBackWasHeld();
         assertTheFifthDeliveryParkedTheRequest(exhausting);
         assertTheMessageWasParkedByThisService(exhausting);
 
@@ -278,6 +292,23 @@ class DeliveryExhaustionIT {
         assertThat(signals().minus(before))
                 .as("every failed run counted, one request parked, one dead-letter performed")
                 .isEqualTo(new Signals(PERMITTED_DELIVERIES, 1, 1));
+    }
+
+    /**
+     * No redelivery started sooner than the hold after the one before it (audit F-04).
+     *
+     * <p>A lower bound only: the broker round trip and the run itself add to every gap, and none of
+     * that is this assertion's business. Without the hold, five deliveries of a run this cheap are
+     * spent inside a second, which is how a fifteen-second downstream blip parked every request
+     * that arrived during it.
+     */
+    private void assertEveryHandBackWasHeld() {
+        assertThat(runStartedAt).hasSize(PERMITTED_DELIVERIES);
+        for (int run = 1; run < PERMITTED_DELIVERIES; run++) {
+            assertThat(Duration.ofNanos(runStartedAt.get(run) - runStartedAt.get(run - 1)))
+                    .as("run %d started at least the hold after run %d", run + 1, run)
+                    .isGreaterThanOrEqualTo(HOLD);
+        }
     }
 
     /**

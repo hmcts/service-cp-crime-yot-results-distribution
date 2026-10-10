@@ -96,6 +96,9 @@ public class YotResultsDistributionMessageListener {
      */
     private final RecordedFlagStateSource flagStates;
 
+    /** How long a delivery is held before it is handed back to a queue that has no back-off. */
+    private final RedeliveryBackoff backoff;
+
     /**
      * Creates the listener for a pod that reads no cutover flag.
      *
@@ -139,6 +142,32 @@ public class YotResultsDistributionMessageListener {
             final StoreGate storeGate,
             final int maxDeliveryCount,
             final RecordedFlagStateSource flagStates) {
+        this(parser, pipeline, metrics, health, storeGate, maxDeliveryCount, flagStates,
+                RedeliveryBackoff.NONE);
+    }
+
+    /**
+     * Creates the listener with the hold it serves before every hand-back it may delay.
+     *
+     * @param parser           reads the body into the validated command
+     * @param pipeline         the use case every valid request is run through
+     * @param metrics          the instrument surface settlements are counted on
+     * @param health           where a refused or accepted settlement is reported as transport news
+     * @param storeGate        the processed-log precondition every delivery passes through
+     * @param maxDeliveryCount the queue's own delivery budget, mirrored in configuration
+     * @param flagStates       what an arriving command is labelled with, or {@code null} where this
+     *                         deployment has no flag reader to label it from
+     * @param backoff          how long a delivery is held before it is handed back
+     */
+    public YotResultsDistributionMessageListener(
+            final DistributionCommandParser parser,
+            final DistributionPipeline pipeline,
+            final ProcessingMetrics metrics,
+            final ServiceBusHealthIndicator health,
+            final StoreGate storeGate,
+            final int maxDeliveryCount,
+            final RecordedFlagStateSource flagStates,
+            final RedeliveryBackoff backoff) {
         this.parser = parser;
         this.pipeline = pipeline;
         this.metrics = metrics;
@@ -146,6 +175,7 @@ public class YotResultsDistributionMessageListener {
         this.storeGate = storeGate;
         this.maxDeliveryCount = maxDeliveryCount;
         this.flagStates = flagStates;
+        this.backoff = backoff;
     }
 
     /**

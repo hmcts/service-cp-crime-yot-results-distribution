@@ -63,6 +63,16 @@ public final class ServiceTestSupport {
     /** The share instant every body published here carries, unless a suite names its own. */
     public static final Instant SHARED_TIME = Instant.parse("2026-08-31T08:00:00Z");
 
+    /** The setting that holds a delivery before every hand-back (audit F-04). */
+    public static final String REDELIVERY_BACKOFF = "yotresultsdistribution.servicebus.redelivery-backoff";
+
+    /**
+     * A hold short enough for a suite to spend all five deliveries inside its patience. The
+     * deployed 225s of hold is what these suites would otherwise wait out; that the hold is served
+     * at all is pinned by {@code DeliveryExhaustionIT}, and its length by unit tests.
+     */
+    public static final String SHORT_REDELIVERY_BACKOFF = "100ms";
+
     private ServiceTestSupport() {
         // Static fixture holder.
     }
@@ -147,6 +157,7 @@ public final class ServiceTestSupport {
         properties.put("spring.datasource.hikari.data-source-properties.socketTimeout", "5");
         properties.put("yotresultsdistribution.servicebus.connection-string",
                 ServiceBusEmulatorTestSupport.connectionString());
+        properties.put(REDELIVERY_BACKOFF, SHORT_REDELIVERY_BACKOFF);
         // The stub payload source. What these suites are about is settlement, the processed log and
         // health, none of which the payload participates in — so standing a cache and an HTTP stub
         // up for them would make what they prove depend on infrastructure their scenarios never
