@@ -83,7 +83,20 @@ public final class RedeliveryBackoff {
      * @return how long to wait; zero where the schedule is empty or the renewal is spent
      */
     public Duration delayFor(final long deliveryCount, final long startedAt) {
-        return Duration.ZERO;
+        Duration delay = Duration.ZERO;
+        if (!schedule.isEmpty()) {
+            final int last = schedule.size() - 1;
+            final Duration scheduled =
+                    schedule.get((int) Math.min(Math.max(deliveryCount, 0L), last));
+            final Duration headroom = lockRenewal
+                    // What the settlement after the hold needs: the margin startup already
+                    // reserves between the run deadline and the renewal.
+                    .minus(PropertiesValidator.RENEWAL_MARGIN)
+                    .minus(Duration.ofNanos(nanoTime.getAsLong() - startedAt));
+            final Duration bounded = scheduled.compareTo(headroom) <= 0 ? scheduled : headroom;
+            delay = bounded.isNegative() ? Duration.ZERO : bounded;
+        }
+        return delay;
     }
 
     /**
@@ -96,7 +109,14 @@ public final class RedeliveryBackoff {
      * @return whether the wait was served rather than interrupted
      */
     public boolean hold(final Duration delay) {
-        return true;
+        boolean served = true;
+        try {
+            pause.pause(delay);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            served = false;
+        }
+        return served;
     }
 
     /**

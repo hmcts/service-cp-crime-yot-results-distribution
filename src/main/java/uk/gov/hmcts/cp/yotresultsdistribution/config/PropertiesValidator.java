@@ -136,6 +136,8 @@ public class PropertiesValidator implements InitializingBean {
     private static final String PROCESSING_DEADLINE = "yotresultsdistribution.claim.processing-deadline";
     private static final String RENEW_DURATION =
             "yotresultsdistribution.servicebus.max-auto-lock-renew-duration";
+    private static final String REDELIVERY_BACKOFF =
+            "yotresultsdistribution.servicebus.redelivery-backoff";
     private static final String CONNECTION_STRING = "yotresultsdistribution.servicebus.connection-string";
     private static final String NAMESPACE = "yotresultsdistribution.servicebus.namespace";
     private static final String PAYLOAD = "yotresultsdistribution.payload";
@@ -657,6 +659,7 @@ public class PropertiesValidator implements InitializingBean {
     public static void validate(final YotResultsDistributionProperties properties) {
         validateRunFinishesBeforeTheClaimExpires(properties);
         validateLockOutlivesTheRun(properties);
+        validateEveryHandBackHoldFitsTheLock(properties);
         validateExactlyOneCredentialSource(properties);
         validateThePayloadSourceCanFetch(properties);
         validateTheSubscriptionsSourceCanFetch(properties);
@@ -703,6 +706,41 @@ public class PropertiesValidator implements InitializingBean {
                     RENEW_DURATION + " (" + renewal + MUST_BE_AT_LEAST + PROCESSING_DEADLINE
                             + " plus the " + RENEWAL_MARGIN + " renewal margin (" + required
                             + "), so the broker lock outlives any legitimate run");
+        }
+    }
+
+    /**
+     * The hold before a hand-back must exist, and must be one the delivery's lock can survive.
+     *
+     * <p>Empty is refused rather than read as "no back-off": an empty schedule is production-readiness
+     * audit F-04 itself, every hand-back offered again at once and a short downstream outage spending
+     * the whole delivery budget. An entry longer than the renewal less its margin can never be served
+     * in full - the listener cuts it to what the lock has left - so it is a value that cannot mean
+     * what it says.
+     */
+    private static void validateEveryHandBackHoldFitsTheLock(
+            final YotResultsDistributionProperties properties) {
+        final List<Duration> schedule = properties.servicebus().redeliveryBackoff();
+        if (schedule == null || schedule.isEmpty()) {
+            throw new IllegalStateException(
+                    REDELIVERY_BACKOFF + " must name at least one wait - the queue offers an"
+                            + " abandoned message again at once, so without one a short downstream"
+                            + " outage spends every delivery in seconds");
+        }
+        final Duration ceiling =
+                properties.servicebus().maxAutoLockRenewDuration().minus(RENEWAL_MARGIN);
+        for (final Duration hold : schedule) {
+            if (hold.isZero() || hold.isNegative()) {
+                throw new IllegalStateException(
+                        REDELIVERY_BACKOFF + " (" + hold + ") must be positive - a hold of nothing"
+                                + " is a hand-back the queue offers again at once");
+            }
+            if (hold.compareTo(ceiling) > 0) {
+                throw new IllegalStateException(
+                        REDELIVERY_BACKOFF + " (" + hold + ") must be at most " + RENEW_DURATION
+                                + " less the " + RENEWAL_MARGIN + " renewal margin (" + ceiling
+                                + "), so a held delivery keeps its lock for the hand-back");
+            }
         }
     }
 

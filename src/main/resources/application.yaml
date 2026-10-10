@@ -101,6 +101,13 @@ yotresultsdistribution:
     # Must be at least the processing deadline plus the fixed 30s renewal margin, so the broker lock
     # always outlives a legitimate run. Validated at startup.
     max-auto-lock-renew-duration: 5m
+    # How long a delivery is held before it is handed back, indexed by the broker's zero-based
+    # delivery count; the last entry serves every count beyond the list. The queue has no back-off
+    # of its own - an abandoned message is offered again at once - so without this a 15s downstream
+    # redeploy spends all five deliveries and parks the request. 225s across four hand-backs. Each
+    # entry must be positive and at most max-auto-lock-renew-duration less 30s; the listener also
+    # cuts a hold to what the lock has left after the run. Validated at startup.
+    redelivery-backoff: 15s,30s,60s,120s
     # An unresolved connection error older than this, with no traffic since, stops being reported as
     # an outage: an idle queue produces no traffic, and absence of traffic is not a failure.
     health-staleness: 60s
