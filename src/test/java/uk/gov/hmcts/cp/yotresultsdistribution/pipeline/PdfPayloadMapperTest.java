@@ -434,6 +434,28 @@ class PdfPayloadMapperTest {
         }
 
         @Test
+        @DisplayName("an optional defence counsel name does not prevent the batch rendering")
+        void a_missing_defence_counsel_name_preserves_the_rest_of_the_batch() {
+            final ObjectNode batch = (ObjectNode) inputFor(BASE);
+            final ArrayNode requests = (ArrayNode) batch.get(REQUESTS);
+            requests.add(documentFor(BASE));
+            final ObjectNode firstCounsel = (ObjectNode) requests.get(0)
+                    .at("/defendants/0/defenceCounsels/0");
+            firstCounsel.remove("name");
+
+            final JsonNode payload = mapper.mapPayload(batch);
+
+            assertThat(payload.at("/cases")).hasSize(4);
+            assertThat(text(payload.at("/cases/0/defenceCounselName"))).isEmpty();
+            assertThat(text(payload.at("/cases/0/defenceCounselStatus")))
+                    .isEqualTo("Junior QC");
+            assertThat(text(payload.at("/cases/2/defenceCounselName")))
+                    .isEqualTo("James Benjamin Simpson");
+            assertThat(text(payload.at("/cases/3/prosecutionCounselName")))
+                    .isEqualTo("David Kieran Walsh");
+        }
+
+        @Test
         @DisplayName("are dashes where nobody appeared for that side")
         void an_absent_counsel_is_a_dash_on_both_fields() {
             // :204-206 and :217-219. The prosecution case in the base register has no prosecution
