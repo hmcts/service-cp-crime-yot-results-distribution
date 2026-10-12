@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.ConcurrencyFailureException;
 import uk.gov.hmcts.cp.yotresultsdistribution.config.GenerationMetrics;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
@@ -145,11 +146,11 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      *
      * <p><strong>The second hand-on is bounded.</strong> A failure on the first is rethrown and
      * the broker offers the event again, which is the retry. A failure on the second is rethrown
-     * only where another delivery could clear it - a store outage; anything else would fail the
-     * same way on every delivery of a durable subscription and hold the pod's one consumer in a
-     * loop, so it is counted under {@code notification-not-retried}, said by class at WARN, and
-     * acknowledged. The batch stays GENERATED, where its age gauge, the morning report and an
-     * operator's resend find it.
+     * only where another delivery could clear it - a store outage or transient contention;
+     * anything else would fail the same way on every delivery of a durable subscription and hold
+     * the pod's one consumer in a loop, so it is counted under {@code notification-not-retried},
+     * said by class at WARN, and acknowledged. The batch stays GENERATED, where its age gauge, the
+     * morning report and an operator's resend find it.
      */
     @Override
     public void documentAvailable(final UUID correlationId, final UUID payloadFileId,
@@ -181,14 +182,14 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
      * @param batchId the batch the announcement found already GENERATED
      */
     // PMD.AvoidCatchingGenericException: whatever the notifier raises other than a store outage
-    // is a failure no redelivery clears; a narrower catch would leave the classes it does not
-    // name looping on the subscription.
+    // or transient contention is a failure no redelivery clears; a narrower catch would leave
+    // the classes it does not name looping on the subscription.
     @SuppressWarnings("PMD.AvoidCatchingGenericException")
     private void handOnAgain(final UUID batchId) {
         try {
             notifier.notify(batchId);
-        } catch (StoreUnavailableException outage) {
-            throw outage;
+        } catch (StoreUnavailableException | ConcurrencyFailureException retryable) {
+            throw retryable;
         } catch (RuntimeException notTold) {
             metrics.notificationNotRetried();
             LOG.warn("Batch {} could not be handed to the notifier again and another delivery "
