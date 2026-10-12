@@ -33,6 +33,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.ConcurrencyFailureException;
 import uk.gov.hmcts.cp.yotresultsdistribution.config.GenerationMetrics;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
@@ -884,6 +886,25 @@ class DocumentOutcomeSinkTest {
                             CompletedBy.EVENT))
                     .as("an outage clears, so the broker offering the event again is the retry")
                     .isInstanceOf(StoreUnavailableException.class);
+        }
+
+        @Test
+        void transient_contention_handing_a_generated_batch_on_again_should_be_offered_again() {
+            final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
+            final ConcurrencyFailureException contention =
+                    new CannotAcquireLockException("two writers met on one row");
+            when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            doThrow(contention).doReturn(null).when(notifier).notify(batch.batchId());
+
+            softly.assertThatThrownBy(() -> sink.documentAvailable(batch.batchId(),
+                            batch.payloadFileId(), DOCUMENT_FILE_ID, GENERATED_AT,
+                            CompletedBy.EVENT))
+                    .as("contention clears, so the broker must offer the event again")
+                    .isSameAs(contention);
+            documentAvailable(batch.batchId(), batch.payloadFileId(), CompletedBy.EVENT);
+
+            told("the redelivery hands the still-GENERATED batch to the notifier again",
+                    () -> verify(notifier, times(2)).notify(batch.batchId()));
         }
 
         @Test
