@@ -22,8 +22,8 @@ import tools.jackson.databind.node.ObjectNode;
  * <p>A Java to Java port of {@code PROG CourtRegisterPdfPayloadGenerator} (364 lines):
  * the same helpers in the same order, the same DASH fallbacks, the same date formats, and C24's
  * {@code ####} sentinel substituted for a newline where progression substitutes it. The port uses
- * a Jackson tree in place of {@code javax.json} and accepts an absent defence counsel status,
- * which the document contract permits but progression's strict read throws on. The signature stays
+ * a Jackson tree in place of {@code javax.json} and accepts absent defence counsel names and statuses,
+ * which the document contract permits but progression's strict reads throw on. The signature stays
  * tree in and tree out because the generator read the raw document.
  *
  * <p>The comparison is the point. Every golden under
@@ -49,8 +49,8 @@ import tools.jackson.databind.node.ObjectNode;
  * String, String)}, {@link #getString(JsonNode, String)}, {@link #getJsonObject} and
  * {@link #getJsonArray} are those four rules over a Jackson tree, so a line of the port reads as the
  * line of the generator it stands for. The types the strict readers throw are Jackson's rather than
- * {@code javax.json}'s. Other than the optional defence counsel status, which defaults to an empty
- * string, the same documents throw at the same reads; invalid documents cannot reach this mapper
+ * {@code javax.json}'s. Other than optional defence counsel names and statuses, which default to
+ * empty strings, the same documents throw at the same reads; invalid documents cannot reach this mapper
  * because the contract validator refuses them at the write (see
  * {@code goldens/progression/PROVENANCE.md}, "The 52 refusals").
  */
@@ -393,7 +393,7 @@ public class PdfPayloadMapper {
         if (containsKey(defendant, "defenceCounsels")) {
             final JsonNode defenceCounsels = getJsonArray(defendant, "defenceCounsels");
             caseJson.put("defenceCounselName", defenceCounsels.valueStream()
-                    .map(r -> getString(r, NAME))
+                    .map(r -> getString(r, NAME, ""))
                     .collect(Collectors.joining(SEPARATOR)));
             caseJson.put("defenceCounselStatus", defenceCounsels.valueStream()
                     .map(r -> getString(r, "status", ""))
