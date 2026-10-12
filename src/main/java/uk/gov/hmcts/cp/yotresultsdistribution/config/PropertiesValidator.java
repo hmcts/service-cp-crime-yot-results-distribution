@@ -228,9 +228,16 @@ public class PropertiesValidator implements InitializingBean {
      * configuration an operator may turn on or off, they are secure by default in
      * {@code application.yaml}, and constitution 5.0.0 withdrew the refusal that tied them to
      * {@code yotresultsdistribution.operations.enabled} on a deployed pod. What is left below is about a
-     * <em>value</em> that cannot mean what it says.
+     * <em>value</em> that cannot mean what it says - and {@link #validateAuthzEnabledIsNotAMisleadingSpelling}
+     * is exactly that rule applied to {@code authz.http.enabled} itself, below.
      */
     private static final String HTTP_AUDIT_ENABLED = "audit.http.enabled";
+
+    /**
+     * The authorisation library's own key, read for its value's shape rather than as a condition of
+     * starting - see {@link #validateAuthzEnabledIsNotAMisleadingSpelling}.
+     */
+    private static final String HTTP_AUTHZ_ENABLED = "authz.http.enabled";
     private static final String OPENAPI_REST_SPEC = "audit.http.openapi-rest-spec";
     private static final String AUDIT_TRANSPORT_ENABLED = "cp.audit.enabled";
     private static final String AUDIT_HOSTS = "cp.audit.hosts";
@@ -418,11 +425,49 @@ public class PropertiesValidator implements InitializingBean {
      */
     /* default */ static void validateOperations(final OperationsProperties operations,
                                                  final Environment environment) {
+        validateAuthzEnabledIsNotAMisleadingSpelling(environment);
         validateTheAuditTransportNamesSomewhereToPublish(environment);
         validateTheAuditFilterHasADocumentToRead(environment);
         validateTheSupersedeBoundAdmitsSomething(operations);
         validateTheLockAttemptIsSomethingAThreadCanMake(operations);
         sayWhereNothingIsPublished(environment);
+    }
+
+    /**
+     * Refuses a value for {@code authz.http.enabled} that would be read as switched off by the
+     * authorisation library's own literal-string comparison, while reading as switched on to a
+     * human, to an IaC template, or to Spring's own wider boolean conversion.
+     *
+     * <p>{@code cp-auth-rules-filter}'s {@code @ConditionalOnProperty} compares the raw value with
+     * {@code equalsIgnoreCase("true")} and nothing else. Spring's relaxed {@code Boolean} binding is
+     * wider - {@code yes}, {@code on}, {@code 1} and {@code y} all convert to {@code true} there -
+     * and the comparison is not trimmed either, so even a correct spelling with stray surrounding
+     * whitespace reads as off. A deployment or an IaC template that writes one of those spellings,
+     * believing authorisation is switched on, leaves the operations API's <strong>sole</strong>
+     * authorisation control silently off: no refusal, no log line, every {@code /operations/**}
+     * action reachable unauthorised. Every other setting on this service's surface fails closed or
+     * loud; this is the one place a typo is a silent full authorisation bypass, so it is refused
+     * here rather than only said, the way {@link #sayWhereNothingIsPublished} says the audit gap.
+     *
+     * <p>Left alone: an absent key (this service's own {@code application.yaml} default of
+     * {@code true}), and a value that is exactly {@code true} or {@code false}, in any case - which
+     * is everything the library itself would ever read as a deliberate choice.
+     *
+     * @param environment the resolved environment, for the authorisation library's own key
+     * @throws IllegalStateException if the value is set and is not exactly {@code true} or
+     *                                {@code false}, in any case
+     */
+    private static void validateAuthzEnabledIsNotAMisleadingSpelling(final Environment environment) {
+        final String value = environment.getProperty(HTTP_AUTHZ_ENABLED);
+        if (value == null || "true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) {
+            return;
+        }
+        throw new IllegalStateException(HTTP_AUTHZ_ENABLED + " must be \"true\" or \"false\" -"
+                + " the authorisation library reads only the literal string \"true\" as switched"
+                + " on and any other value as off. A deployment that wrote this believing"
+                + " authorisation was switched on"
+                + " would serve every /operations/** action with no check and no signal that it"
+                + " was misconfigured.");
     }
 
     /**

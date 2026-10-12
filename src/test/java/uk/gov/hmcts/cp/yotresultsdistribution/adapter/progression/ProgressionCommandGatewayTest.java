@@ -477,15 +477,16 @@ class ProgressionCommandGatewayTest {
         @Test
         @DisplayName("a dropped connection is retried because the outcome is unknown")
         void a_dropped_connection_is_retried_because_the_outcome_is_unknown() {
-            progression.stubFor(post(urlEqualTo(PATH)).inScenario("drops")
-                    .whenScenarioStateIs(Scenario.STARTED)
-                    .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER))
-                    .willSetStateTo("up"));
-            progression.stubFor(post(urlEqualTo(PATH)).inScenario("drops")
-                    .whenScenarioStateIs("up")
-                    .willReturn(aResponse().withStatus(ACCEPTED)));
+            progression.stubFor(post(urlEqualTo(PATH))
+                    .willReturn(aResponse().withFault(Fault.EMPTY_RESPONSE)));
+            final RetryPause recovering = duration -> {
+                pause.pause(duration);
+                progression.stubFor(post(urlEqualTo(PATH)).atPriority(1)
+                        .willReturn(aResponse().withStatus(ACCEPTED)));
+            };
 
-            assertThat(gateway().post(BODY, CallerIdentity.SYSTEM, farDeadline())).isEqualTo(ACCEPTED);
+            assertThat(gateway(MAX_ATTEMPTS, Map.of(), READ_TIMEOUT, recovering)
+                    .post(BODY, CallerIdentity.SYSTEM, farDeadline())).isEqualTo(ACCEPTED);
             assertThat(pause.waits).containsExactly(INITIAL_BACKOFF);
         }
 

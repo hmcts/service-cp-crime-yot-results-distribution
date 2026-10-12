@@ -180,19 +180,17 @@ public class PublicEventsConfig {
      * Says at ERROR that a delivery was rolled back, and is the reason the container does not say it
      * at WARN.
      *
-     * <p>The cause's type is named in the line and the throwable carries the stack: a store outage
-     * and a bug in the sink are the same sentence from here and different investigations, and the
-     * type is the only bounded thing that tells them apart. Nothing else is added - which batch this
-     * was about is on {@link DocumentEventListener}'s own line, where the identity is known, and no
-     * value here comes from a register (constitution Principle VII).
+     * <p>The cause's type is named in the line without attaching the throwable: its message and
+     * stack may quote a public event, register data or credentials from an underlying driver.
+     * A store outage and a bug in the sink remain distinguishable by the bounded type. The batch
+     * identity is on {@link DocumentEventListener}'s own line, where it is known.
      *
      * @param notApplied whatever the listener handed back, which is the sink's failure or the
      *                   container's own
      */
     private static void notApplied(final Throwable notApplied) {
         LOG.error("A public event was not applied, so the transacted session is rolled back and the "
-                + "broker offers the message again. cause={}", notApplied.getClass().getName(),
-                notApplied);
+                + "broker offers the message again. cause={}", notApplied.getClass().getName());
     }
 
     /**

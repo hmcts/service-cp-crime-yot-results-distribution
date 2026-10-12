@@ -20,6 +20,32 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.ProcessedRequestReposi
 /**
  * The processed log's state machine: what a delivery may do, and what a run may record.
  *
+ * <p><strong>In plain terms</strong>, this is the gatekeeper on {@code processed_request}. Every
+ * delivery asks it "may I run this?" through {@link #admit}, and every run tells it "this is how it
+ * went" through one of the four {@code record*} methods. Between them they make sure one
+ * {@code (source, requestId)} is processed once, whether the broker redelivers it, two pods receive
+ * it at the same moment, or a pod dies halfway through it. The row is the single source of truth,
+ * every write is made only on condition that this runner still owns the row, and every path ends in
+ * exactly one of four decisions:
+ *
+ * <pre>
+ *   admit
+ *     new request                      -&gt; Run         (inserted, claimed, attempts = 1)
+ *     same key, different request      -&gt; DeadLetter  (collision; the row is not touched)
+ *     COMPLETED                        -&gt; Complete    (acknowledged, nothing re-run)
+ *     FAILED, same messageId as parked -&gt; DeadLetter  (an earlier park that did not settle)
+ *     FAILED, fresh messageId          -&gt; Run         (a deliberate replay, audit note written)
+ *     RECEIVED / RETRYING, claim free  -&gt; Run         (the previous claim has expired)
+ *     RECEIVED / RETRYING, claim held  -&gt; Abandon     (another runner has it; broker retries)
+ *
+ *   record*  (only if this runner's claim is still the row's claim)
+ *     recordCompletion                 -&gt; Complete    (under one of the five reasons, fix C33)
+ *     recordTransientFailure           -&gt; Abandon     (RETRYING; the broker redelivers)
+ *     recordNonTransientFailure        -&gt; DeadLetter  (parked now; a retry cannot change it)
+ *     recordExhaustion                 -&gt; DeadLetter  (parked after the final delivery)
+ *     claim taken over while working   -&gt; Abandon     (result discarded, counted as stale)
+ * </pre>
+ *
  * <p>The guard decides; the listener settles and the pipeline runs. Every path returns one of four
  * decisions, so there is no way to fall off the end of a branch and leave a delivery neither run nor
  * settled — which is the silent loss this service exists to cure (constitution Principle VI).
@@ -30,14 +56,19 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.ProcessedRequestReposi
  *   <li><strong>The affected-row count is the decision.</strong> Each conditional statement is asked
  *       once and its answer is final. After a claim acquisition that affected nothing the delivery
  *       is handed back immediately — never re-read in a loop. Broker redelivery is the retry
- *       mechanism, and it already carries back-off and a delivery budget.</li>
+ *       mechanism, and it already carries back-off and a delivery budget. Put simply: a statement
+ *       that changed a row means this runner won; one that changed nothing means someone else
+ *       did.</li>
  *   <li><strong>Claim liveness is the database's decision, not this class's.</strong> The record's
  *       expiry is read only so a log line can mention it; whether the claim may be taken is settled
  *       inside the conditional update, comparing the stored expiry against the database's own
- *       {@code now()}. Nothing here compares a JVM clock reading against a stored timestamp.</li>
+ *       {@code now()}. Nothing here compares a JVM clock reading against a stored timestamp:
+ *       the pods' clocks can drift apart, and the database has only one.</li>
  *   <li><strong>A superseded runner writes nothing.</strong> Outcome writes are predicated on the
  *       owner and the token that acquired the claim, so a runner whose claim was reclaimed while it
- *       worked affects no rows; it discards its result rather than overwriting the new owner's.</li>
+ *       worked affects no rows; it discards its result rather than overwriting the new owner's.
+ *       If pod A's lease runs out and pod B takes the request over, A's late answer changes
+ *       nothing, and B's work stands.</li>
  * </ul>
  *
  * <p>Nothing logged here carries anything about a defendant. The correlation set is the request,

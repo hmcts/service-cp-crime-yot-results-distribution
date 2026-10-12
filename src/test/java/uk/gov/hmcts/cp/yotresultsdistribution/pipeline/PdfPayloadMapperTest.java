@@ -393,8 +393,7 @@ class PdfPayloadMapperTest {
         @DisplayName("are named and statused in the order the register carries them")
         void counsel_names_and_statuses_are_joined_in_the_order_they_arrived() {
             // :192-221. Names and statuses are collected in two passes over the same array, so the
-            // nth status belongs to the nth name and a counsel with one and not the other shifts
-            // the pairing rather than breaking it. Prosecution counsel is per case-or-application
+            // nth status belongs to the nth name. Prosecution counsel is per case-or-application
             // and defence counsel per defendant, which is why the two cases below differ in one
             // and not the other.
             final String twoCounsels = "mut__surviving-youth-defendant__duplicate-array-entry"
@@ -410,6 +409,28 @@ class PdfPayloadMapperTest {
             assertThat(valueAt(BASE, "/cases/1/prosecutionCounselName"))
                     .isEqualTo("David Kieran Walsh");
             assertThat(valueAt(BASE, "/cases/1/prosecutionCounselStatus")).isEqualTo("Leading QC");
+        }
+
+        @Test
+        @DisplayName("an optional defence counsel status does not prevent the batch rendering")
+        void a_missing_defence_counsel_status_preserves_the_rest_of_the_batch() {
+            final ObjectNode batch = (ObjectNode) inputFor(BASE);
+            final ArrayNode requests = (ArrayNode) batch.get(REQUESTS);
+            requests.add(documentFor(BASE));
+            final ObjectNode firstCounsel = (ObjectNode) requests.get(0)
+                    .at("/defendants/0/defenceCounsels/0");
+            firstCounsel.remove("status");
+
+            final JsonNode payload = mapper.mapPayload(batch);
+
+            assertThat(payload.at("/cases")).hasSize(4);
+            assertThat(text(payload.at("/cases/0/defenceCounselName")))
+                    .isEqualTo("James Benjamin Simpson");
+            assertThat(text(payload.at("/cases/0/defenceCounselStatus"))).isEmpty();
+            assertThat(text(payload.at("/cases/2/defenceCounselStatus")))
+                    .isEqualTo("Junior QC");
+            assertThat(text(payload.at("/cases/3/prosecutionCounselStatus")))
+                    .isEqualTo("Leading QC");
         }
 
         @Test
