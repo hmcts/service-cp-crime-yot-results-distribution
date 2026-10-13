@@ -805,6 +805,8 @@ class DocumentOutcomeSinkTest {
             when(batches.findById(batch.batchId()))
                     .thenReturn(Optional.of(batch))
                     .thenReturn(Optional.of(generated(batch, CompletedBy.EVENT)));
+            when(notifier.notify(batch.batchId()))
+                    .thenReturn(new NotificationSummary(1, 0, BatchStatus.NOTIFIED));
 
             documentAvailable(batch.batchId(), batch.payloadFileId(), CompletedBy.EVENT);
             documentAvailable(batch.batchId(), batch.payloadFileId(), CompletedBy.EVENT);
@@ -829,6 +831,8 @@ class DocumentOutcomeSinkTest {
         void a_document_available_for_a_batch_already_generated_should_hand_it_to_the_notifier() {
             final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
             when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            when(notifier.notify(batch.batchId()))
+                    .thenReturn(new NotificationSummary(1, 0, BatchStatus.NOTIFIED));
 
             documentAvailable(batch.batchId(), batch.payloadFileId(), CompletedBy.EVENT);
 
@@ -857,7 +861,7 @@ class DocumentOutcomeSinkTest {
                     .thenReturn(Optional.of(generated(batch, CompletedBy.EVENT)));
             doThrow(new StoreUnavailableException("the store could not be reached to claim a batch",
                     new IllegalStateException("the connection pool is empty")))
-                    .doReturn(null)
+                    .doReturn(new NotificationSummary(1, 0, BatchStatus.NOTIFIED))
                     .when(notifier).notify(batch.batchId());
 
             softly.assertThatThrownBy(() -> sink.documentAvailable(batch.batchId(),
@@ -894,7 +898,9 @@ class DocumentOutcomeSinkTest {
             final ConcurrencyFailureException contention =
                     new CannotAcquireLockException("two writers met on one row");
             when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
-            doThrow(contention).doReturn(null).when(notifier).notify(batch.batchId());
+            doThrow(contention)
+                    .doReturn(new NotificationSummary(1, 0, BatchStatus.NOTIFIED))
+                    .when(notifier).notify(batch.batchId());
 
             softly.assertThatThrownBy(() -> sink.documentAvailable(batch.batchId(),
                             batch.payloadFileId(), DOCUMENT_FILE_ID, GENERATED_AT,
@@ -926,6 +932,93 @@ class DocumentOutcomeSinkTest {
             softly.assertThat(ignored(GenerationMetrics.NOTIFICATION_NOT_RETRIED))
                     .as("an acknowledged-and-dropped path moves a counter under a bounded reason")
                     .isEqualTo(1);
+        }
+
+        /**
+         * The second hand-on's own cycle can answer without throwing: {@link
+         * NotificationDisposition#ALREADY_NOTIFYING}, {@link NotificationDisposition#CLAIM_LOST}
+         * and {@link NotificationDisposition#INCOMPLETE} are all ordinary returns, so a bare
+         * {@code notifier.notify(batchId)} statement would discard them in silence. Each is
+         * already counted and logged where the notifier decides it; what these three cases pin is
+         * that the sink's own account of the no-op moves a counter too, matching the class's own
+         * rule everywhere else an arriving announcement is applied to nothing.
+         */
+        @Test
+        void a_second_hand_on_already_notifying_should_still_move_a_counter() {
+            final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
+            when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            when(notifier.notify(batch.batchId())).thenReturn(
+                    NotificationSummary.alreadyNotifying(1, 0, BatchStatus.GENERATED));
+
+            try (CapturedLog log = CapturedLog.capturing(DocumentOutcomeSinkImpl.class)) {
+                softly.assertThatCode(() -> sink.documentAvailable(batch.batchId(),
+                                batch.payloadFileId(), DOCUMENT_FILE_ID, GENERATED_AT,
+                                CompletedBy.EVENT))
+                        .as("not a failure - another notifier holds the claim - so nothing is "
+                                + "thrown and the announcement is simply acknowledged")
+                        .doesNotThrowAnyException();
+                softly.assertThat(log.renderings())
+                        .as("and it is not dropped in silence: the batch is on the line")
+                        .anyMatch(line -> line.contains(batch.batchId().toString()));
+            }
+            softly.assertThat(ignored("already-notifying"))
+                    .as("a redelivery that found the batch already claimed moves this "
+                            + "subscription's own counter, not only the notifier's")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void a_second_hand_on_that_lost_the_claim_should_still_move_a_counter() {
+            final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
+            when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            when(notifier.notify(batch.batchId())).thenReturn(
+                    NotificationSummary.claimLost(1, 0, BatchStatus.GENERATED));
+
+            softly.assertThatCode(() -> sink.documentAvailable(batch.batchId(),
+                            batch.payloadFileId(), DOCUMENT_FILE_ID, GENERATED_AT,
+                            CompletedBy.EVENT))
+                    .as("not a failure - this call held the claim and lost it mid-cycle - so "
+                            + "nothing is thrown")
+                    .doesNotThrowAnyException();
+            softly.assertThat(ignored("claim-lost"))
+                    .as("a second hand-on that lost the claim moves this subscription's own "
+                            + "counter too")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void a_second_hand_on_that_could_not_be_accounted_for_should_still_move_a_counter() {
+            final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
+            when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            when(notifier.notify(batch.batchId())).thenReturn(
+                    NotificationSummary.incomplete(1, 0, BatchStatus.GENERATED));
+
+            softly.assertThatCode(() -> sink.documentAvailable(batch.batchId(),
+                            batch.payloadFileId(), DOCUMENT_FILE_ID, GENERATED_AT,
+                            CompletedBy.EVENT))
+                    .as("not a failure - the fault itself is reported where the notifier's write "
+                            + "meets it - so nothing is thrown")
+                    .doesNotThrowAnyException();
+            softly.assertThat(ignored("incomplete"))
+                    .as("a second hand-on that could not account for a recipient moves this "
+                            + "subscription's own counter too")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        void a_second_hand_on_that_settled_should_move_no_extra_counter() {
+            final RegisterBatch batch = generated(generating(MONDAY), CompletedBy.EVENT);
+            when(batches.findById(batch.batchId())).thenReturn(Optional.of(batch));
+            when(notifier.notify(batch.batchId()))
+                    .thenReturn(new NotificationSummary(1, 0, BatchStatus.NOTIFIED));
+
+            documentAvailable(batch.batchId(), batch.payloadFileId(), CompletedBy.EVENT);
+
+            softly.assertThat(ignored("already-notifying")).isEqualTo(ABSENT);
+            softly.assertThat(ignored("claim-lost")).isEqualTo(ABSENT);
+            softly.assertThat(ignored("incomplete"))
+                    .as("the ordinary answer settles the batch and moves nothing extra")
+                    .isEqualTo(ABSENT);
         }
 
         @ParameterizedTest

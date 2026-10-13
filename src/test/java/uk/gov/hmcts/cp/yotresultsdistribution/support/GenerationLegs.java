@@ -768,6 +768,7 @@ public final class GenerationLegs implements AutoCloseable {
         anOutcomeAboutAnotherPayload();
         anOutcomeThatArrivedTwice();
         aDocumentForABatchStillGenerated();
+        aSecondHandOnThatFoundAnotherNotifierHoldingTheClaim();
         anOutcomeTheStateMachineDoesNotDraw();
         anOutcomeThatClosesTheRoundTrip();
         anOutcomeWhoseRoundTripCouldNotBeRead();
@@ -804,6 +805,18 @@ public final class GenerationLegs implements AutoCloseable {
                 .thenReturn(NotificationClaim.ABSENT);
         whateverItAnswers(() -> sink.documentAvailable(BATCH_ID, PAYLOAD_FILE_ID,
                 DOCUMENT_FILE_ID, AT, CompletedBy.EVENT));
+    }
+
+    /**
+     * A document announced again for a batch still GENERATED whose second hand-on finds another
+     * notifier already holding the claim: not a failure, so nothing is thrown and the sink's own
+     * line and its own counter - not only the notifier's - are what carry it, named by the
+     * disposition's own bounded code and the batch alone.
+     */
+    private void aSecondHandOnThatFoundAnotherNotifierHoldingTheClaim() {
+        notifyingOne(NotificationClaim.ALREADY_CLAIMED, BatchStatus.GENERATED);
+        whateverItAnswers(() -> sink.documentAvailable(BATCH_ID, PAYLOAD_FILE_ID, DOCUMENT_FILE_ID,
+                AT, CompletedBy.EVENT));
     }
 
     private void anOutcomeTheStateMachineDoesNotDraw() {
