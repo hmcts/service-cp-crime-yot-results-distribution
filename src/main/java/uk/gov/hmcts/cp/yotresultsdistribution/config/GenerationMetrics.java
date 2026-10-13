@@ -599,13 +599,17 @@ public class GenerationMetrics {
     }
 
     /**
-     * Counts a batch whose request did not finish, which the run carried on past.
+     * Counts a batch whose request raised something no classified failure names, which the run
+     * carried on past.
      *
-     * <p>Defect fix P5: one court centre's trouble is not a night's, so a batch whose request
-     * throws - a store outage on one of its marks, or anything else - is left PENDING for the next
-     * run's stale-batch pass and the run goes on. The run line counts it among {@code pending};
-     * this is the reading an alert fires on: a night of these is a failing collaborator or a
-     * defect, not a deadline. A batch whose stamp was refused is not counted here.
+     * <p>Defect fix P5: one court centre's trouble is not a night's. The ordinary case fails the
+     * batch {@code REQUEST_UNFINISHED} and releases its registers on the same statement (fix 3,
+     * part 2 of the review of #31); only where that mark itself cannot be written is the batch left
+     * PENDING for a later run's stale-batch pass instead, exactly as every such batch was before
+     * that fix. Either way the run line counts it under the status it actually ended as; this
+     * counter is the reading an alert fires on regardless: a night of these is a failing
+     * collaborator or a defect, not a deadline. A batch whose stamp was refused before any request
+     * was made is not counted here.
      */
     public void generationRequestUnfinished() {
         counter(GENERATION_REQUEST_UNFINISHED).increment();
