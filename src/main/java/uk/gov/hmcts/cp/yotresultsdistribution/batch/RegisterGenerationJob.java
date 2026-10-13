@@ -36,6 +36,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.GateDecision.Skipped;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RegisterBatch;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RegisterRecord;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RunReport;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException;
 
 /**
  * The nightly run: flag, assemble, request, report.
@@ -363,8 +364,19 @@ public class RegisterGenerationJob {
      * tomorrow's run, which will find its registers active and unbatched, and a gauge that only
      * ever moved up would need a run to fail before it could come down again.
      *
+     * <p><strong>A store outage is counted before it is rethrown (fix 3, part 1).</strong> The
+     * batch {@link #requested} was asking about is still this run's own - its render may have been
+     * asked for, which {@link RunTally} already knows independently of how the call ended - so it
+     * is counted PENDING here, on the same line the stopped run still writes, before the run leaves
+     * through the one path that already reports and rethrows a store outage lost anywhere else in
+     * the night.
+     *
      * @param tally what the run has done, which is where each batch's state is counted
      */
+    // PMD.AvoidInstantiatingObjectsInLoops: the loop is the night's batches, not a hot path, and
+    // the allocation only happens on the one iteration whose store outage ends the run - every
+    // other night it never runs at all.
+    @SuppressWarnings("PMD.AvoidInstantiatingObjectsInLoops")
     private void request(final RunTally tally) {
         final Deadline deadline = Deadline.startingAt(clock.instant(), properties.runDeadline());
 
@@ -373,7 +385,13 @@ public class RegisterGenerationJob {
             if (deadline.hasPassedAt(clock.instant())) {
                 tally.noTimeLeftFor(registers);
             } else {
-                tally.ended(requested(assembled, deadline, tally), registers);
+                try {
+                    tally.ended(requested(assembled, deadline, tally), registers);
+                } catch (StoreUnavailableException outage) {
+                    tally.ended(new BatchOutcome(assembled.batch().batchId(), BatchStatus.PENDING,
+                            null, false), registers);
+                    throw outage;
+                }
             }
         }
     }
@@ -398,17 +416,22 @@ public class RegisterGenerationJob {
      * up in, so the batch is counted PENDING and the night carries on to the court centres behind
      * it. That isolation is defect fix P5's other half: one court centre's trouble is not a night's.
      *
-     * <p><strong>Nor does a batch whose request did not finish.</strong> The same rule, one step
-     * later and for anything the requesting leg throws: a store that will not take one of the
-     * batch's marks, a client that raises something nobody classified, a defect. The batch is
-     * counted PENDING, said at ERROR by class only, and counted on
+     * <p><strong>Nor does a batch whose request did not finish, for its own reasons.</strong> A
+     * client that raises something nobody classified, or a defect. The batch is counted PENDING,
+     * said at ERROR by class only, and counted on
      * {@code yotresultsdistribution_generation_request_unfinished_total}; its row is left where the
      * store holds it - PENDING or GENERATING, or wherever an outcome has since put it - and the
      * next run's stale-batch pass fails and releases whatever is still in flight, which is how its
      * registers are retried. Nothing is swallowed: the batch's ending is decided by that pass, and
-     * the counter is what an alert fires on. The one throw that is not a batch's is a shutdown: a
-     * request that fails on an interrupted thread ends the run, as any failure did before, because
-     * every batch behind it would fail the same way.
+     * the counter is what an alert fires on.
+     *
+     * <p><strong>Two throws are not a batch's at all, and both still end the run (fix 3, part
+     * 1).</strong> A shutdown - a request that fails on an interrupted thread - because every batch
+     * behind it would fail the same way and raise an alert each for a routine pod stop; and a
+     * {@link StoreUnavailableException} from either of the requesting leg's own marks, because with
+     * the store down every batch behind it would hit the same wall. A store outage swallowed here
+     * the same way a classified failure is would read as a night that finished while it counted one
+     * ERROR per remaining batch instead of the one the run itself already reports and rethrows.
      *
      * <p><strong>A batch whose render was asked for is counted where the call was made.</strong>
      * The requesting leg announces that to the tally as it makes the call, so a batch whose request
@@ -422,10 +445,10 @@ public class RegisterGenerationJob {
      * @return what this batch ended the requesting leg as, which for a batch that could not be
      *         written down, or whose request did not finish, is PENDING under no reason at all
      */
-    // PMD.AvoidCatchingGenericException: the stamp refuses through IllegalStateException, the
-    // requesting leg can throw anything its collaborators raise, and the store translates an
-    // outage into its own unchecked type; all of them mean the same thing here - this
-    // batch is left for the next run - and a narrower catch would leave one of them ending the run.
+    // PMD.AvoidCatchingGenericException: the stamp refuses through IllegalStateException and the
+    // requesting leg can throw anything its collaborators raise other than its own store outage,
+    // which is caught ahead of this one and rethrown; a narrower catch than RuntimeException here
+    // would leave one of the classified failures ending the run.
     // PMD.OnlyOneReturn: the three exits are the three things that can happen to a batch, and each
     // says so where it is decided; funnelling them through one would turn a verdict into a flag carried
     // past the call that must not be made once it exists.
@@ -443,6 +466,11 @@ public class RegisterGenerationJob {
         }
         try {
             return service.request(batch, deadline, progress);
+        } catch (StoreUnavailableException outage) {
+            // Not this batch's trouble: every batch behind it would hit the same store, so the
+            // run leaves through the one path that already reports and rethrows a store outage
+            // lost anywhere else in the night (fix 3, part 1).
+            throw outage;
         } catch (RuntimeException unfinished) {
             if (Thread.currentThread().isInterrupted()) {
                 // A shutdown, not this batch's trouble: every batch behind it would fail the same
