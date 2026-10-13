@@ -479,6 +479,7 @@ public final class GenerationLegs implements AutoCloseable {
 
         aNightThatStoppedPartWay();
         aNightOneOfWhoseRequestsDidNotFinish();
+        aNightOneOfWhoseRequestsCouldNotItselfBeFailed();
         aNightWhoseOwnBatchesCouldNotBeReadBack();
     }
 
@@ -508,8 +509,9 @@ public final class GenerationLegs implements AutoCloseable {
      *
      * <p>Not a store outage from one of the requesting leg's own marks - that ends the run instead
      * (fix 3, part 1) - but a defect nobody anticipated from the same call. The run counts it,
-     * says so by class, and goes on (defect fix P5). The line names the batch and the class of
-     * what was raised - never the words of whatever raised it.
+     * says so by class, fails the batch REQUEST_UNFINISHED and releases its registers on the same
+     * statement (fix 3, part 2), and goes on (defect fix P5). The line names the batch and the
+     * class of what was raised - never the words of whatever raised it.
      */
     private void aNightOneOfWhoseRequestsDidNotFinish() {
         readyToGenerate();
@@ -517,6 +519,24 @@ public final class GenerationLegs implements AutoCloseable {
         when(store.batched(BATCH_ID)).thenReturn(List.of(register(List.of(recipient()))));
         doThrow(new IllegalStateException("a defect nobody anticipated"))
                 .when(store).markPayloadMinted(any(), any());
+        whateverItAnswers(job::run);
+    }
+
+    /**
+     * The night a batch whose request did not finish could not itself be failed REQUEST_UNFINISHED
+     * either (fix 3, part 2): the race that only an outcome arriving at exactly the wrong moment
+     * could cause. The batch is left PENDING for a later run's stale-batch pass instead, exactly as
+     * every such batch was before fix 3's second part, and the WARN names the batch and the class
+     * of what refused the mark - never the words of whatever raised it.
+     */
+    private void aNightOneOfWhoseRequestsCouldNotItselfBeFailed() {
+        readyToGenerate();
+        when(store.assemble(any(RegisterBatch.class), anyList())).thenReturn(pending());
+        when(store.batched(BATCH_ID)).thenReturn(List.of(register(List.of(recipient()))));
+        doThrow(new IllegalStateException("a defect nobody anticipated"))
+                .when(store).markPayloadMinted(any(), any());
+        doThrow(new IllegalStateException("the batch moved again before this mark could land"))
+                .when(store).markFailed(any(), any(BatchFailureReason.class), any(), any());
         whateverItAnswers(job::run);
     }
 

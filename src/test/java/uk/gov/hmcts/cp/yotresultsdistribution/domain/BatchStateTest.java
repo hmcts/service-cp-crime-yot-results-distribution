@@ -332,7 +332,7 @@ class BatchStateTest {
         }
 
         /**
-         * Six reasons, each a different investigation. The renderer's own {@code reason} is not
+         * Seven reasons, each a different investigation. The renderer's own {@code reason} is not
          * one of them: it is another system's text about a document whose every defendant is a
          * child, and it is kept in {@code sdg_reason} where the batches counter cannot label a
          * series with it.
@@ -347,10 +347,12 @@ class BatchStateTest {
          * is what makes a migration that changes the vocabulary provably complete here, and it is
          * why this case goes red between a constant landing or leaving and its migration landing.
          * It is red for exactly that reason between the two constants being removed from the
-         * enumeration and V7 narrowing the constraint they are still admitted by.
+         * enumeration and V7 narrowing the constraint they are still admitted by, and again between
+         * {@code REQUEST_UNFINISHED} landing in the enumeration and V8 widening the constraint to
+         * admit it (review of #31, fix 3, part 2).
          */
         @Test
-        void the_failure_reasons_should_be_exactly_the_six_the_schema_enumerates()
+        void the_failure_reasons_should_be_exactly_the_seven_the_schema_enumerates()
                 throws IOException {
             assertThat(BatchFailureReason.values())
                     .extracting(Enum::name)
@@ -360,7 +362,8 @@ class BatchStateTest {
                             "RENDER_REQUEST_REJECTED",
                             "GENERATION_FAILED",
                             "ASSEMBLY_FAILED",
-                            "NOT_COMPLETED_BY_NEXT_RUN");
+                            "NOT_COMPLETED_BY_NEXT_RUN",
+                            "REQUEST_UNFINISHED");
             assertThat(schemaFailureReasons())
                     .as("the values register_batch_failure_reason_chk admits after every committed "
                             + "migration, against the constants that reach that column")

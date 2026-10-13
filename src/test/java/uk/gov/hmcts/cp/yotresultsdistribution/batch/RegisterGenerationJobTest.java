@@ -2301,10 +2301,12 @@ class RegisterGenerationJobTest {
      *
      * <p><strong>And what does not stop it (defect fix P5, amended).</strong> A batch whose own
      * request throws something nobody classified, or anything else that is not a store outage or a
-     * shutdown, is that batch's trouble and not the night's: it is counted PENDING, said at ERROR by
-     * class, counted on {@code yotresultsdistribution_generation_request_unfinished_total}, and left
-     * for the next run's stale-batch pass, while the run goes on to the court centres behind it. The
-     * cases below that arrange a request to throw assert exactly that.
+     * shutdown, is that batch's trouble and not the night's: it is said at ERROR by class, counted
+     * on {@code yotresultsdistribution_generation_request_unfinished_total}, and failed {@code
+     * REQUEST_UNFINISHED} with its registers released on the same statement (fix 3, part 2), while
+     * the run goes on to the court centres behind it - PENDING only where that mark itself could not
+     * be written, for a later run's stale-batch pass to find instead. The cases below that arrange a
+     * request to throw assert exactly that.
      *
      * <p><strong>And what does stop it even so (fix 3, part 1).</strong> A store outage on either
      * of the requesting leg's own marks is not isolated to its batch: every batch behind it would
@@ -2322,17 +2324,19 @@ class RegisterGenerationJobTest {
          * The line the mixed night writes when its second batch's request throws.
          *
          * <p>Defect fix P5: one court centre's trouble is not a night's. The batch whose request
-         * threw is counted PENDING - its row is left for the next run's stale-batch pass to fail and
-         * give back - and the night carries on to the third, whose stamp is refused and which is
-         * PENDING too. Every register the night read is in exactly one count, so the line still adds
-         * up; nothing was asked of the renderer for either PENDING batch.
+         * threw is failed {@code REQUEST_UNFINISHED} and its registers released on the same
+         * statement (fix 3, part 2) - the mock store takes the mark with no refusal of its own, so
+         * this is the ordinary case - while the night carries on to the third, whose stamp is
+         * refused and which stays PENDING, unaffected by either part of fix 3. Every register the
+         * night read is in exactly one count, so the line still adds up; nothing was asked of the
+         * renderer for either batch.
          */
         private static final String AS_FAR_AS_IT_GOT = RUN_EVENT
                 + NORMALISED_RUN_ID + THE_SCHEDULE_ASKED
-                + " gate=proceed reason=flag-on batches=3 requested=1 generating=1 failed=0"
-                + " pending=2 deferred=2 rows=" + THE_MIXED_NIGHTS_ROWS
+                + " gate=proceed reason=flag-on batches=3 requested=1 generating=1 failed=1"
+                + " pending=1 deferred=2 rows=" + THE_MIXED_NIGHTS_ROWS
                 + " rows_generating=" + GENERATING_ROWS
-                + " rows_failed=0 rows_pending=" + (FAILING_ROWS + UNSTAMPABLE_ROWS)
+                + " rows_failed=" + FAILING_ROWS + " rows_pending=" + UNSTAMPABLE_ROWS
                 + " rows_deferred=" + WAITING_ROWS
                 + NOTHING_SETTLED_YET
                 + " released_batches=" + RELEASED_BATCHES
@@ -2392,7 +2396,7 @@ class RegisterGenerationJobTest {
         }
 
         @Test
-        void a_batch_whose_request_threw_should_be_pending_and_the_night_should_carry_on() {
+        void a_batch_whose_request_threw_should_be_failed_and_the_night_should_carry_on() {
             aNightOneOfWhoseRequestsThrew();
 
             try (CapturedLog log = CapturedLog.capturing(RegisterGenerationJob.class)) {
@@ -2401,9 +2405,9 @@ class RegisterGenerationJobTest {
                         .isNull();
 
                 softly.assertThat(normalisedRunLines(log))
-                        .as("the batch that threw is pending for the next run, the night went on "
-                                + "to the batch behind it, and every register is still in exactly "
-                                + "one count")
+                        .as("the batch that threw is failed REQUEST_UNFINISHED and its registers "
+                                + "released (fix 3, part 2), the night went on to the batch behind "
+                                + "it, and every register is still in exactly one count")
                         .containsExactly(AS_FAR_AS_IT_GOT);
             }
         }
@@ -2424,8 +2428,9 @@ class RegisterGenerationJobTest {
             verify(service).request(eq(following), any(), any());
             softly.assertThat(reported(report, RunReport::outcomes))
                     .as("not only a store outage: any runtime failure of one batch's request is "
-                            + "that batch's, and the one behind it is asked for as usual")
-                    .isEqualTo(Map.of(BatchStatus.GENERATING, 1, BatchStatus.PENDING, 1));
+                            + "that batch's, failed REQUEST_UNFINISHED rather than ending the "
+                            + "night, and the one behind it is asked for as usual")
+                    .isEqualTo(Map.of(BatchStatus.GENERATING, 1, BatchStatus.FAILED, 1));
         }
 
         @Test
@@ -2493,8 +2498,9 @@ class RegisterGenerationJobTest {
          *
          * <p>{@code RunReport.Settled} documents that {@code notified <= generated <= generating}
          * is not an invariant, and this is the case it names: a batch whose render was accepted and
-         * whose request then threw is counted PENDING by the requesting leg, and the completion legs
-         * can still settle it before the line is written. Nothing asserted it,
+         * whose request then threw is failed REQUEST_UNFINISHED by the requesting leg (fix 3, part
+         * 2), and the completion legs can still settle it before the line is written. Nothing
+         * asserted it,
          * so the exception lived only in a javadoc - which is how a reader comes to write an alert
          * on the inequality, or to "fix" the code until it holds and take the divergence with it.
          *
