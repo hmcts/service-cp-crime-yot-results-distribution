@@ -503,19 +503,19 @@ public final class GenerationLegs implements AutoCloseable {
     }
 
     /**
-     * The night one batch's request threw and the run carried on past it.
+     * The night one batch's request threw something nobody classified, and the run carried on
+     * past it.
      *
-     * <p>The store will not take the batch's payload id, so its request leaves through a throw; the
-     * run counts it, says so by class, and goes on (defect fix P5). The line names the batch and
-     * the class of what was raised - never the store's own words.
+     * <p>Not a store outage from one of the requesting leg's own marks - that ends the run instead
+     * (fix 3, part 1) - but a defect nobody anticipated from the same call. The run counts it,
+     * says so by class, and goes on (defect fix P5). The line names the batch and the class of
+     * what was raised - never the words of whatever raised it.
      */
     private void aNightOneOfWhoseRequestsDidNotFinish() {
         readyToGenerate();
         when(store.assemble(any(RegisterBatch.class), anyList())).thenReturn(pending());
         when(store.batched(BATCH_ID)).thenReturn(List.of(register(List.of(recipient()))));
-        doThrow(new StoreUnavailableException(
-                "the store could not be reached to mint a batch's payload id",
-                new IllegalStateException("the connection pool is empty")))
+        doThrow(new IllegalStateException("a defect nobody anticipated"))
                 .when(store).markPayloadMinted(any(), any());
         whateverItAnswers(job::run);
     }

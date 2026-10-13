@@ -2300,11 +2300,16 @@ class RegisterGenerationJobTest {
      * </ul>
      *
      * <p><strong>And what does not stop it (defect fix P5, amended).</strong> A batch whose own
-     * request throws - a store outage on one of its marks, or anything else at all - is that
-     * batch's trouble and not the night's: it is counted PENDING, said at ERROR by class, counted
-     * on {@code yotresultsdistribution_generation_request_unfinished_total}, and left for the next
-     * run's stale-batch pass, while the run goes on to the court centres behind it. The cases
-     * below that arrange a request to throw assert exactly that.
+     * request throws something nobody classified, or anything else that is not a store outage or a
+     * shutdown, is that batch's trouble and not the night's: it is counted PENDING, said at ERROR by
+     * class, counted on {@code yotresultsdistribution_generation_request_unfinished_total}, and left
+     * for the next run's stale-batch pass, while the run goes on to the court centres behind it. The
+     * cases below that arrange a request to throw assert exactly that.
+     *
+     * <p><strong>And what does stop it even so (fix 3, part 1).</strong> A store outage on either
+     * of the requesting leg's own marks is not isolated to its batch: every batch behind it would
+     * hit the same store, so it is rethrown and ends the run through the same path a store lost
+     * anywhere else in the night does - one report, one line naming the cause, no per-batch count.
      */
     @Nested
     @DisplayName("a run that stopped part way")
@@ -2624,14 +2629,45 @@ class RegisterGenerationJobTest {
         }
 
         @Test
-        void a_render_the_store_then_refused_should_not_stop_the_run() {
+        void a_render_the_store_then_refused_should_stop_the_run() {
             aRenderThatLeftBeforeTheStoreRefused("mark a batch requested");
 
             softly.assertThat(whatStoppedTheRun())
-                    .as("a store that would not take one batch's mark costs that batch, which the "
-                            + "next run's stale-batch pass settles, and not the court centres "
-                            + "behind it (P5)")
+                    .as("a store outage on one batch's mark is the run's own failure, not that "
+                            + "batch's alone: every batch behind it would hit the same wall, so "
+                            + "the run ends visibly rather than counting each one PENDING under a "
+                            + "report that reads as a night that finished (fix 3, part 1)")
+                    .isInstanceOf(StoreUnavailableException.class);
+        }
+
+        @Test
+        void a_render_the_store_then_refused_should_not_move_the_unfinished_counter() {
+            aRenderThatLeftBeforeTheStoreRefused("mark a batch requested");
+
+            whatStoppedTheRun();
+
+            softly.assertThat(registry.find(GenerationMetrics.GENERATION_REQUEST_UNFINISHED)
+                            .counter())
+                    .as("a store outage ends the run through its own path, not the per-batch "
+                            + "counter a classified failure moves")
                     .isNull();
+        }
+
+        @Test
+        void a_store_outage_on_one_batchs_request_should_stop_the_run_before_the_next_batch() {
+            final RegisterBatch outaged = batch();
+            final RegisterBatch following = batch();
+            aNightHolding(outaged, following);
+            everyRequestIsAccepted();
+            doThrow(new StoreUnavailableException("the register store did not answer", null))
+                    .when(service).request(eq(outaged), any(), any());
+
+            softly.assertThat(whatStoppedTheRun())
+                    .as("every batch behind an outage would hit the same store, so the run leaves "
+                            + "instead of asking systemdocgenerator about batches the store cannot "
+                            + "yet record an outcome for (fix 3, part 1)")
+                    .isInstanceOf(StoreUnavailableException.class);
+            verify(service, never()).request(eq(following), any(), any());
         }
 
         @Test
