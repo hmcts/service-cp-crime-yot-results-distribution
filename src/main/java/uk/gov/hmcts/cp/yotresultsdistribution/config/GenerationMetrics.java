@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Component;
+import uk.gov.hmcts.cp.yotresultsdistribution.application.NotificationDisposition;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision.Unreadable;
@@ -479,6 +480,24 @@ public class GenerationMetrics {
      */
     public void notificationNotRetried() {
         counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, NOTIFICATION_NOT_RETRIED).increment();
+    }
+
+    /**
+     * Counts a second hand-on - a redelivered announcement finding its batch already GENERATED -
+     * whose own call to the notifier returned without settling the batch.
+     *
+     * <p>{@link #alreadyNotifying()}, {@link #claimLost()} and the notifier's own
+     * {@code settlement-row-absent} already say why that call did not settle; this is this
+     * subscription's own account of the same no-op, because every other branch that leaves a
+     * redelivered announcement applying nothing moves a counter here rather than returning
+     * silently. Labelled by the disposition's own name, so the reason is not folded into one
+     * generic label and lost crossing into this series.
+     *
+     * @param disposition what the second hand-on's own cycle answered, which is never SETTLED
+     *                     where this is counted
+     */
+    public void secondHandOnNotSettled(final NotificationDisposition disposition) {
+        counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, code(disposition)).increment();
     }
 
     /**

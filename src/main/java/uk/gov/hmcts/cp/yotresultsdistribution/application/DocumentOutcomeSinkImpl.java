@@ -179,6 +179,17 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
     /**
      * The second hand-on, which is the one bounded: see {@link #documentAvailable}.
      *
+     * <p>A disposition other than SETTLED does not throw, so it would otherwise leave through
+     * here unremarked: the notifier's own series already says why ({@link
+     * NotificationDisposition#ALREADY_NOTIFYING}, {@link NotificationDisposition#CLAIM_LOST} and
+     * {@link NotificationDisposition#INCOMPLETE} are each counted and logged where they are
+     * decided), but this class's own rule is that every branch that applies nothing moves a
+     * counter of its own rather than returning silently - the same rule {@link
+     * #countIfAlreadyEnded} and the catch below already follow. A claim whose release also failed
+     * is held until its lease lapses, and a redelivery landing inside that lease is exactly the
+     * {@code ALREADY_NOTIFYING} case this counts; the scheduled sweep of GENERATED batches is the
+     * backstop for the lease itself (defect fix P1, left open), not this counter.
+     *
      * @param batchId the batch the announcement found already GENERATED
      */
     // PMD.AvoidCatchingGenericException: whatever the notifier raises other than a store outage
@@ -187,7 +198,15 @@ public class DocumentOutcomeSinkImpl implements DocumentOutcomeSink {
     @SuppressWarnings("PMD.AvoidCatchingGenericException")
     private void handOnAgain(final UUID batchId) {
         try {
-            notifier.notify(batchId);
+            final NotificationSummary summary = notifier.notify(batchId);
+            if (!summary.settled()) {
+                metrics.secondHandOnNotSettled(summary.disposition());
+                LOG.info("Batch {} was handed to the notifier again by a redelivered "
+                                + "announcement and did not settle on this call: disposition={}. "
+                                + "The notifier's own series already counts why; this is the "
+                                + "redelivery's own account of a hand-on that applied nothing.",
+                        batchId, summary.disposition().code());
+            }
         } catch (StoreUnavailableException | ConcurrencyFailureException retryable) {
             throw retryable;
         } catch (RuntimeException notTold) {
