@@ -157,10 +157,7 @@ public class ServiceBusConsumerConfig {
         return new YotResultsDistributionMessageListener(
                 parser, pipeline, metrics, health, new DeferredStoreGate(lifecycle::getObject),
                 properties.servicebus().maxDeliveryCount(),
-                flagStates(flagReader.getIfAvailable(), refreshes, clock),
-                // The queue has no back-off of its own; this is the one a hand-back gets (F-04).
-                RedeliveryBackoff.sleeping(properties.servicebus().redeliveryBackoff(),
-                        properties.servicebus().maxAutoLockRenewDuration()));
+                flagStates(flagReader.getIfAvailable(), refreshes, clock));
     }
 
     /**

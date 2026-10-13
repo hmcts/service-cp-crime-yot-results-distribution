@@ -104,7 +104,7 @@ public record YotResultsDistributionProperties(
             @DefaultValue("5") int maxDeliveryCount,
             @DefaultValue("5m") Duration maxAutoLockRenewDuration,
             @DefaultValue("60s") Duration healthStaleness,
-            @DefaultValue({"15s", "30s", "60s", "120s"}) List<Duration> redeliveryBackoff) {
+            List<Duration> redeliveryBackoff) {
     }
 
     /**
