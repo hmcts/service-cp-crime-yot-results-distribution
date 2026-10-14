@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Component;
+import uk.gov.hmcts.cp.yotresultsdistribution.application.NotificationDisposition;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.FlagDecision.Unreadable;
@@ -69,6 +70,8 @@ public class GenerationMetrics {
             "yotresultsdistribution_public_events_ignored_total";
     public static final String GENERATION_UNRECORDED =
             "yotresultsdistribution_generation_unrecorded_total";
+    public static final String GENERATION_REQUEST_UNFINISHED =
+            "yotresultsdistribution_generation_request_unfinished_total";
     public static final String BATCH_SWEEP_FAILURES =
             "yotresultsdistribution_batch_sweep_failures_total";
     public static final String OLDEST_RECORDED_UNBATCHED_AGE =
@@ -178,6 +181,18 @@ public class GenerationMetrics {
      * fact inside a notification series.
      */
     public static final String TERMINAL_BATCH = "terminal-batch";
+
+    /**
+     * The {@code reason} label of a document announced again for a batch still GENERATED whose
+     * hand-on to the notifier failed for a reason another delivery cannot clear.
+     *
+     * <p>A store outage is rethrown and the broker offers the event again; anything else would
+     * fail the same way on every delivery of a durable subscription, so the event is acknowledged
+     * and counted here. The batch stays GENERATED, where
+     * {@code yotresultsdistribution_oldest_generated_age}, the 07:00 report and an operator's
+     * {@code POST /operations/batches/{batchId}/notify} find it. Nought on a healthy estate.
+     */
+    public static final String NOTIFICATION_NOT_RETRIED = "notification-not-retried";
 
     /**
      * The {@code reason} label of a delivery whose body would not parse at all.
@@ -460,6 +475,32 @@ public class GenerationMetrics {
     }
 
     /**
+     * Counts a document announced again for a GENERATED batch that could not be handed to the
+     * notifier again and was acknowledged rather than offered for ever.
+     */
+    public void notificationNotRetried() {
+        counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, NOTIFICATION_NOT_RETRIED).increment();
+    }
+
+    /**
+     * Counts a second hand-on - a redelivered announcement finding its batch already GENERATED -
+     * whose own call to the notifier returned without settling the batch.
+     *
+     * <p>{@link #alreadyNotifying()}, {@link #claimLost()} and the notifier's own
+     * {@code settlement-row-absent} already say why that call did not settle; this is this
+     * subscription's own account of the same no-op, because every other branch that leaves a
+     * redelivered announcement applying nothing moves a counter here rather than returning
+     * silently. Labelled by the disposition's own name, so the reason is not folded into one
+     * generic label and lost crossing into this series.
+     *
+     * @param disposition what the second hand-on's own cycle answered, which is never SETTLED
+     *                     where this is counted
+     */
+    public void secondHandOnNotSettled(final NotificationDisposition disposition) {
+        counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, code(disposition)).increment();
+    }
+
+    /**
      * Counts a public event that reached this service's subscription and belongs to somebody else.
      *
      * <p>The topic is the estate's, and progression's still-deployed leg renders through the same
@@ -555,6 +596,23 @@ public class GenerationMetrics {
      */
     public void headerEnvelopeMismatchIgnored() {
         counter(PUBLIC_EVENTS_IGNORED, REASON_TAG, HEADER_ENVELOPE_MISMATCH).increment();
+    }
+
+    /**
+     * Counts a batch whose request raised something no classified failure names, which the run
+     * carried on past.
+     *
+     * <p>Defect fix P5: one court centre's trouble is not a night's. The ordinary case fails the
+     * batch {@code REQUEST_UNFINISHED} and releases its registers on the same statement (fix 3,
+     * part 2 of the review of #31); only where that mark itself cannot be written is the batch left
+     * PENDING for a later run's stale-batch pass instead, exactly as every such batch was before
+     * that fix. Either way the run line counts it under the status it actually ended as; this
+     * counter is the reading an alert fires on regardless: a night of these is a failing
+     * collaborator or a defect, not a deadline. A batch whose stamp was refused before any request
+     * was made is not counted here.
+     */
+    public void generationRequestUnfinished() {
+        counter(GENERATION_REQUEST_UNFINISHED).increment();
     }
 
     /**

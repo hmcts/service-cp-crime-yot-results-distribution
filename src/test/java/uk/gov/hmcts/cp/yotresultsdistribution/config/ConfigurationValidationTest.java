@@ -3040,6 +3040,45 @@ class ConfigurationValidationTest {
         }
 
         /**
+         * {@code cp-auth-rules-filter}'s own {@code @ConditionalOnProperty} reads only the literal
+         * string {@code true} as on; everything else, including a spelling most boolean parsers
+         * would accept, is on off. A deployment that wrote one of these believing authorisation was
+         * switched on would serve every {@code /operations/**} action with no check and no signal
+         * that anything was wrong - the one misconfiguration on this service's whole surface that is
+         * a full authorisation bypass rather than a pod merely started with a switch the operator
+         * did not intend, so it is refused rather than only said.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {"yes", "on", "1", "y", "enabled"})
+        void an_authz_enabled_value_that_is_not_exactly_true_or_false_refuses_to_start(
+                final String value) {
+            deployed.withPropertyValues("authz.http.enabled=" + value).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasMessageContaining("authz.http.enabled")
+                        .hasMessageContaining("must be \"true\" or \"false\"");
+            });
+        }
+
+        @Test
+        void an_invalid_authz_enabled_value_is_not_echoed_in_the_failure() {
+            final String sensitiveValue = "sensitive-authz-setting-value";
+            deployed.withPropertyValues("authz.http.enabled=" + sensitiveValue).run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure())
+                        .hasMessageContaining("authz.http.enabled")
+                        .hasMessageNotContaining(sensitiveValue);
+            });
+        }
+
+        /** Any case of the literal word is what the library itself reads as on. */
+        @Test
+        void an_authz_enabled_value_of_true_in_any_case_should_start() {
+            deployed.withPropertyValues("authz.http.enabled=True")
+                    .run(context -> assertThat(context).hasNotFailed());
+        }
+
+        /**
          * A value rule, and the reason it is one: the audit filter <strong>swallows every
          * publishing failure</strong>, so a transport switched on and pointed at nothing publishes
          * nothing and says so only in a log line. The library's own {@code validateProps} checks

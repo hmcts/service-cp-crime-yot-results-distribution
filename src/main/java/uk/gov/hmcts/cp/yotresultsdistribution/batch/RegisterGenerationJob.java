@@ -26,6 +26,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.config.RunProgress;
 import uk.gov.hmcts.cp.yotresultsdistribution.config.SchedulingConfig;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.AssembledBatch;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchAssembly;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CourtCentreDay;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.Deadline;
@@ -36,6 +37,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.GateDecision.Skipped;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RegisterBatch;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RegisterRecord;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RunReport;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.StoreUnavailableException;
 
 /**
  * The nightly run: flag, assemble, request, report.
@@ -120,6 +122,12 @@ public class RegisterGenerationJob {
 
     /** What the line calls the reading a run goes ahead on when nobody overrode anything. */
     private static final String FLAG_ON = "flag-on";
+
+    /** Named once (PMD.AvoidDuplicateLiterals), as {@code CATCHES_ANYTHING} is elsewhere. */
+    private static final String CATCHES_ANYTHING = "PMD.AvoidCatchingGenericException";
+
+    /** Named once for the same reason {@link #CATCHES_ANYTHING} is. */
+    private static final String ONE_EXIT_PER_VERDICT = "PMD.OnlyOneReturn";
 
     private final FeatureFlagGate gate;
 
@@ -250,7 +258,7 @@ public class RegisterGenerationJob {
     // PMD.AvoidCatchingGenericException and PMD.OnlyOneReturn: as stated above this method's
     // opening comment, which describes this body - the two exits are the two nights, and the wide
     // catch is what stops a night reporting nothing.
-    @SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.OnlyOneReturn"})
+    @SuppressWarnings({CATCHES_ANYTHING, ONE_EXIT_PER_VERDICT})
     private RunReport correlatedRun() {
         final Instant startedAt = clock.instant();
         final GateDecision decision = gate.decide(false);
@@ -363,8 +371,19 @@ public class RegisterGenerationJob {
      * tomorrow's run, which will find its registers active and unbatched, and a gauge that only
      * ever moved up would need a run to fail before it could come down again.
      *
+     * <p><strong>A store outage is counted before it is rethrown (fix 3, part 1).</strong> The
+     * batch {@link #requested} was asking about is still this run's own - its render may have been
+     * asked for, which {@link RunTally} already knows independently of how the call ended - so it
+     * is counted PENDING here, on the same line the stopped run still writes, before the run leaves
+     * through the one path that already reports and rethrows a store outage lost anywhere else in
+     * the night.
+     *
      * @param tally what the run has done, which is where each batch's state is counted
      */
+    // PMD.AvoidInstantiatingObjectsInLoops: the loop is the night's batches, not a hot path, and
+    // the allocation only happens on the one iteration whose store outage ends the run - every
+    // other night it never runs at all.
+    @SuppressWarnings("PMD.AvoidInstantiatingObjectsInLoops")
     private void request(final RunTally tally) {
         final Deadline deadline = Deadline.startingAt(clock.instant(), properties.runDeadline());
 
@@ -373,7 +392,13 @@ public class RegisterGenerationJob {
             if (deadline.hasPassedAt(clock.instant())) {
                 tally.noTimeLeftFor(registers);
             } else {
-                tally.ended(requested(assembled, deadline, tally), registers);
+                try {
+                    tally.ended(requested(assembled, deadline, tally), registers);
+                } catch (StoreUnavailableException outage) {
+                    tally.ended(new BatchOutcome(assembled.batch().batchId(), BatchStatus.PENDING,
+                            null, false), registers);
+                    throw outage;
+                }
             }
         }
     }
@@ -398,26 +423,50 @@ public class RegisterGenerationJob {
      * up in, so the batch is counted PENDING and the night carries on to the court centres behind
      * it. That isolation is defect fix P5's other half: one court centre's trouble is not a night's.
      *
+     * <p><strong>Nor does a batch whose request did not finish, for its own reasons (fix 3, part
+     * 2).</strong> A client that raises something nobody classified, or a mark refused on a batch
+     * the state machine says was never sent. The batch is failed {@code REQUEST_UNFINISHED} and its
+     * registers released on the same statement, said at ERROR by class only and counted on
+     * {@code yotresultsdistribution_generation_request_unfinished_total} - the same question {@code
+     * NOT_COMPLETED_BY_NEXT_RUN} answers for a batch nothing is learned about, asked a day earlier
+     * because the store, not a later run's stale-batch pass, is the one thing this call already
+     * knows is reachable. A late or duplicate outcome for the batch this failure ends is dropped by
+     * the same terminal-batch rule that protects every other releasing reason. If the mark itself
+     * cannot be written - the store is down, or the batch moved again in the instant between the
+     * refusal and this attempt - the batch is left PENDING for a later run instead, exactly as
+     * before; a {@link StoreUnavailableException} from that attempt is rethrown and ends the run the
+     * same way fix 3's first part does.
+     *
+     * <p><strong>Two throws are not a batch's at all, and both still end the run (fix 3, part
+     * 1).</strong> A shutdown - a request that fails on an interrupted thread - because every batch
+     * behind it would fail the same way and raise an alert each for a routine pod stop; and a
+     * {@link StoreUnavailableException} from either of the requesting leg's own marks, because with
+     * the store down every batch behind it would hit the same wall. A store outage swallowed here
+     * the same way a classified failure is would read as a night that finished while it counted one
+     * ERROR per remaining batch instead of the one the run itself already reports and rethrows.
+     *
      * <p><strong>A batch whose render was asked for is counted where the call was made.</strong>
-     * The requesting leg announces that to the tally as it makes the call, so a store that will not
-     * write the batch's ending down - which takes the whole run out through a throw - cannot make a
-     * render that did leave this service disappear from the night's account.
+     * The requesting leg announces that to the tally as it makes the call, so a batch whose request
+     * then threw - and is counted PENDING, never asked for - still has its render on the night's
+     * account.
      *
      * @param assembled the batch the assembler decided on, beside the registers it groups
      * @param deadline  the run's requesting bound
      * @param progress  the night's own account, told as the render is asked for and before
      *                  anything is concluded about it
-     * @return what this batch ended the requesting leg as, which for a batch that could not be
-     *         written down is PENDING under no reason at all: nothing was asked of the renderer and
-     *         there is no row for a reason to have been written to
+     * @return what this batch ended the requesting leg as: PENDING under no reason at all for a
+     *         batch that could not be written down, or whose request did not finish and could not
+     *         itself be failed; FAILED {@code REQUEST_UNFINISHED} for a request that did not finish
+     *         and could be
      */
     // PMD.AvoidCatchingGenericException: the stamp refuses through IllegalStateException and the
-    // store translates an outage into its own unchecked type; both mean the same thing here - this
-    // batch was not written down - and a narrower catch would leave one of them ending the run.
-    // PMD.OnlyOneReturn: the two exits are the two things that can happen to a batch, and each says
-    // so where it is decided; funnelling them through one would turn a verdict into a flag carried
+    // requesting leg can throw anything its collaborators raise other than its own store outage,
+    // which is caught ahead of this one and rethrown; a narrower catch than RuntimeException here
+    // would leave one of the classified failures ending the run.
+    // PMD.OnlyOneReturn: the three exits are the three things that can happen to a batch, and each
+    // says so where it is decided; funnelling them through one would turn a verdict into a flag carried
     // past the call that must not be made once it exists.
-    @SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.OnlyOneReturn"})
+    @SuppressWarnings({CATCHES_ANYTHING, ONE_EXIT_PER_VERDICT})
     private BatchOutcome requested(final AssembledBatch assembled, final Deadline deadline,
             final RenderProgress progress) {
         final RegisterBatch batch;
@@ -429,7 +478,76 @@ public class RegisterGenerationJob {
                     assembled.batch().batchId(), notStamped.getClass().getName());
             return new BatchOutcome(assembled.batch().batchId(), BatchStatus.PENDING, null, false);
         }
-        return service.request(batch, deadline, progress);
+        try {
+            return service.request(batch, deadline, progress);
+        } catch (StoreUnavailableException outage) {
+            // Not this batch's trouble: every batch behind it would hit the same store, so the
+            // run leaves through the one path that already reports and rethrows a store outage
+            // lost anywhere else in the night (fix 3, part 1).
+            throw outage;
+        } catch (RuntimeException unfinished) {
+            if (Thread.currentThread().isInterrupted()) {
+                // A shutdown, not this batch's trouble: every batch behind it would fail the same
+                // way and raise an alert each for a routine pod stop, so the run leaves.
+                throw unfinished;
+            }
+            return requestUnfinished(batch, unfinished);
+        }
+    }
+
+    /**
+     * What a batch whose own request raised something no classified failure names ends as (fix 3,
+     * part 2 of the review of #31).
+     *
+     * <p>Failed {@code REQUEST_UNFINISHED} and released on the same statement, so the next run finds
+     * the registers active and unbatched rather than needing its own stale-batch pass to notice this
+     * one first - the register's position is the same either way, which is exactly {@code
+     * NOT_COMPLETED_BY_NEXT_RUN}'s own reasoning, asked here a day earlier because the store, not a
+     * later run, is the one thing already known to be reachable.
+     *
+     * <p><strong>The mark can itself fail, and that is not this batch's trouble either.</strong> A
+     * {@link StoreUnavailableException} from this attempt is rethrown unchanged, because with the
+     * store down every batch behind this one would hit the same wall - fix 3's first part, reached a
+     * second way. Any other refusal - the batch moved again in the instant between the original
+     * exception and this attempt, which only an outcome racing in at exactly the wrong moment could
+     * cause - leaves the batch exactly where the pre-fix behaviour left it: PENDING, for a later
+     * run's stale-batch pass to find.
+     *
+     * @param batch      the batch whose request raised {@code unfinished}, already durable at the
+     *                   state {@link #requested} stamped it at
+     * @param unfinished whatever the requesting leg's own call raised, other than its own store
+     *                   outage or an interrupted thread
+     * @return FAILED {@code REQUEST_UNFINISHED} where the mark could be written, or PENDING under
+     *         no reason where it could not
+     */
+    // PMD.AvoidCatchingGenericException: the mark refuses through IllegalStateException on the one
+    // race described above, and a narrower catch would leave that case ending the run over a batch
+    // this method exists to isolate.
+    // PMD.OnlyOneReturn: the two exits are the two things this mark can come to, and each says so
+    // where it is decided; funnelling them through one would turn a verdict into a flag carried
+    // past the call that must not be made once it exists.
+    @SuppressWarnings({CATCHES_ANYTHING, ONE_EXIT_PER_VERDICT})
+    private BatchOutcome requestUnfinished(final RegisterBatch batch,
+            final RuntimeException unfinished) {
+        metrics.generationRequestUnfinished();
+        LOG.error("The request for batch {} did not finish, so it is failed {} and its registers "
+                        + "are released for a later run to re-assemble. cause={}",
+                batch.batchId(), BatchFailureReason.REQUEST_UNFINISHED,
+                unfinished.getClass().getName());
+        try {
+            store.markFailed(batch.batchId(), BatchFailureReason.REQUEST_UNFINISHED, null, null);
+        } catch (StoreUnavailableException outage) {
+            throw outage;
+        } catch (RuntimeException refused) {
+            LOG.warn("Batch {} could not itself be failed {} - {} - so it is left PENDING for a "
+                            + "later run's stale-batch pass instead.",
+                    batch.batchId(), BatchFailureReason.REQUEST_UNFINISHED,
+                    refused.getClass().getName());
+            return new BatchOutcome(batch.batchId(), BatchStatus.PENDING, null, false);
+        }
+        metrics.batchCompleted(BatchStatus.FAILED);
+        return new BatchOutcome(batch.batchId(), BatchStatus.FAILED,
+                BatchFailureReason.REQUEST_UNFINISHED, false);
     }
 
     /**
@@ -520,7 +638,7 @@ public class RegisterGenerationJob {
     // not name failing a run over its own report.
     // PMD.OnlyOneReturn: the three exits are the three answers - nothing to ask about, what the
     // store said, and a read that was refused - and each is stated where it is decided.
-    @SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.OnlyOneReturn"})
+    @SuppressWarnings({CATCHES_ANYTHING, ONE_EXIT_PER_VERDICT})
     private RunReport.Settled settled(final RunTally tally) {
         final Map<UUID, Integer> assembled = tally.registersPerBatch();
         if (assembled.isEmpty()) {

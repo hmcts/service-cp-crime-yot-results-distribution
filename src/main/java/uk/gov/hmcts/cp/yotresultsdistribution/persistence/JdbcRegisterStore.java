@@ -1258,21 +1258,26 @@ public class JdbcRegisterStore implements RegisterStore {
             BatchStatus.NOTIFIED, BatchStatus.PARTIALLY_NOTIFIED, BatchStatus.NOTIFIED_NOBODY);
 
     /**
-     * The three failures that leave no document to wait for, and so give their rows back.
+     * The four failures that leave no document to wait for, and so give their rows back.
      *
      * <p>Two of them never left this service at all - no payload was stored, or the batch could not
-     * be assembled into one. The third is the next run's verdict that this batch had not finished:
-     * whether its request ever reached systemdocgenerator is a question this service can no longer
-     * ask, and the register's position is the same either way. Holding a register against a
-     * document nothing will now produce is what strands it.
+     * be assembled into one. The other two are each this service's own verdict that it can no
+     * longer say whether a render reached systemdocgenerator: the next run's verdict that this
+     * batch had not finished, and the requesting leg's own verdict the moment its own call raises
+     * something no classified failure names (review of #31, fix 3, part 2). Both ask the same
+     * question of the same uncertainty, a day apart, and answer it the same way - whether a render
+     * ever reached systemdocgenerator is not a question this service can ask, and the register's
+     * position is the same either way. Holding a register against a document nothing will now
+     * produce is what strands it.
      *
      * <p>Named here rather than at each call site, so the fenced statement, a person's per-batch
      * {@code markFailed} from the operations surface and {@link #releaseFailed} all release on one
-     * rule. A reason that joined the set in one of the three and not the others would be a register
-     * given back by one path and held by another.
+     * rule. A reason that joined the set in one of the three statements and not the others would be
+     * a register given back by one path and held by another.
      */
     private static final Set<BatchFailureReason> RELEASING_REASONS = Set.of(
             BatchFailureReason.PAYLOAD_STORE_UNAVAILABLE, BatchFailureReason.ASSEMBLY_FAILED,
+            BatchFailureReason.REQUEST_UNFINISHED,
             BatchFailureReason.NOT_COMPLETED_BY_NEXT_RUN);
 
     /**

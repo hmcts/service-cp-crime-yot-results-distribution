@@ -1900,6 +1900,44 @@ class RegisterStoreIT {
                     .containsExactlyInAnyOrder(HEARING_ONE, HEARING_TWO);
         }
 
+        /**
+         * The fourth releasing reason, pinned the same way the first is: a batch whose own call
+         * raised something no classified failure names is released on the same statement, not left
+         * stamped for a later run's stale-batch pass to notice (review of #31, fix 3, part 2).
+         */
+        @Test
+        void a_request_that_did_not_finish_should_release_its_rows_for_the_next_run() {
+            final DistributionCommand first = seededCommand(HEARING_ONE, MONDAY_SHARED);
+            final DistributionCommand second = seededCommand(HEARING_TWO, MONDAY_SHARED);
+
+            softly.assertThatCode(() -> {
+                record(first, document(HEARING_ONE, MONDAY, MONDAY_SHARED), APPLICANT,
+                        RecordedFlagState.ON);
+                record(second, document(HEARING_TWO, MONDAY, MONDAY_SHARED), APPLICANT,
+                        RecordedFlagState.ON);
+                final RegisterBatch monday = assembled(MONDAY, mine(store.activeUnbatched()));
+                store.markFailed(monday.batchId(),
+                        BatchFailureReason.REQUEST_UNFINISHED, null, null);
+            }).as(WALKED).doesNotThrowAnyException();
+
+            softly.assertThat(batchOn(MONDAY))
+                    .as("the batch is finished under the bounded code the run report counts it by, "
+                            + "and systemdocgenerator may never have been asked at all")
+                    .contains(new BatchOutcome(FAILED, "REQUEST_UNFINISHED", null));
+            softly.assertThat(statusesOn(MONDAY))
+                    .as("nothing is known to have been sent about these registers, so nothing "
+                            + "about them moved on")
+                    .containsExactly(RECORDED, RECORDED);
+            softly.assertThat(stampedRowsOn(MONDAY))
+                    .as("the stamp is released: a batch whose request did not finish holds no "
+                            + "register hostage to an outcome this service can no longer ask about")
+                    .isZero();
+            softly.assertThat(activeUnbatched())
+                    .as("and the next run picks the same registers up, under a fresh batch identity")
+                    .extracting(RegisterRecord::hearingId)
+                    .containsExactlyInAnyOrder(HEARING_ONE, HEARING_TWO);
+        }
+
         @Test
         void a_failure_that_never_left_should_supersede_the_share_it_overtook() {
             final DistributionCommand batched = seededCommand(HEARING_ONE, MONDAY_SHARED);

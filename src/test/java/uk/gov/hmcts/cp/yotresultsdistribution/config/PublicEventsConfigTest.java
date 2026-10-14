@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import ch.qos.logback.classic.Level;
 import jakarta.jms.ConnectionFactory;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +14,8 @@ import org.springframework.jms.config.DefaultJmsListenerContainerFactory;
 import org.springframework.jms.config.SimpleJmsListenerEndpoint;
 import org.springframework.jms.listener.DefaultMessageListenerContainer;
 import uk.gov.hmcts.cp.yotresultsdistribution.config.GenerationProperties.SourceMode;
+import uk.gov.hmcts.cp.yotresultsdistribution.support.CapturedLog;
+import uk.gov.hmcts.cp.yotresultsdistribution.support.PersonalDataMarkers;
 
 /**
  * The shape of the container the public-event subscription runs in, read off a container the
@@ -97,6 +100,28 @@ class PublicEventsConfigTest {
                     .as("the listener hands the sink's failure back on purpose, and an "
                             + "auto-acknowledging container has nothing left to hand back")
                     .isTrue();
+        }
+
+        @Test
+        @DisplayName("reports rollback at ERROR without rendering the failure or its cause")
+        void the_error_handler_should_log_only_the_failure_type() {
+            final DefaultMessageListenerContainer container = container();
+            final RuntimeException failure = new IllegalStateException(
+                    PersonalDataMarkers.CHILD_NAME,
+                    new IllegalArgumentException(PersonalDataMarkers.RECIPIENT_EMAIL));
+
+            try (CapturedLog log = CapturedLog.capturing(PublicEventsConfig.class)) {
+                container.getErrorHandler().handleError(failure);
+
+                assertThat(log.events()).hasSize(1);
+                assertThat(log.events().get(0).getLevel()).isEqualTo(Level.ERROR);
+                assertThat(log.events().get(0).getThrowableProxy()).isNull();
+                assertThat(log.renderings().get(0))
+                        .as("the public-event failure and its cause can carry private data")
+                        .contains("cause=java.lang.IllegalStateException")
+                        .doesNotContain(PersonalDataMarkers.CHILD_NAME,
+                                PersonalDataMarkers.RECIPIENT_EMAIL);
+            }
         }
     }
 

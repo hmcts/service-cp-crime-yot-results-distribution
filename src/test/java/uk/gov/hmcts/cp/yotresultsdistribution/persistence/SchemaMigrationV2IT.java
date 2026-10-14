@@ -960,6 +960,40 @@ class SchemaMigrationV2IT {
         }
 
         /**
+         * V8's whole effect, asked of the database rather than read off the file.
+         *
+         * <p>{@code RegisterGenerationJob.requested()} writes this reason with no attribution, at
+         * the moment its own call raises something no classified failure names, rather than leaving
+         * the batch PENDING for a later run's stale-batch pass to find (review of #31, fix 3, part
+         * 2). Until V8 the column's constraint enumerated six values and this row is refused by it.
+         */
+        @Test
+        void v8_admits_request_unfinished() {
+            assertThatCode(() -> inRolledBackTransaction(
+                    insertFailedBatch("REQUEST_UNFINISHED", null)))
+                    .doesNotThrowAnyException();
+        }
+
+        /**
+         * And the half V8 deliberately leaves to the constraint that is already right, exactly as
+         * V6's own new reason does.
+         *
+         * <p>The admitted row comes first and is the case's precondition rather than a repetition
+         * of the one above, for the reason {@link #the_new_reason_refuses_an_attribution} states.
+         */
+        @Test
+        void the_v8_reason_also_refuses_an_attribution() {
+            assertThatCode(() -> inRolledBackTransaction(
+                    insertFailedBatch("REQUEST_UNFINISHED", null)))
+                    .as("the reason is admitted, so what follows is about the attribution alone")
+                    .doesNotThrowAnyException();
+            assertThatThrownBy(() -> inRolledBackTransaction(
+                    insertFailedBatch("REQUEST_UNFINISHED", "EVENT")))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("register_batch_completed_by_shape_chk");
+        }
+
+        /**
          * And the vocabulary the column is left with, in both directions.
          *
          * <p>{@code contains} would say that every constant reaches the database and nothing about
@@ -1484,6 +1518,16 @@ class SchemaMigrationV2IT {
                         + "DATE '2026-08-20', 'yotresultsdistribution_2026-08-20.json', 'GENERATED', true, "
                         + "'RECONCILER')";
 
+        /**
+         * The vocabulary as V7 itself left it, named rather than read off {@link BatchFailureReason}
+         * for the reason {@link SchemaMigrationV7IT} and {@link SchemaMigrationV8IT} both state: V8
+         * widens the same constraint by one more value, so the live enumeration is no longer what a
+         * database pinned to {@code target("7")} actually admits.
+         */
+        private static final List<String> THE_SIX_AT_V7 = List.of(
+                "PAYLOAD_STORE_UNAVAILABLE", "RENDER_REQUEST_FAILED", "RENDER_REQUEST_REJECTED",
+                "GENERATION_FAILED", "ASSEMBLY_FAILED", "NOT_COMPLETED_BY_NEXT_RUN");
+
         private static FluentConfiguration flywayAgainst(final String jdbcUrl) {
             return Flyway.configure()
                     .dataSource(jdbcUrl, PostgresTestSupport.username(), PostgresTestSupport.password())
@@ -1530,7 +1574,7 @@ class SchemaMigrationV2IT {
                     .doesNotThrowAnyException();
             assertThat(admittedFailureReasonsIn(jdbcUrl))
                     .as("the narrowed vocabulary, read off the constraint the migration left")
-                    .containsExactlyInAnyOrder(vocabularyOf(BatchFailureReason.class));
+                    .containsExactlyInAnyOrderElementsOf(THE_SIX_AT_V7);
         }
 
         /**

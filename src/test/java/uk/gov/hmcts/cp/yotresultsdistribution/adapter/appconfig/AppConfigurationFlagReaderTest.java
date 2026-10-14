@@ -9,7 +9,9 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.awaitility.Awaitility.await;
 
+import ch.qos.logback.classic.Level;
 import com.azure.core.http.HttpClient;
 import com.azure.core.http.netty.NettyAsyncHttpClientBuilder;
 import com.azure.core.http.policy.FixedDelayOptions;
@@ -539,6 +541,126 @@ class AppConfigurationFlagReaderTest {
                             + "the reader's outer deadline instead, having held the connection "
                             + "for it")
                     .isLessThan(CLIENT_OR_READER);
+        }
+    }
+
+    @Nested
+    @DisplayName("a skipped read is said once")
+    class SaidOnce {
+
+        /**
+         * How long the suite watches for a second line after the first.
+         *
+         * <p>The abandoned read is interrupted at the deadline and unwinds in milliseconds; on the
+         * STE pod its line followed the deadline's by under a hundred. Watching for the better part
+         * of a second is what lets the absence of that line be evidence rather than luck.
+         */
+        private static final Duration QUIET_PERIOD = Duration.ofMillis(750);
+
+        private static long warnings(final CapturedLog log) {
+            return log.events().stream().filter(event -> event.getLevel() == Level.WARN).count();
+        }
+
+        /**
+         * A read abandoned at the deadline is one skipped read, and the morning's question is which
+         * of the four causes it was. Two lines - the deadline's {@code timed-out} and then the
+         * abandoned thread's own {@code call-failed} as its interrupt reaches the SDK - answer that
+         * question twice and differently, for a decision that was only ever made once.
+         */
+        @Test
+        @DisplayName("a read abandoned at the deadline writes one warning, naming the timeout")
+        void abandoned_read_should_write_one_warning_naming_the_timeout() {
+            answeringAfter(TheWholeRead.BLACK_HOLED_MS, settingCarrying(flagValue(true)));
+            final FeatureFlagProperties properties =
+                    new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, SHORT_BUDGET);
+            final AppConfigurationFlagReader reader =
+                    new AppConfigurationFlagReader(properties, unboundedClientFor(properties));
+
+            try (CapturedLog log = CapturedLog.capturing(AppConfigurationFlagReader.class)) {
+                decisionOf(reader);
+
+                await().during(QUIET_PERIOD).atMost(QUIET_PERIOD.multipliedBy(2))
+                        .untilAsserted(() -> assertThat(warnings(log))
+                                .as("one decision, one line - the abandoned read says nothing")
+                                .isEqualTo(1));
+                assertThat(log.messages())
+                        .singleElement(InstanceOfAssertFactories.STRING)
+                        .endsWith("reason=" + UnreadableReason.TIMED_OUT.code());
+            }
+        }
+
+        /** The ordinary path keeps its line: a skip nobody is told about is a silent one. */
+        @Test
+        @DisplayName("a read the store refused writes one warning, naming the cause")
+        void refused_read_should_write_one_warning_naming_the_cause() {
+            answering(404, "{}");
+
+            try (CapturedLog log = CapturedLog.capturing(AppConfigurationFlagReader.class)) {
+                decisionOf(reader());
+
+                assertThat(warnings(log)).isOne();
+                assertThat(log.messages())
+                        .singleElement(InstanceOfAssertFactories.STRING)
+                        .endsWith("reason=" + UnreadableReason.NOT_FOUND.code());
+            }
+        }
+
+        /**
+         * The caller's own thread interrupted mid-read - the pod going down - abandons the read
+         * exactly as the deadline does, and is one skipped read with one line, not two.
+         */
+        @Test
+        @DisplayName("a read whose caller is interrupted writes one warning, and keeps the interrupt")
+        void interrupted_read_should_write_one_warning_and_restore_the_interrupt() {
+            answeringAfter(TheWholeRead.BLACK_HOLED_MS, settingCarrying(flagValue(true)));
+            final FeatureFlagProperties properties =
+                    new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, BUDGET);
+            final AppConfigurationFlagReader reader =
+                    new AppConfigurationFlagReader(properties, unboundedClientFor(properties));
+
+            try (CapturedLog log = CapturedLog.capturing(AppConfigurationFlagReader.class)) {
+                Thread.currentThread().interrupt();
+                final FlagDecision decision = decisionOf(reader);
+                final boolean interruptKept = Thread.interrupted();
+
+                assertThat(interruptKept).as("the caller's interrupt is restored").isTrue();
+                assertThat(decision).isEqualTo(unreadable(UnreadableReason.CALL_FAILED));
+                await().during(QUIET_PERIOD).atMost(QUIET_PERIOD.multipliedBy(2))
+                        .untilAsserted(() -> assertThat(warnings(log))
+                                .as("one decision, one line - the abandoned read says nothing")
+                                .isEqualTo(1));
+            }
+        }
+
+        /** No store configured is a skip like any other, and is said like any other. */
+        @Test
+        @DisplayName("a reader with no store configured writes one warning, naming that")
+        void unconfigured_read_should_write_one_warning_naming_it() {
+            final AppConfigurationFlagReader reader = new AppConfigurationFlagReader(
+                    new FeatureFlagProperties(storeConnectionString(), KEY, LABEL, BUDGET), null);
+
+            try (CapturedLog log = CapturedLog.capturing(AppConfigurationFlagReader.class)) {
+                decisionOf(reader);
+
+                assertThat(warnings(log)).isOne();
+                assertThat(log.messages())
+                        .singleElement(InstanceOfAssertFactories.STRING)
+                        .endsWith("reason=" + UnreadableReason.NOT_CONFIGURED.code());
+            }
+        }
+
+        /** A verdict is not a skip, and is not written as one - whichever verdict it is. */
+        @ParameterizedTest(name = "enabled={0}")
+        @ValueSource(booleans = {true, false})
+        @DisplayName("a read that answered writes no warning")
+        void answered_read_should_write_no_warning(final boolean enabled) {
+            answering(200, settingCarrying(flagValue(enabled)));
+
+            try (CapturedLog log = CapturedLog.capturing(AppConfigurationFlagReader.class)) {
+                decisionOf(reader());
+
+                assertThat(warnings(log)).isZero();
+            }
         }
     }
 

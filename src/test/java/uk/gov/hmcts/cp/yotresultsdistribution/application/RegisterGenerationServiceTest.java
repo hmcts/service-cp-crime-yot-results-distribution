@@ -45,6 +45,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.config.JacksonConfig;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchFailureReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.BatchStatus;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CallerIdentity;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.CompletedBy;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CourtCentreDay;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CourtRegisterDefendant;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.CourtRegisterDocument;
@@ -976,6 +977,235 @@ class RegisterGenerationServiceTest {
                             + "announcement belongs after the guard that decides whether an "
                             + "attempt is started and never before it")
                     .isEmpty();
+        }
+    }
+
+    /**
+     * Defect fix P5's isolation, held against the outcome that arrives before the mark (F-01).
+     *
+     * <p>The requesting leg is not the only writer of a batch between PENDING and GENERATING. The
+     * public-event listener runs on every pod while the night is being asked for, and
+     * systemdocgenerator can render a batch and announce it before its 202 has reached this
+     * service - or answer a request whose 202 was lost and then announce the document while this leg
+     * is still retrying. Either way the listener moves the batch first, and the mark this leg then
+     * makes is one the state machine refuses: GENERATED or FAILED to GENERATING, GENERATED or
+     * NOTIFIED to FAILED. Thrown, that refusal took the whole night out with it and every court
+     * centre behind the batch got no register.
+     *
+     * <p>An overtaken mark is not an error. The render was accepted - an outcome exists only for a
+     * request systemdocgenerator took - so the requesting leg answers GENERATING, exactly as it would
+     * had its mark landed first, and the settled snapshot the run takes from the store says what the
+     * batch came to. A refused mark on a batch nothing moved is still the defect it always was, and
+     * still leaves.
+     *
+     * <p><strong>[A]</strong> - the five {@code ..._should_still_leave} cases and the read-back outage case are green on
+     * introduction: they state the bound the fix must not cross rather than the behaviour it adds,
+     * so that the overtaken answer cannot be built by absorbing every refusal.
+     */
+    @Nested
+    @DisplayName("a render whose outcome overtook its own mark (P5, F-01)")
+    class WhenTheOutcomeOvertookTheMark {
+
+        /** The refusal the store raises for a move the state machine does not draw. */
+        private static IllegalStateException refusedMove(final BatchStatus from,
+                final BatchStatus to) {
+            return new IllegalStateException(
+                    "batch " + BATCH_ID + " may not move from " + from + " to " + to);
+        }
+
+        /**
+         * The batch as the store holds it once the listener has been at it.
+         *
+         * @param status where the outcome left it
+         * @return the batch under that state, everything else as the assembler left it
+         */
+        private RegisterBatch heldAt(final BatchStatus status, final CompletedBy completedBy) {
+            final RegisterBatch assembled = batch();
+            return new RegisterBatch(assembled.batchId(), assembled.courtCentreId(),
+                    assembled.courtCentreOuCode(), assembled.courtHouse(),
+                    assembled.registerDate(), assembled.fileName(), assembled.payloadFileId(),
+                    assembled.documentFileId(), status, assembled.failureReason(),
+                    assembled.sdgReason(), assembled.systemGenerated(), completedBy,
+                    assembled.assembledAt(), assembled.requestedAt(), assembled.generatedAt(),
+                    assembled.notifiedAt(), assembled.failedAt(), assembled.attempts(),
+                    assembled.supplementOf(), assembled.supplementIndex());
+        }
+
+        /**
+         * What the store answers once the listener has been at the batch.
+         *
+         * <p>A FAILED batch is one {@code generation-failed} failed, so it names the event; every
+         * other state carries the mechanism the listener's mark writes, which is also the event.
+         *
+         * @param status where the outcome left it
+         */
+        private void theStoreNowHolds(final BatchStatus status) {
+            theStoreNowHolds(status, CompletedBy.EVENT);
+        }
+
+        private void theStoreNowHolds(final BatchStatus status, final CompletedBy completedBy) {
+            when(store.batchesNamed(List.of(BATCH_ID)))
+                    .thenReturn(List.of(heldAt(status, completedBy)));
+        }
+
+        @Test
+        void a_document_that_landed_before_the_mark_should_leave_the_batch_answered_generating() {
+            doThrow(refusedMove(BatchStatus.GENERATED, BatchStatus.GENERATING))
+                    .when(store).markRequested(any(), any());
+            theStoreNowHolds(BatchStatus.GENERATED);
+
+            final BatchOutcome outcome = request();
+
+            softly.assertThat(outcome)
+                    .as("systemdocgenerator accepted the render and the listener got to the batch "
+                            + "first; the night is owed the next court centre, not a throw, and "
+                            + "what the batch came to is the settled snapshot's to say")
+                    .isEqualTo(new BatchOutcome(BATCH_ID, BatchStatus.GENERATING, null, true));
+        }
+
+        @Test
+        void a_batch_already_notified_before_the_mark_should_be_answered_generating_too() {
+            doThrow(refusedMove(BatchStatus.NOTIFIED, BatchStatus.GENERATING))
+                    .when(store).markRequested(any(), any());
+            theStoreNowHolds(BatchStatus.NOTIFIED);
+
+            softly.assertThat(request())
+                    .as("the listener notifies inline, so by the time the 202 is read the teams "
+                            + "may already have been told")
+                    .isEqualTo(new BatchOutcome(BATCH_ID, BatchStatus.GENERATING, null, true));
+        }
+
+        @Test
+        void a_generation_failure_that_landed_before_the_mark_should_not_end_the_run() {
+            doThrow(refusedMove(BatchStatus.FAILED, BatchStatus.GENERATING))
+                    .when(store).markRequested(any(), any());
+            theStoreNowHolds(BatchStatus.FAILED);
+
+            softly.assertThat(request())
+                    .as("generation-failed is an outcome as much as document-available is: the "
+                            + "request was accepted, and the batch's ending is the listener's")
+                    .isEqualTo(new BatchOutcome(BATCH_ID, BatchStatus.GENERATING, null, true));
+        }
+
+        @Test
+        void a_document_that_landed_while_a_lost_202_was_retried_should_not_be_failed_over() {
+            doThrow(transientFailure()).when(renderer).requestRender(any(), any());
+            doThrow(refusedMove(BatchStatus.GENERATED, BatchStatus.FAILED))
+                    .when(store).markFailed(any(), any(), any(), any());
+            theStoreNowHolds(BatchStatus.GENERATED);
+
+            final BatchOutcome outcome = request();
+
+            softly.assertThat(outcome)
+                    .as("the first attempt was accepted and its answer lost; the document it "
+                            + "produced is the proof, so the exhausted retries fail nothing and "
+                            + "the batch is answered as the accepted request it was")
+                    .isEqualTo(new BatchOutcome(BATCH_ID, BatchStatus.GENERATING, null, true));
+            softly.assertThat(batches(BatchStatus.FAILED))
+                    .as("and it is not counted on the terminal series as a failure it never was")
+                    .isEqualTo(ABSENT);
+        }
+
+        @Test
+        void a_refused_mark_on_a_batch_nothing_moved_should_still_leave() {
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.PENDING, BatchStatus.GENERATING);
+            doThrow(refused).when(store).markRequested(any(), any());
+            theStoreNowHolds(BatchStatus.PENDING);
+
+            softly.assertThat(whatStoppedTheRequest(batch()))
+                    .as("no outcome explains this refusal, so it is the defect it always was and "
+                            + "is not this leg's to absorb")
+                    .isSameAs(refused);
+        }
+
+        @Test
+        void a_generation_failure_that_landed_while_a_lost_202_was_retried_should_not_end_the_run() {
+            doThrow(transientFailure()).when(renderer).requestRender(any(), any());
+            doThrow(refusedMove(BatchStatus.FAILED, BatchStatus.FAILED))
+                    .when(store).markFailed(any(), any(), any(), any());
+            theStoreNowHolds(BatchStatus.FAILED);
+
+            softly.assertThat(request())
+                    .as("systemdocgenerator's own verdict reached the batch while this leg was "
+                            + "still retrying the request it answered; that verdict stands, and "
+                            + "this leg's own failure over it is moot")
+                    .isEqualTo(new BatchOutcome(BATCH_ID, BatchStatus.GENERATING, null, true));
+        }
+
+        @Test
+        void a_refused_mark_on_a_batch_this_service_failed_itself_should_still_leave() {
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.FAILED, BatchStatus.GENERATING);
+            doThrow(refused).when(store).markRequested(any(), any());
+            theStoreNowHolds(BatchStatus.FAILED, null);
+
+            softly.assertThat(whatStoppedTheRequest(batch()))
+                    .as("a FAILED row that names no event is this service's own verdict, which no "
+                            + "outcome wrote, so nothing overtook the mark")
+                    .isSameAs(refused);
+        }
+
+        @Test
+        void a_refused_failure_on_a_batch_still_in_flight_should_still_leave() {
+            doThrow(transientFailure()).when(renderer).requestRender(any(), any());
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.GENERATING, BatchStatus.FAILED);
+            doThrow(refused).when(store).markFailed(any(), any(), any(), any());
+            theStoreNowHolds(BatchStatus.GENERATING);
+
+            softly.assertThat(whatStoppedTheRequest(batch()))
+                    .as("the request left, but the batch is still waiting for its outcome, so the "
+                            + "refused failure is not explained by one and is not answered "
+                            + "GENERATING")
+                    .isSameAs(refused);
+        }
+
+        @Test
+        void a_store_that_cannot_say_what_refused_the_mark_should_end_the_request_carrying_it() {
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.GENERATED, BatchStatus.GENERATING);
+            doThrow(refused).when(store).markRequested(any(), any());
+            when(store.batchesNamed(List.of(BATCH_ID))).thenThrow(new StoreUnavailableException(
+                    "the store could not be reached to read batches by identity",
+                    new IllegalStateException("the connection pool is empty")));
+
+            final Throwable stopped = whatStoppedTheRequest(batch());
+
+            softly.assertThat(stopped)
+                    .as("an outage is an outage wherever it lands, and ends the run as before")
+                    .isInstanceOf(StoreUnavailableException.class);
+            softly.assertThat(stopped.getSuppressed())
+                    .as("with the refusal it was asked to explain kept on it as evidence")
+                    .containsExactly(refused);
+        }
+
+        @Test
+        void a_refused_failure_for_a_batch_that_was_never_sent_should_still_leave() {
+            doThrow(new PayloadStoreUnavailableException("the file service did not answer"))
+                    .when(payloadFileStore).store(any(), any(), any());
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.GENERATED, BatchStatus.FAILED);
+            doThrow(refused).when(store).markFailed(any(), any(), any(), any());
+            theStoreNowHolds(BatchStatus.GENERATED);
+
+            softly.assertThat(whatStoppedTheRequest(batch()))
+                    .as("no render left this service, so no outcome can have overtaken this "
+                            + "batch's failure, whatever the row says")
+                    .isSameAs(refused);
+            verifyNoInteractions(renderer);
+        }
+
+        @Test
+        void a_refused_mark_on_a_batch_the_store_no_longer_holds_should_still_leave() {
+            final IllegalStateException refused =
+                    refusedMove(BatchStatus.PENDING, BatchStatus.GENERATING);
+            doThrow(refused).when(store).markRequested(any(), any());
+            when(store.batchesNamed(List.of(BATCH_ID))).thenReturn(List.of());
+
+            softly.assertThat(whatStoppedTheRequest(batch()))
+                    .as("a batch with no row has no outcome to have been overtaken by")
+                    .isSameAs(refused);
         }
     }
 

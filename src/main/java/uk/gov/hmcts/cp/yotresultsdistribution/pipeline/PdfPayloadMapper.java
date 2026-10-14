@@ -19,13 +19,12 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * The render payload one batch is turned into, exactly as progression turned it.
  *
- * <p>A Java to Java port of {@code PROG CourtRegisterPdfPayloadGenerator} (364 lines), bug for bug:
+ * <p>A Java to Java port of {@code PROG CourtRegisterPdfPayloadGenerator} (364 lines):
  * the same helpers in the same order, the same DASH fallbacks, the same date formats, and C24's
- * {@code ####} sentinel substituted for a newline where progression substitutes it. What the port
- * changes is the JSON library and nothing else, {@code javax.json} for a Jackson tree, which is why
- * the signature is tree in and tree out rather than the typed model the rest of this package deals
- * in: the generator read the raw document, and a port that read a typed one would be a rewrite whose
- * output nobody could compare.
+ * {@code ####} sentinel substituted for a newline where progression substitutes it. The port uses
+ * a Jackson tree in place of {@code javax.json} and accepts absent defence counsel names and statuses,
+ * which the document contract permits but progression's strict reads throw on. The signature stays
+ * tree in and tree out because the generator read the raw document.
  *
  * <p>The comparison is the point. Every golden under
  * {@code src/test/resources/goldens/progression/pdf-payload/} was recorded by executing
@@ -50,9 +49,10 @@ import tools.jackson.databind.node.ObjectNode;
  * String, String)}, {@link #getString(JsonNode, String)}, {@link #getJsonObject} and
  * {@link #getJsonArray} are those four rules over a Jackson tree, so a line of the port reads as the
  * line of the generator it stands for. The types the strict readers throw are Jackson's rather than
- * {@code javax.json}'s; which line throws, and on which document, is unchanged, and no such
- * document reaches this mapper in service, because the contract validator refuses it at the write
- * (see {@code goldens/progression/PROVENANCE.md}, "The 52 refusals").
+ * {@code javax.json}'s. Other than optional defence counsel names and statuses, which default to
+ * empty strings, the same documents throw at the same reads; invalid documents cannot reach this mapper
+ * because the contract validator refuses them at the write (see
+ * {@code goldens/progression/PROVENANCE.md}, "The 52 refusals").
  */
 // PMD.OnlyOneReturn: every branch here is the generator's own if/else, answered where it decides;
 // funnelling them through a single exit would reshape the control flow the port is reviewed
@@ -393,10 +393,10 @@ public class PdfPayloadMapper {
         if (containsKey(defendant, "defenceCounsels")) {
             final JsonNode defenceCounsels = getJsonArray(defendant, "defenceCounsels");
             caseJson.put("defenceCounselName", defenceCounsels.valueStream()
-                    .map(r -> getString(r, NAME))
+                    .map(r -> getString(r, NAME, ""))
                     .collect(Collectors.joining(SEPARATOR)));
             caseJson.put("defenceCounselStatus", defenceCounsels.valueStream()
-                    .map(r -> getString(r, "status"))
+                    .map(r -> getString(r, "status", ""))
                     .collect(Collectors.joining(SEPARATOR)));
         } else {
             caseJson.put("defenceCounselName", DASH);

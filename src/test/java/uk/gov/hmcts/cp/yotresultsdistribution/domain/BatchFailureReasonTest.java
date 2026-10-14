@@ -46,15 +46,22 @@ class BatchFailureReasonTest {
     private static final String STALE_RELEASE = "NOT_COMPLETED_BY_NEXT_RUN";
 
     /**
+     * The requesting leg's own ending, named as a string for the same reason {@link #STALE_RELEASE}
+     * is (review of #31, fix 3, part 2).
+     */
+    private static final String REQUEST_UNFINISHED = "REQUEST_UNFINISHED";
+
+    /**
      * Which endings somebody outside this service reported, written out one by one.
      *
      * <p>GENERATION_FAILED is the only one left, and it is systemdocgenerator's own verdict about
      * the render: it arrived because the renderer said so, so the row names the mechanism that
-     * carried it. The other five are this service's own verdict about a render it could not ask
-     * for, could not hear about, or stopped waiting for - the payload was never stored, the request
-     * was never delivered, it was refused, the batch could not be assembled at all, or the next run
-     * began and the answer still had not come - and nobody outside this service was ever in a
-     * position to answer.
+     * carried it. The other six are this service's own verdict about a render it could not ask
+     * for, could not hear about, stopped waiting for, or could not itself tell the outcome of - the
+     * payload was never stored, the request was never delivered, it was refused, the batch could
+     * not be assembled at all, the next run began and the answer still had not come, or the
+     * requesting leg's own call raised something no classified failure names - and nobody outside
+     * this service was ever in a position to answer.
      *
      * <p>There were two until the grace-period reconciler went. GENERATION_TIMED_OUT was its
      * verdict about the renderer's silence, and it is a verdict nothing takes any more: a batch
@@ -67,7 +74,8 @@ class BatchFailureReasonTest {
             "RENDER_REQUEST_REJECTED", false,
             "GENERATION_FAILED", true,
             "ASSEMBLY_FAILED", false,
-            STALE_RELEASE, false);
+            STALE_RELEASE, false,
+            REQUEST_UNFINISHED, false);
 
     /**
      * Which endings give their registers back to the next run, written out one by one.
@@ -90,7 +98,8 @@ class BatchFailureReasonTest {
             "RENDER_REQUEST_REJECTED", false,
             "GENERATION_FAILED", false,
             "ASSEMBLY_FAILED", true,
-            STALE_RELEASE, true);
+            STALE_RELEASE, true,
+            REQUEST_UNFINISHED, true);
 
     /** The reason of that name, empty while the vocabulary does not have one. */
     private static Optional<BatchFailureReason> reasonNamed(final String name) {
@@ -149,7 +158,7 @@ class BatchFailureReasonTest {
         assertThat(Arrays.stream(BatchFailureReason.values())
                         .filter(BatchFailureReason::isGeneratorAttributed)
                         .map(Enum::name))
-                .as("one of the six, and it is the renderer's own verdict; the other five are this "
+                .as("one of the seven, and it is the renderer's own verdict; the other six are this "
                         + "service answering for itself")
                 .containsExactly("GENERATION_FAILED");
         assertThat(ATTRIBUTION.entrySet().stream().filter(Map.Entry::getValue).map(Map.Entry::getKey))
@@ -183,7 +192,7 @@ class BatchFailureReasonTest {
      * this case is the enumeration's own half of that statement.
      */
     @Test
-    void the_six_reasons_are_the_bounded_set() {
+    void the_seven_reasons_are_the_bounded_set() {
         assertThat(names())
                 .containsExactlyInAnyOrder(
                         "PAYLOAD_STORE_UNAVAILABLE",
@@ -191,7 +200,8 @@ class BatchFailureReasonTest {
                         "RENDER_REQUEST_REJECTED",
                         "GENERATION_FAILED",
                         "ASSEMBLY_FAILED",
-                        STALE_RELEASE);
+                        STALE_RELEASE,
+                        REQUEST_UNFINISHED);
     }
 
     /**
@@ -239,9 +249,39 @@ class BatchFailureReasonTest {
     void not_completed_by_next_run_releases_its_rows() {
         assertThat(releasingReasons())
                 .as("the endings that give their registers back for the next run to re-assemble, "
-                        + "and the stale-batch pass's is the third of them")
+                        + "and the stale-batch pass's is one of them")
                 .containsExactlyInAnyOrder(
-                        "PAYLOAD_STORE_UNAVAILABLE", "ASSEMBLY_FAILED", STALE_RELEASE);
+                        "PAYLOAD_STORE_UNAVAILABLE", "ASSEMBLY_FAILED", STALE_RELEASE,
+                        REQUEST_UNFINISHED);
+    }
+
+    /**
+     * The requesting leg's own verdict is this service deciding for itself that whatever its own
+     * call raised is not a question it can put to anybody outside it (review of #31, fix 3, part
+     * 2). No event arrived, no query was made and no mechanism outside this service reported
+     * anything, so the row names none - and {@code register_batch_completed_by_shape_chk} refuses
+     * one that does, exactly as it does for {@link #STALE_RELEASE}.
+     */
+    @Test
+    void request_unfinished_is_not_generator_attributed() {
+        assertThat(reasonNamed(REQUEST_UNFINISHED))
+                .as("the reason requested() writes when its own call raises something no "
+                        + "classified failure names")
+                .get()
+                .satisfies(reason -> assertThat(reason.isGeneratorAttributed())
+                        .as("nobody outside this service was asked and nobody answered")
+                        .isFalse());
+    }
+
+    /**
+     * And the point of this ending too: the registers go back, exactly as {@link
+     * #not_completed_by_next_run_releases_its_rows} asserts for the sibling it shares its
+     * reasoning with - whether a render ever reached systemdocgenerator is not a question this
+     * service can answer, so the register's position is the same either way.
+     */
+    @Test
+    void request_unfinished_releases_its_rows() {
+        assertThat(releasingReasons()).contains(REQUEST_UNFINISHED);
     }
 
     /** The names of the reasons that exist and that the release table classifies as releasing. */
