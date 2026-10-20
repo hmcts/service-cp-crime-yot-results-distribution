@@ -352,6 +352,54 @@ fixtures mount the same file, so local, CI and deployed queue properties cannot 
 local-only, and `bootRun` does not inherit compose environment variables — which is why the command
 above passes them itself.
 
+### Performance tests (Gatling)
+
+`src/gatling/` load-tests the intake leg, following `service-cp-crime-informant-register`'s suite:
+it publishes `DistributionCommand` messages to `yotresultsdistribution.requests` over AMQP/JMS
+(Qpid JMS with SAS for the emulator, `azure-servicebus-jms` with `DefaultAzureCredential` for an
+Entra-only namespace), seeds the Redis claim-check for a share of hearings, and stubs the
+results-query fallback and reference data in WireMock.
+
+| Simulation | What it is | Gate |
+|---|---|---|
+| `CapacitySimulation` | warm-up, then peak (1.51 msg/s) ramping to 10× peak | publish p95 < 100 ms, p99 < 500 ms, > 99.9% OK |
+| `StressSimulation` | ramp to 50 msg/s plus a 200-user spike | none, report-only |
+
+The message mix is 55% standard, 20% without `userId`, 10% byte-identical duplicates, 5% re-shares
+(an already-published hearing under a fresh `requestId`) and 10% older hearing days. Duplicates
+exercise the service's `(source, requestId)` guard only: the publisher cannot set the JMS
+`MessageId`, so the broker's duplicate detection never fires and every duplicate reaches the
+listener. Bodies are sent as a JMS `BytesMessage` because the listener's `getBody()` reads only an
+AMQP data section; a `TextMessage` arrives as an AMQP value and is never processed.
+
+The service records each register in its own store and POSTs nothing, so
+`src/gatling/scripts/verify-outputs.sh` reads `processed_request` and `processed_output` rather than
+a WireMock journal. It checks that every unique request ended `COMPLETED` with `recorded` and has a
+register row of its own, that each hearing is left with exactly one active register (a re-share
+must supersede the earlier one at the write), and that no row exists for a request that was never
+published or carries another request's hearing. It also gates publish-to-`COMPLETED` latency. Never
+run it across 18:00 Europe/London on a weekday where the `YotResultsDistributionService` flag is ON
+and generation is enabled: a register the nightly run has batched can no longer be superseded, so a
+later re-share leaves two active rows and the verifier fails a correct service. Let the queue drain
+between runs. Seeded Redis keys expire after
+six hours (`-Dgatling.redisTtlSeconds`). The service under test must run its intake adapters
+`LIVE` against the stubs, with a Redis, rather than in the compose `app`'s `STUB` shape. Gradle has
+to run on JDK 25, because `gatlingRun` forks with Gradle's own JVM:
+
+```bash
+docker compose up -d postgres servicebus-emulator wiremock && docker run -d -p 6379:6379 redis:7-alpine
+RESULTS_BASE_URL=http://localhost:8089 REFERENCEDATA_BASE_URL=http://localhost:8089 \
+  YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 ./gradlew bootRun
+ASB_EMULATOR_KEY=SAS_KEY_VALUE REDIS_URI=redis://localhost:6379 \
+  DATABASE_URL=postgresql://yotresultsdistribution:yotresultsdistribution@localhost:5432/yotresultsdistribution \
+  ./perfTest.sh
+```
+
+In a pipeline, `src/gatling/scripts/setup-wiremock-stubs.sh` installs the stubs through
+`kubectl exec` and Gatling runs with `-Dgatling.wiremockViaScript=true`; locally, a stub that cannot
+be installed aborts the run. `verify-outputs.sh` reaches Postgres through `NAMESPACE` +
+`POSTGRES_POD_SELECTOR` and passes no password. PMD and Checkstyle do not run on the `gatling` source set.
+
 ### Contribute to this repository
 
 See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Repository working conventions live in

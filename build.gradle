@@ -1,3 +1,14 @@
+buildscript {
+  dependencies {
+    // The Gatling plugin brings plexus-utils 4.x onto the shared plugin classpath, which wins
+    // conflict resolution over CycloneDX's 3.x. 4.x moved org.codehaus.plexus.util.xml into
+    // the separate plexus-xml artifact, so without it cyclonedxBom fails with
+    // NoClassDefFoundError: XmlPullParserException. plexus-xml 3.x is the plexus-utils 4 /
+    // Maven 3 line (4.x targets Maven 4).
+    classpath 'org.codehaus.plexus:plexus-xml:3.0.1'
+  }
+}
+
 plugins {
   id 'application'
   id 'java'
@@ -8,6 +19,7 @@ plugins {
   id 'com.github.ben-manes.versions' version '0.65.0'
   id 'org.cyclonedx.bom' version '3.5.0'
   id 'com.gorylenko.gradle-git-properties' version '4.0.1'
+  id 'io.gatling.gradle' version '3.15.1.3'
 }
 
 group = 'uk.gov.hmcts.cp'
@@ -138,6 +150,80 @@ dependencies {
   // Security: pin transitive tomcat-embed-core to patched version (CVE-2026-41293, -43512, et al.)
   // Brought in transitively via spring-boot-starter-web; >=11.0.0-M1,<11.0.22 are vulnerable
   implementation 'org.apache.tomcat.embed:tomcat-embed-core:11.0.26'
+
+  // --- Gatling performance tests: JMS bridge to Azure Service Bus ---
+  // Gatling has its own compile classpath, which neither the Spring Boot BOM nor the jackson-bom
+  // override above reaches, so every version is explicit here for dependabot to track. Lettuce and
+  // Jackson match what the service itself resolves.
+  gatlingImplementation 'io.lettuce:lettuce-core:7.5.2.RELEASE'
+  gatlingImplementation 'tools.jackson.core:jackson-databind:3.1.7'
+  // Qpid JMS: AMQP 1.0 transport for the SAS/emulator path.
+  gatlingImplementation 'org.apache.qpid:qpid-jms-client:2.10.0'
+  // Azure Service Bus JMS (Jakarta): CBS token auth for Entra-only namespaces.
+  // The 2.x line uses jakarta.jms (matching Gatling 3.15 and Qpid JMS 2.x).
+  gatlingImplementation 'com.azure:azure-servicebus-jms:2.1.0'
+}
+
+gatling {
+  def args = [
+    "-Dgatling.queueName=${System.getProperty('gatling.queueName', 'yotresultsdistribution.requests')}",
+    // docker-compose.yml maps WireMock to 8089 on the host; the pipeline passes its own URL
+    "-Dgatling.wiremockUrl=${System.getProperty('gatling.wiremockUrl', 'http://localhost:8089')}",
+    "-Dgatling.actuatorUrl=${System.getProperty('gatling.actuatorUrl', 'http://localhost:8082')}",
+    // Publish manifest read by src/gatling/scripts/verify-outputs.sh; absolute so it does not
+    // depend on the Gatling JVM's working directory
+    "-Dgatling.manifestPath=${System.getProperty('gatling.manifestPath', "${layout.buildDirectory.get().asFile}/nft/published-manifest.csv")}",
+    "-Dlogback.configurationFile=${projectDir}/src/gatling/resources/logback-gatling.xml",
+    "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+    "--add-opens", "java.base/java.util=ALL-UNNAMED"
+  ]
+  // Emulator/SAS path: an explicit connection string wins; otherwise one is composed from the
+  // emulator key (-Dgatling.emulatorKey or ASB_EMULATOR_KEY). No key is ever committed here.
+  def connectionString = System.getProperty('gatling.connectionString')
+  def emulatorKey = System.getProperty('gatling.emulatorKey', System.getenv('ASB_EMULATOR_KEY'))
+  if (connectionString == null && emulatorKey != null) {
+    connectionString = "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=${emulatorKey};UseDevelopmentEmulator=true;"
+  }
+  if (connectionString != null) {
+    args.add("-Dgatling.connectionString=${connectionString}")
+  }
+  // A namespace explicitly selects Entra auth in the factory and takes precedence over any
+  // connection string.
+  if (System.getProperty('gatling.asbNamespace') != null) {
+    args.add("-Dgatling.asbNamespace=${System.getProperty('gatling.asbNamespace')}")
+  }
+  if (System.getProperty('gatling.redisUri') != null) {
+    args.add("-Dgatling.redisUri=${System.getProperty('gatling.redisUri')}")
+  }
+  ['gatling.redisHitPercent', 'gatling.redisTtlSeconds', 'gatling.wiremockViaScript'].each { key ->
+    if (System.getProperty(key) != null) {
+      args.add("-D${key}=${System.getProperty(key)}")
+    }
+  }
+  jvmArgs = args
+}
+
+// gatlingRun forks with the JVM running Gradle, not the Java 25 toolchain the simulations are
+// compiled with, so an older JAVA_HOME fails at class loading with UnsupportedClassVersionError.
+// Say so before the fork instead.
+tasks.named('gatlingRun') {
+  doFirst {
+    if (!JavaVersion.current().isCompatibleWith(JavaVersion.toVersion(25))) {
+      throw new GradleException("gatlingRun needs Gradle itself on Java 25+ (running on "
+          + "${JavaVersion.current()}): point JAVA_HOME at a JDK 25 and re-run")
+    }
+  }
+}
+
+// The simulations are load-generation scripts, not service code: the service's PMD and Checkstyle
+// rule sets (and the JaCoCo gate, which reads only the main source set) do not apply to them.
+// Keep these tasks disabled rather than removed: `check` depends on them, and Gradle still runs a
+// disabled task's dependencies, which is what makes `./gradlew build` compile src/gatling.
+tasks.matching { it.name == 'pmdGatling' }.configureEach {
+  enabled = false
+}
+tasks.matching { it.name == 'checkstyleGatling' }.configureEach {
+  enabled = false
 }
 
 // Guard against any legacy javax.jms slipping onto the classpath alongside Spring Boot 4's jakarta.jms.

@@ -1,0 +1,71 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/referencedata-query-api/query/api/rest/referencedata/now-subscriptions"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/vnd.referencedata.query.get-now-subscriptions+json"
+    },
+    "jsonBody": {
+      "nowSubscriptions": [
+        {
+          "id": "f300c115-8220-42a4-95f8-095392dcbc4e",
+          "name": "Employer Subscription",
+          "isNowSubscription": false,
+          "isEDTSubscription": false,
+          "isInformantRegisterSubscription": false,
+          "isCourtRegisterSubscription": true,
+          "isPrisonCourtRegisterSubscription": false,
+          "applySubscriptionRules": true,
+          "recipient": {
+            "nowSubscription": "f300c115-8220-42a4-95f8-095392dcbc4e",
+            "recipientFromCase": false,
+            "recipientFromSubscription": false,
+            "recipientFromResults": true,
+            "isApplyDefenceOrganisationDetails": false,
+            "isApplyParentGuardianDetails": false,
+            "isApplyDefendantDetails": false,
+            "isApplyDefendantCustodyDetails": false,
+            "isApplyApplicantDetails": false,
+            "isApplyRespondentDetails": false,
+            "organisationName": "Youth Offending Service - Perf Test",
+            "emailAddress1": "yos.perf@example.com"
+          },
+          "subscriptionVocabulary": {
+            "appearedByVideoLink": false,
+            "appearedInPerson": false,
+            "anyAppearance": true,
+            "inCustody": false,
+            "custodyLocationIsPrison": false,
+            "custodyLocationIsPolice": false,
+            "allNonCustodialResults": false,
+            "atleastOneNonCustodialResult": false,
+            "atleastOneCustodialResult": false,
+            "youthDefendant": true,
+            "adultDefendant": false,
+            "adultOrYouthDefendant": false,
+            "welshCourtHearing": false,
+            "englishCourtHearing": false,
+            "anyCourtHearing": true,
+            "ignoreCustody": true,
+            "ignoreResults": true
+          },
+          "firstClassLetterDelivery": false,
+          "secondClassLetterDelivery": false,
+          "emailDelivery": true,
+          "forDistribution": true,
+          "includedNOWS": [
+            "10115268-8efc-49fe-b8e8-feee216a03da"
+          ],
+          "startDate": "2020-02-28",
+          "emailTemplateName": "cr_youth",
+          "selectedCourtHouses": [
+            "B01LY00"
+          ]
+        }
+      ]
+    }
+  }
+}

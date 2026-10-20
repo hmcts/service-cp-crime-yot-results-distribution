@@ -145,3 +145,6 @@ private RedisHearingPayloadAdapter adapter;
   `config/**` excluded). Naming a task is a way to run one of them **sooner**, never a way to run
   one at all — there is no `onlyIf` in `gradle/pmd.gradle` and `pmdTest` is not disabled
   (constitution 2.0.3 removed both, and `CLAUDE.md`'s Build & Test table has said so since).
+  The one exemption is the `gatling` source set (`src/gatling/`, the NFT load tooling, never
+  shipped): `check` still compiles it, but `pmdGatling` and `checkstyleGatling` are disabled in
+  `build.gradle`, and it is outside the coverage gate.
