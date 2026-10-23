@@ -39,8 +39,9 @@ import org.slf4j.LoggerFactory;
  * <p>This path is for local runs, and here a stub that cannot be installed aborts the run: without
  * the stubs every request goes transient, and a publish-only Gatling report would still read green.
  * In the pipeline the Gatling process cannot reach WireMock (the agent's istio sidecar routes
- * localhost:8080 to the service pod), so the shell script installs the stubs and the pipeline sets
- * {@code -Dgatling.wiremockViaScript=true}, which skips this class entirely.
+ * localhost:8080 to the service pod), so the shell script installs the stubs and the build sets
+ * {@code -Dgatling.wiremockViaScript=true} (by default wherever {@code TF_BUILD} is set, i.e. on
+ * every Azure DevOps agent), which skips this class entirely.
  */
 public final class WireMockStubs {
 

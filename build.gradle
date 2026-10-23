@@ -195,10 +195,18 @@ gatling {
   if (System.getProperty('gatling.redisUri') != null) {
     args.add("-Dgatling.redisUri=${System.getProperty('gatling.redisUri')}")
   }
-  ['gatling.redisHitPercent', 'gatling.redisTtlSeconds', 'gatling.wiremockViaScript'].each { key ->
+  ['gatling.redisHitPercent', 'gatling.redisTtlSeconds'].each { key ->
     if (System.getProperty(key) != null) {
       args.add("-D${key}=${System.getProperty(key)}")
     }
+  }
+  // On an Azure DevOps agent (TF_BUILD is set on every one) the shared ASB perf pipeline installs
+  // the stubs with setup-wiremock-stubs.sh and cannot reach WireMock from the agent, so default to
+  // skipping WireMockStubs there; an explicit -Dgatling.wiremockViaScript still wins either way.
+  def wiremockViaScript = System.getProperty('gatling.wiremockViaScript',
+      System.getenv('TF_BUILD') != null ? 'true' : null)
+  if (wiremockViaScript != null) {
+    args.add("-Dgatling.wiremockViaScript=${wiremockViaScript}")
   }
   jvmArgs = args
 }

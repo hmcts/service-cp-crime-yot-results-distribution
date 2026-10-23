@@ -59,10 +59,12 @@
 #   POSTGRES_POD_SELECTOR   selected by this label selector (default: the validation stack's
 #                           `postgres` release of the postgresql chart, primary pod),
 #   POSTGRES_CONTAINER      in this container (default postgresql, that chart's container), as
-#                           PGUSER / PGDATABASE (default
-#                           yotresultsdistribution). No password is passed: psql authenticates
-#                           with the pod's own environment or local socket trust, so no secret
-#                           reaches a command line
+#                           PGUSER (default postgres, the chart's admin user) on PGDATABASE (default
+#                           yotresultsdistribution). The chart demands a password even on the local
+#                           socket, and the only one the pod holds is the admin's, so psql reads it
+#                           from the pod's own environment (POSTGRES_POSTGRES_PASSWORD, else
+#                           POSTGRES_PASSWORD, else the matching *_FILE) inside the pod: no secret
+#                           reaches a command line or this agent
 #   MAX_P95_MS            p95 latency gate for the gated scenario (required)
 #   MAX_P99_MS            p99 latency gate for the gated scenario (required)
 #   GATED_SIMULATIONS     space-separated simulations whose outcomes are gated
@@ -110,10 +112,20 @@ else
   [ -n "$PG_POD" ] || { error "Postgres pod ($POSTGRES_POD_SELECTOR) not found in $NAMESPACE"; exit 1; }
   CONTAINER_ARGS=()
   [ -n "${POSTGRES_CONTAINER:-}" ] && CONTAINER_ARGS=(-c "$POSTGRES_CONTAINER")
+  # The password is resolved by the pod's shell from the pod's environment (single-quoted here, so
+  # this agent never expands it); user, database and statement travel as positional arguments
+  # shellcheck disable=SC2016
+  PG_LOGIN='pw="${POSTGRES_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}"
+    if [ -z "$pw" ]; then
+      for f in "${POSTGRES_POSTGRES_PASSWORD_FILE:-}" "${POSTGRES_PASSWORD_FILE:-}"; do
+        if [ -n "$f" ] && [ -r "$f" ]; then pw=$(cat "$f"); break; fi
+      done
+    fi
+    PGPASSWORD="$pw" exec psql -h 127.0.0.1 -U "$1" -d "$2" -X -q -At -F "$(printf "\t")" \
+      -v ON_ERROR_STOP=1 -c "$3"'
   sql() {
     kubectl exec -i "$PG_POD" -n "$NAMESPACE" ${CONTAINER_ARGS[@]+"${CONTAINER_ARGS[@]}"} -- \
-      psql -U "${PGUSER:-yotresultsdistribution}" \
-      -d "${PGDATABASE:-yotresultsdistribution}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 -c "$1"
+      sh -c "$PG_LOGIN" sh "${PGUSER:-postgres}" "${PGDATABASE:-yotresultsdistribution}" "$1"
   }
 fi
 

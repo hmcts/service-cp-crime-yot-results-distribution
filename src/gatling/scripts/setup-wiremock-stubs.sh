@@ -15,9 +15,10 @@
 # message that caused it. That is what lets verify-outputs.sh correlate register
 # rows to requests; a preflight below fails the run if templating does not render.
 #
-# Expects: NAMESPACE and KUBECONFIG to be set by the calling pipeline, which then runs Gatling
-# with -Dgatling.wiremockViaScript=true so the simulations do not try to install the stubs again
-# (they cannot reach WireMock from the agent, and would abort).
+# Expects: NAMESPACE and KUBECONFIG to be set by the calling pipeline. Gatling then runs with
+# -Dgatling.wiremockViaScript=true — build.gradle defaults it on wherever TF_BUILD is set, i.e. on
+# every Azure DevOps agent — so the simulations do not try to install the stubs again (they cannot
+# reach WireMock from the agent, and would abort).
 set -euo pipefail
 
 : "${NAMESPACE:?NAMESPACE must be set}"
