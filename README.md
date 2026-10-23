@@ -397,8 +397,9 @@ ASB_EMULATOR_KEY=SAS_KEY_VALUE REDIS_URI=redis://localhost:6379 \
 
 In a pipeline, `src/gatling/scripts/setup-wiremock-stubs.sh` installs the stubs through
 `kubectl exec` and Gatling runs with `-Dgatling.wiremockViaScript=true`; locally, a stub that cannot
-be installed aborts the run. `verify-outputs.sh` reaches Postgres through `NAMESPACE` +
-`POSTGRES_POD_SELECTOR` and passes no password. PMD and Checkstyle do not run on the `gatling` source set.
+be installed aborts the run. `verify-outputs.sh` reaches Postgres through `NAMESPACE` alone,
+selecting the validation stack's `postgres` release (override with `POSTGRES_POD_SELECTOR` /
+`POSTGRES_CONTAINER`), and passes no password. PMD and Checkstyle do not run on the `gatling` source set.
 
 ### Contribute to this repository
 

@@ -56,8 +56,10 @@
 #   DATABASE_URL          reach Postgres directly with a libpq URI (local), e.g.
 #                         postgresql://yotresultsdistribution:yotresultsdistribution@localhost:5432/yotresultsdistribution
 #   NAMESPACE             or reach it via kubectl exec into a pod with psql on its path (pipeline),
-#   POSTGRES_POD_SELECTOR   selected by this label selector (required with NAMESPACE),
-#   POSTGRES_CONTAINER      in this container (optional), as PGUSER / PGDATABASE (default
+#   POSTGRES_POD_SELECTOR   selected by this label selector (default: the validation stack's
+#                           `postgres` release of the postgresql chart, primary pod),
+#   POSTGRES_CONTAINER      in this container (default postgresql, that chart's container), as
+#                           PGUSER / PGDATABASE (default
 #                           yotresultsdistribution). No password is passed: psql authenticates
 #                           with the pod's own environment or local socket trust, so no secret
 #                           reaches a command line
@@ -97,7 +99,10 @@ if [ -n "${DATABASE_URL:-}" ]; then
   sql() { psql "$DATABASE_URL" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 -c "$1"; }
 else
   : "${NAMESPACE:?NAMESPACE or DATABASE_URL must be set}"
-  : "${POSTGRES_POD_SELECTOR:?POSTGRES_POD_SELECTOR must be set with NAMESPACE}"
+  # The validation stack's Postgres (cpp-aks-deploy helmsman_nle.toml, release `postgres`), so the
+  # shared ASB perf pipeline, which exports only NAMESPACE, needs no service-specific wiring
+  POSTGRES_POD_SELECTOR="${POSTGRES_POD_SELECTOR:-app.kubernetes.io/instance=postgres,app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary}"
+  POSTGRES_CONTAINER="${POSTGRES_CONTAINER-postgresql}"
   # items[*], not items[0]: an empty match is then an empty string the check below can report,
   # rather than a jsonpath error that set -e turns into an unexplained exit
   PG_POD=$(kubectl get pods -n "$NAMESPACE" -l "$POSTGRES_POD_SELECTOR" \
