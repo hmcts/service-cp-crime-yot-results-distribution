@@ -86,6 +86,15 @@ story's tests are built on. No user-story work can begin until this phase is gre
       throws still produces exactly one settlement, and that settlement is always `abandon()`,
       **never** `deadLetter()`, because the final-delivery position could not be determined; a
       `null`/absent enqueue time is recorded as absent and the delivery proceeds normally.
+- [ ] T006a [P] Write failing `persistence/IdempotencyGuardIT` or `FailedReplayIT` case in
+      `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/persistence/` (co-located with whichever
+      suite the implementer finds the cleaner fit): two runners race to park the same request — the
+      runner whose claim was reclaimed while it was working (the existing stale-runner scenario the
+      suite already drives for `status`/`failure_reason`) must not have its
+      `parking_sequence_number`/`parking_category`/`parking_attempt_count` applied either; the
+      winner's values are the ones that land (FR-002, FR-015 "a stale runner cannot overwrite the
+      parking metadata"). Mirrors the existing owner/token-predicate proof this suite already has for
+      the pre-existing columns — this case is the same proof extended to the three new ones.
 
 ### Implementation for Foundational
 
@@ -126,8 +135,10 @@ story's tests are built on. No user-story work can begin until this phase is gre
       `RECORD_FAILED`'s `SET` clause with `parking_sequence_number = :sequenceNumber,
       parking_category = :category, parking_attempt_count = attempts` (the last is the bare column
       reference, not a bound parameter — FR-001), and `recordNonTransientFailure`/`recordExhaustion`
-      to pass the claim's `sequenceNumber` and the calling branch's category. Depends on T007, T009,
-      T010.
+      to pass the claim's `sequenceNumber` and the calling branch's category — this `SET` clause
+      stays predicated on `claim_owner = :owner AND claim_token = :token`, unchanged, which is what
+      makes T006a's stale-runner case pass alongside the existing ones. Depends on T007, T009, T010.
+      Makes T006a pass.
 - [ ] T017 `inbound/YotResultsDistributionMessageListener.java`: add a listener-local
       `BrokerDeliverySnapshot` record (`sequenceNumber`, `deliveryCount`, `messageId`, `lockToken`,
       `enqueueTime`, `finalPermittedDelivery`); build it once at the top of `process`'s existing call
@@ -164,6 +175,12 @@ and the pipeline running again.
       `(attempts, parking_sequence_number)` pair observed on the read; a delivery that read the row
       before a concurrent replay already ran and re-parked it is refused `REPLAY_NOT_ADMITTED` and
       never replays the newer failure (FR-006, the spec's "stale replay decision" edge case).
+- [ ] T019a [P] [US1] Write failing case — the opposite of T019, not a duplicate of it: a delivery
+      arrives **after** a newer failure has already been recorded for the request, carrying a
+      sequence number that differs from the **current** parking sequence number (a stray or delayed
+      copy of an earlier attempt). Assert it is **admitted** and replays the current failure once,
+      logged as a replay — the spec's "independent-enqueue policy" (Edge Cases, "A stale copy of an
+      older parking delivery…"), which is accepted behaviour, not a race to be refused.
 - [ ] T020 [P] [US1] Write failing case: two concurrent re-sends for the same parked request admit
       exactly one replay; the loser is handed back `REPLAY_NOT_ADMITTED` (FR-006 concurrency).
 - [ ] T021 [P] [US1] Write failing case: a replay of a request whose register is already recorded in
@@ -191,7 +208,7 @@ and the pipeline running again.
       `parking_attempt_count` equals the current `attempts` (the "exact" row, data-model.md's decision
       table) — equal sequence number re-parks without running (the US2 half, carried forward
       unconditionally pending Phase 6's reason/category wiring), different sequence number replays
-      via the new compare-and-set (T025). Depends on T025. Makes T018, T019, T020, T022 pass.
+      via the new compare-and-set (T025). Depends on T025. Makes T018, T019, T019a, T020, T022 pass.
 - [ ] T027 [US1] `inbound/YotResultsDistributionMessageListener.java`: `identityOf` builds
       `DeliveryIdentity`/`RunClaim` from the `BrokerDeliverySnapshot`'s `sequenceNumber`,
       `deliveryCount` and `enqueueTime` (T017's new explicit constructor from T008). Depends on T017,
@@ -254,6 +271,13 @@ fails either condition and observe a re-park.
       (FR-005).
 - [ ] T034 [US3] Write failing case: an enqueue time **exactly equal** to `updated_at + legacy-margin`
       re-parks — the boundary is exclusive.
+- [ ] T034a [US3] Write failing case demonstrating, not just narrating, FR-005's accepted residual
+      risk: a legacy row released without a delivery-count increment (the connection-closed path,
+      not an abandon), delivered with an **enqueue time read as later than it genuinely was** by
+      more than the margin (a simulated broker-clock lead over the database clock) — assert the
+      heuristic still admits it as a replay. This is the one case FR-005's own text accepts rather
+      than guards against; the test's purpose is to pin it as observed, reviewed behaviour rather
+      than an assumption nothing exercises.
 - [ ] T035 [US3] Write failing case: a legacy resubmission handed back once (store outage suspended
       intake, or it lost a compare-and-set race) is judged afresh on its next delivery, not
       remembered (US3 Acceptance Scenario 3).
@@ -261,9 +285,20 @@ fails either condition and observe a re-park.
       present but whose current `attempts` differs from its recorded `parking_attempt_count` is
       decided by the legacy heuristic, not as exact, and its stale `parking_category` is never read
       (FR-005a, research.md R6).
-- [ ] T037 [US3] Write failing case: a row an older consumer re-parked without the new columns
-      (constructed directly, pre-migration-shaped) keeps its stale parking fields without violating
-      `processed_request_parking_triple_chk` or any other constraint.
+- [ ] T037 [US3] Write failing case for the **replay** half of the rolling-deployment edge case,
+      distinct from T036's re-park half: a row parked by a newer consumer (parking triple set) is
+      then moved `FAILED → RECEIVED` by a statement shaped like the *old* `REPLAY_FAILED` — one that
+      clears only the pre-existing columns (`exhausted_message_id`, `failure_reason`, `audit_note`)
+      and has no idea the three new columns exist. Assert the triple survives, stale and non-null,
+      on the now-`RECEIVED` row, and that `processed_request_parking_triple_chk` is not violated
+      (FR-014's "clearing is a write rule, not a database constraint" — this is the state that rule
+      exists to permit). This is the precursor state to T036: T036 proves the *next* parking of this
+      same row is judged as legacy by the `attempts` signal; T037 proves the intermediate state
+      between the two parkings is itself constraint-valid. The "old" statement is simulated directly
+      in the test (a hand-written `UPDATE` mirroring the pre-this-feature `REPLAY_FAILED` shape),
+      not invoked through production code — there is no older version of this statement left to call.
+      Pinned by T007's migration (the constraint under test already exists); no new production code
+      in this phase guards this case.
 
 ### Implementation for User Story 3
 
@@ -271,7 +306,7 @@ fails either condition and observe a re-park.
       for a row with absent or stale parking fields, apply `deliveryCount == 0 && enqueueTime >
       updatedAt.plus(legacyMargin)`, replaying via the same compare-and-set (its null-safe half
       matches whatever was observed) or re-parking otherwise. Depends on T026, T014 (needs
-      `legacyMargin`). Makes T032-T037 pass.
+      `legacyMargin`). Makes T032-T034, T034a, T035-T037 pass.
 
 **Checkpoint**: all three replay-admission paths — exact-equal, exact-different, legacy/stale
 heuristic — are complete and independently provable.
@@ -358,8 +393,10 @@ and category. All four user stories and FR-001–FR-015 are behaviourally comple
 
 - Every `[P]` task within Phase 2's Tests block, and within its Implementation block, touches a
   different file and can run in parallel once the phase starts.
-- T018-T023 (US1 tests) are independent files and can run in parallel; T024 depends on T017's
-  snapshot wiring being in place to assert against the emulator meaningfully.
+- T018-T023 and T019a (US1 tests) are independent files and can run in parallel; T024 depends on
+  T017's snapshot wiring being in place to assert against the emulator meaningfully.
+- T032-T034, T034a and T036 (US3 tests) are independent and can run in parallel; T035 and T037 are
+  not marked `[P]` since they share fixture state with their neighbours within the same suite.
 - Phase 7's T044-T047 are independent review tasks and can run in parallel.
 
 ---
