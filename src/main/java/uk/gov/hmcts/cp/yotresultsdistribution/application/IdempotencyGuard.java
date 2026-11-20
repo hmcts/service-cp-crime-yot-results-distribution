@@ -33,8 +33,13 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.ProcessedRequestReposi
  *     new request                      -&gt; Run         (inserted, claimed, attempts = 1)
  *     same key, different request      -&gt; DeadLetter  (collision; the row is not touched)
  *     COMPLETED                        -&gt; Complete    (acknowledged, nothing re-run)
- *     FAILED, same messageId as parked -&gt; DeadLetter  (an earlier park that did not settle)
- *     FAILED, fresh messageId          -&gt; Run         (a deliberate replay, audit note written)
+ *     FAILED, same sequence as parked  -&gt; DeadLetter  (an earlier park that did not settle,
+ *                                                       whatever its messageId - spec
+ *                                                       007-replay-by-sequence-number, FR-003/FR-004)
+ *     FAILED, different sequence       -&gt; Run         (a deliberate replay, audit note written,
+ *                                                       whatever its messageId; messageId decides
+ *                                                       only a legacy/stale row this version did not
+ *                                                       park, pending FR-005)
  *     RECEIVED / RETRYING, claim free  -&gt; Run         (the previous claim has expired)
  *     RECEIVED / RETRYING, claim held  -&gt; Abandon     (another runner has it; broker retries)
  *
