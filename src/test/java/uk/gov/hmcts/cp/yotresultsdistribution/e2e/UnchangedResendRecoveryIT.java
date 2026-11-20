@@ -66,7 +66,7 @@ class UnchangedResendRecoveryIT {
     private static final Duration REPLAYED_WITHIN = Duration.ofSeconds(60);
 
     /** The test-only queue's shortened window (config.json), plus a safety margin. */
-    private static final Duration PAST_THE_DUPLICATE_DETECTION_WINDOW = Duration.ofSeconds(12);
+    private static final Duration PAST_THE_DUPLICATE_DETECTION_WINDOW = Duration.ofSeconds(18);
 
     private static final int PERMITTED_DELIVERIES = 5;
 
