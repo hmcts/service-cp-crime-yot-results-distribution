@@ -156,8 +156,10 @@ every refusal.
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/006-appconfig-connection-string/plan.md` (with `spec.md` and `tasks.md` alongside
-it); the completed increments are `specs/001-court-register-port/`,
-`specs/002-consolidate-progression-leg/`, `specs/003-exception-report/`,
-`specs/004-release-stale-batches/` and `specs/005-operations-rest-api/`.
+`specs/007-replay-by-sequence-number/plan.md` (with `research.md`, `data-model.md`,
+`quickstart.md` and `contracts/` alongside it). The completed increments are
+`specs/001-court-register-port/`, `specs/002-consolidate-progression-leg/`,
+`specs/003-exception-report/`, `specs/004-release-stale-batches/` and
+`specs/005-operations-rest-api/`; `specs/006-appconfig-connection-string/`'s plan remains
+at its own path and is not superseded by this one.
 <!-- SPECKIT END -->
