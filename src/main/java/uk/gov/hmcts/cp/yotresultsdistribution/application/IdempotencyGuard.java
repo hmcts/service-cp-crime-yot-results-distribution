@@ -352,7 +352,7 @@ public class IdempotencyGuard {
             LOG.warn("Delivery carries the sequence number that parked this request; re-parking. "
                     + "source={} requestId={} sequenceNumber={}",
                     claim.source(), claim.requestId(), claim.sequenceNumber());
-            decision = reParkDecision(record, claim, record.parkingCategory());
+            decision = reParkDecision(record, claim, trustedCategoryOf(record));
         } else if (repository.replayFailed(
                 claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
             LOG.info("Parked request replayed. source={} requestId={} parkedSequenceNumber={} "
@@ -416,9 +416,18 @@ public class IdempotencyGuard {
             // where physically non-null, describes a parking this decision has already judged not
             // to be the current one (isExactParking returned false to route here at all); FR-005a
             // says to decide as though it were absent, not merely as though it were unwritten.
-            decision = reParkDecision(record, claim, null);
+            decision = reParkDecision(record, claim, Optional.empty());
         }
         return decision;
+    }
+
+    /**
+     * The stored {@code parking_category}, as an exact row's re-park branch alone may trust it
+     * (FR-010); a legacy/stale row never calls this at all (FR-005a) and passes
+     * {@link Optional#empty()} directly instead.
+     */
+    private static Optional<DeadLetterReason> trustedCategoryOf(final ProcessedRequestRecord record) {
+        return Optional.ofNullable(record.parkingCategory()).map(DeadLetterReason::valueOf);
     }
 
     /**
@@ -429,27 +438,27 @@ public class IdempotencyGuard {
      * which decision path re-parked it; what differs between the two callers is {@code
      * trustedCategory}, since only the exact branch may trust what {@code parking_category} says.
      *
-     * <p>A non-null {@code trustedCategory} is used exactly as given and never reconstructed from
-     * the reason code (FR-010); a {@code null} one — the legacy/stale branch always passes one, the
-     * exact branch only when the column itself is empty — falls to {@link FailureCategoryMapping}.
-     * A stored {@code failure_reason} that does not parse to a known {@link ReasonCode} — missing,
+     * <p>A present {@code trustedCategory} is used exactly as given and never reconstructed from
+     * the reason code (FR-010); an absent one — the legacy/stale branch always passes one, the exact
+     * branch only when the column itself is empty — falls to {@link FailureCategoryMapping}. A
+     * stored {@code failure_reason} that does not parse to a known {@link ReasonCode} — missing,
      * or written by a version that does not exist yet — dead-letters as
      * {@code exhausted / UNEXPECTED_FAILURE} rather than propagate text this service did not write:
      * the sanitised log line below names the anomaly by identifiers only, never the unrecognised
      * text itself, and nothing here throws (FR-009).
      *
-     * @param trustedCategory the stored {@code parking_category} if, and only if, the caller has
+     * @param trustedCategory the stored {@code parking_category}, if and only if the caller has
      *                        established it still describes the current {@code FAILED} generation;
-     *                        {@code null} otherwise, however the column itself reads
+     *                        {@link Optional#empty()} otherwise, however the column itself reads
      */
     private GuardDecision reParkDecision(
-            final ProcessedRequestRecord record, final RunClaim claim, final String trustedCategory) {
+            final ProcessedRequestRecord record, final RunClaim claim,
+            final Optional<DeadLetterReason> trustedCategory) {
         final Optional<ReasonCode> reason = ReasonCode.fromCode(record.failureReason());
         final GuardDecision decision;
         if (reason.isPresent()) {
-            final DeadLetterReason category = trustedCategory != null
-                    ? DeadLetterReason.valueOf(trustedCategory)
-                    : FailureCategoryMapping.categoryFor(record.failureReason());
+            final DeadLetterReason category = trustedCategory
+                    .orElseGet(() -> FailureCategoryMapping.categoryFor(record.failureReason()));
             decision = new GuardDecision.DeadLetter(category, reason.get());
         } else {
             LOG.error("Re-park found a stored failure reason this version cannot classify; "

@@ -2,6 +2,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -484,6 +485,9 @@ class FailedReplayIT {
         assertThat(captured.list)
                 .as("the anomaly is logged, but the unrecognised text itself is never emitted")
                 .noneMatch(event -> event.getFormattedMessage().contains(unrecognisedReason));
+        assertThat(captured.list)
+                .as("an anomaly is actually logged, not merely silent about the unrecognised text")
+                .anyMatch(event -> event.getLevel().equals(Level.ERROR));
     }
 
     // --- US3: requests parked before this change can be recovered (spec 007, FR-005) -------------
