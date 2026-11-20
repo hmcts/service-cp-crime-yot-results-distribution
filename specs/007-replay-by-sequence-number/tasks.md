@@ -164,54 +164,63 @@ and the pipeline running again.
 
 ### Tests for User Story 1 (write first) ⚠️
 
-- [ ] T018 [P] [US1] Write failing `IdempotencyGuardIT`/`FailedReplayIT` case: a `FAILED` request with
+- [X] T018 [P] [US1] Write failing `IdempotencyGuardIT`/`FailedReplayIT` case: a `FAILED` request with
       a recorded parking sequence number, delivered under the **same `messageId`** but a **different**
       sequence number, is replayed — `FAILED → RECEIVED`, `attempts` preserved and incremented once,
       `failure_reason`/`exhausted_message_id`/`parking_sequence_number`/`parking_category`/
       `parking_attempt_count` all cleared, audit note written (FR-003 different-branch, FR-004,
       FR-007).
-- [ ] T019 [P] [US1] Write failing case: the replay's compare-and-set matches exactly the
+- [X] T019 [P] [US1] Write failing case: the replay's compare-and-set matches exactly the
       `(attempts, parking_sequence_number)` pair observed on the read; a delivery that read the row
       before a concurrent replay already ran and re-parked it is refused `REPLAY_NOT_ADMITTED` and
       never replays the newer failure (FR-006, the spec's "stale replay decision" edge case).
-- [ ] T019a [P] [US1] Write failing case — the opposite of T019, not a duplicate of it: a delivery
+- [X] T019a [P] [US1] Write failing case — the opposite of T019, not a duplicate of it: a delivery
       arrives **after** a newer failure has already been recorded for the request, carrying a
       sequence number that differs from the **current** parking sequence number (a stray or delayed
       copy of an earlier attempt). Assert it is **admitted** and replays the current failure once,
       logged as a replay — the spec's "independent-enqueue policy" (Edge Cases, "A stale copy of an
       older parking delivery…"), which is accepted behaviour, not a race to be refused.
-- [ ] T020 [P] [US1] Write failing case: two concurrent re-sends for the same parked request admit
+- [X] T020 [P] [US1] Write failing case: two concurrent re-sends for the same parked request admit
       exactly one replay; the loser is handed back `REPLAY_NOT_ADMITTED` (FR-006 concurrency).
-- [ ] T021 [P] [US1] Write failing case: a replay of a request whose register is already recorded in
+- [X] T021 [P] [US1] Write failing case: a replay of a request whose register is already recorded in
       `record` mode (or, in `progression-post` mode, already `POSTED`) records/sends nothing a second
       time — the independent-enqueue regression, re-asserted under the new decision path.
-- [ ] T022 [US1] Write failing log-assertion case: an admitted replay logs the request identifiers,
+- [X] T022 [US1] Write failing log-assertion case: an admitted replay logs the request identifiers,
       the parked delivery's sequence number, and the replaying delivery's sequence number —
       identifiers only, no defendant detail (FR-008).
-- [ ] T023 [P] [US1] Extend `e2e/QueueSettlementIT` and `e2e/DeliveryExhaustionIT` against the real
+- [X] T023 [P] [US1] Extend `e2e/QueueSettlementIT` and `e2e/DeliveryExhaustionIT` against the real
       Service Bus emulator: the sequence number is unchanged across an `abandon()`; a dead-letter
       re-send under the same `messageId` is accepted and enqueued with a **new** sequence number.
-- [ ] T024 [US1] Extend `e2e/QueueSettlementIT`: park a request, wait past the duplicate-detection
+- [X] T024 [US1] Extend `e2e/QueueSettlementIT`: park a request, wait past the duplicate-detection
       window, re-send the dead-lettered body unchanged via the emulator's dead-letter sub-queue, and
       observe `FAILED → RECEIVED → COMPLETED` end to end (US1's own Independent Test).
 
 ### Implementation for User Story 1
 
-- [ ] T025 [US1] `persistence/ProcessedRequestRepository.java`: rewrite `REPLAY_FAILED`'s `WHERE`
+- [X] T025 [US1] `persistence/ProcessedRequestRepository.java`: rewrite `REPLAY_FAILED`'s `WHERE`
       clause from `status = 'FAILED' AND exhausted_message_id <> :messageId` to `status = 'FAILED'
       AND attempts = :observedAttempts AND parking_sequence_number IS NOT DISTINCT FROM
       :observedParkingSequenceNumber`; extend its `SET` clause to clear `parking_sequence_number`,
       `parking_category`, `parking_attempt_count` alongside the existing `exhausted_message_id = NULL`.
       Depends on T016. Makes T018-T020 pass.
-- [ ] T026 [US1] `application/IdempotencyGuard.java`: rewrite `replayOrPark` for the row whose
+- [X] T026 [US1] `application/IdempotencyGuard.java`: rewrite `replayOrPark` for the row whose
       `parking_attempt_count` equals the current `attempts` (the "exact" row, data-model.md's decision
       table) — equal sequence number re-parks without running (the US2 half, carried forward
       unconditionally pending Phase 6's reason/category wiring), different sequence number replays
       via the new compare-and-set (T025). Depends on T025. Makes T018, T019, T019a, T020, T022 pass.
-- [ ] T027 [US1] `inbound/YotResultsDistributionMessageListener.java`: `identityOf` builds
+- [X] T027 [US1] `inbound/YotResultsDistributionMessageListener.java`: `identityOf` builds
       `DeliveryIdentity`/`RunClaim` from the `BrokerDeliverySnapshot`'s `sequenceNumber`,
       `deliveryCount` and `enqueueTime` (T017's new explicit constructor from T008). Depends on T017,
       T026. Makes T023, T024 pass.
+
+      T024's independent test needed a second, test-only queue
+      (`yotresultsdistribution.requests.resend-window-test`, `docker/servicebus-emulator/config.json`)
+      with a ten-second duplicate-detection window rather than the production-mirroring five minutes,
+      so the suite can wait the window out; mirrors the identical choice already taken in
+      `service-cp-crime-informant-register` (`UnchangedResendRecoveryIT`). `QueueSettlementIT`'s own
+      T023 sequence-number-on-an-accepted-resend assertion stays on the production queue under a
+      **fresh** `messageId`, deliberately, so it is not itself discarded by the real five-minute
+      window; `ServiceBusEmulatorTestSupport.peekFor` gained a queue-name overload to serve both.
 
 **Checkpoint**: User Story 1 is independently testable — a portal-style dead-letter re-send with an
 unchanged `messageId` recovers a parked request end to end.

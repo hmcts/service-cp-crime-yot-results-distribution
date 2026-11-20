@@ -153,13 +153,20 @@ public class ProcessedRequestRepository {
             """;
 
     /**
-     * Statement 5 — a deliberate resubmission under a fresh identity.
+     * Statement 5 — a deliberate resubmission, admitted by a compare-and-set against the exact
+     * failure generation the delivery observed (spec 007-replay-by-sequence-number, FR-006).
      *
      * <p>{@code attempts} is carried forward, not reset: the counter is a lifetime tally, so five
-     * failed deliveries followed by a successful replay leave the row showing 6. The
-     * {@code exhausted_message_id <> :messageId} predicate is defence in depth — the same-identity
-     * case is already decided on the read — and is safe against NULL because the FAILED check
-     * guarantees the column is populated on every parked row.
+     * failed deliveries followed by a successful replay leave the row showing 6. The predicate is
+     * {@code attempts = :observedAttempts AND parking_sequence_number IS NOT DISTINCT FROM
+     * :observedParkingSequenceNumber} — not {@code exhausted_message_id <> :messageId} any more,
+     * because a different sequence number replays whatever its {@code messageId} is (FR-004).
+     * {@code IS NOT DISTINCT FROM} rather than {@code =} so a legacy row's {@code NULL} parking
+     * sequence number still matches the {@code NULL} observed on the read (FR-005, FR-006) — plain
+     * {@code =} is never true against a {@code NULL} on either side. Defence in depth, not the
+     * decision itself: {@link uk.gov.hmcts.cp.yotresultsdistribution.application.IdempotencyGuard}
+     * decides replay-or-park before this statement is ever called; this predicate only refuses the
+     * write if the row moved between that read and this update.
      */
     private static final String REPLAY_FAILED = """
             UPDATE processed_request
@@ -169,12 +176,16 @@ public class ProcessedRequestRepository {
                    attempts = attempts + 1,
                    failure_reason = NULL,
                    exhausted_message_id = NULL,
+                   parking_sequence_number = NULL,
+                   parking_category = NULL,
+                   parking_attempt_count = NULL,
                    audit_note = :note,
                    updated_at = now()
              WHERE source = :source
                AND request_id = :requestId
                AND status = 'FAILED'
-               AND exhausted_message_id <> :messageId
+               AND attempts = :observedAttempts
+               AND parking_sequence_number IS NOT DISTINCT FROM :observedParkingSequenceNumber
             """;
 
     /**
@@ -421,14 +432,23 @@ public class ProcessedRequestRepository {
     }
 
     /**
-     * Statement 5 — replay a parked request under a fresh message identity, the claim's own.
+     * Statement 5 — replay a parked request, admitted by a compare-and-set against the exact
+     * failure generation the delivery observed (spec 007-replay-by-sequence-number, FR-006).
      *
-     * @param runClaim  the claim the replayed run would be made under
-     * @param auditNote the bounded note recording the replay
+     * @param runClaim                     the claim the replayed run would be made under
+     * @param observedAttempts             the {@code attempts} value read when the decision to
+     *                                     replay was made
+     * @param observedParkingSequenceNumber the {@code parking_sequence_number} read at the same
+     *                                      moment — {@code null} for a legacy or stale row (FR-005,
+     *                                      FR-005a); matched null-safely
+     * @param auditNote                    the bounded note recording the replay
      * @return whether the replay was admitted. False means the record moved between the read and
-     *         this update; it never means the identity was the same one, which the read decides.
+     *         this update — a concurrent replay won, or the record is no longer parked. It never
+     *         means the sequence number was the same one, which the read decides.
      */
-    public boolean replayFailed(final RunClaim runClaim, final String auditNote) {
+    public boolean replayFailed(
+            final RunClaim runClaim, final int observedAttempts,
+            final Long observedParkingSequenceNumber, final String auditNote) {
         return StoreOutage.translating("replay a parked request", () -> affected(jdbcClient
                 .sql(REPLAY_FAILED)
                 .param(SOURCE, runClaim.source())
@@ -436,7 +456,8 @@ public class ProcessedRequestRepository {
                 .param(OWNER, runClaim.owner())
                 .param(TOKEN, runClaim.token())
                 .param(LEASE_PARAM, lease())
-                .param(MESSAGE_ID, runClaim.messageId())
+                .param("observedAttempts", observedAttempts)
+                .param("observedParkingSequenceNumber", observedParkingSequenceNumber)
                 .param("note", auditNote)
                 .update()));
     }

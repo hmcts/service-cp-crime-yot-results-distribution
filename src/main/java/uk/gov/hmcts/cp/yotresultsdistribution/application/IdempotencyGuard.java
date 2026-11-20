@@ -285,29 +285,98 @@ public class IdempotencyGuard {
     }
 
     /**
-     * A parked request, decided by which identity is delivering it.
+     * A parked request, decided by which broker sequence number is delivering it (spec
+     * 007-replay-by-sequence-number, FR-003/FR-004) — for a row this version parked itself.
      *
-     * <p>The same identity that exhausted the retries is dead-lettering that did not settle: nothing
-     * runs and the parking is attempted again. Any other identity is a deliberate resubmission —
-     * which is the supported way to recover a dead-lettered court register, the replay tooling
-     * minting a fresh {@code messageId} and keeping the original {@code requestId}.
+     * <p>"This version parked itself" is {@link #isExactParking}: the row's recorded
+     * {@code parking_attempt_count} still equals its current {@code attempts}, so
+     * {@code parking_sequence_number} describes the <em>current</em> {@code FAILED} generation, not
+     * one an older consumer has since written over without knowing these columns exist (FR-005a).
+     * The same sequence number is dead-lettering that did not settle: nothing runs and the parking
+     * is attempted again, under the request's own recorded reason and category (FR-009), never a
+     * generic one. A different sequence number is a deliberate resubmission — the supported way to
+     * recover a dead-lettered court register — admitted by a compare-and-set against the exact
+     * failure generation observed (FR-006), whatever the delivery's {@code messageId} is (FR-004).
+     *
+     * <p>A row with no recorded parking sequence number, or a stale one, is not decided here yet:
+     * that is the legacy/stale heuristic (FR-005), landing in a later phase. Until then this method
+     * falls back to today's {@code messageId}-identity test for that one case, so a row outside this
+     * feature's current scope is decided exactly as it always has been.
      */
     private GuardDecision replayOrPark(
             final ProcessedRequestRecord record,
             final RunClaim claim) {
+        return isExactParking(record)
+                ? replayOrParkExact(record, claim)
+                : replayOrParkByMessageIdUntilTheLegacyHeuristicLands(record, claim);
+    }
 
+    /**
+     * Whether the row's recorded parking fields describe the <em>current</em> {@code FAILED}
+     * generation, rather than one an older consumer has since re-parked without knowing these
+     * columns exist (FR-005a).
+     */
+    private static boolean isExactParking(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() != null
+                && Objects.equals(record.parkingAttemptCount(), record.attempts());
+    }
+
+    /**
+     * The new rule: decided by sequence-number equality alone (FR-003/FR-004).
+     *
+     * <p>The re-park branch still reports the generic {@code exhausted / DELIVERY_LIMIT_EXHAUSTED}
+     * reason here, unchanged from before this feature — reporting the request's own recorded reason
+     * and category instead (FR-009/FR-010) is a separate, later phase's change, built once the
+     * legacy/stale heuristic (FR-005) also exists, so both re-park paths gain the real reason in one
+     * piece rather than one of the two first.
+     */
+    private GuardDecision replayOrParkExact(
+            final ProcessedRequestRecord record, final RunClaim claim) {
+        final GuardDecision decision;
+        if (record.parkingSequenceNumber() == claim.sequenceNumber()) {
+            LOG.warn("Delivery carries the sequence number that parked this request; re-parking. "
+                    + "source={} requestId={} sequenceNumber={}",
+                    claim.source(), claim.requestId(), claim.sequenceNumber());
+            decision = new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED);
+        } else if (repository.replayFailed(
+                claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
+            LOG.info("Parked request replayed. source={} requestId={} parkedSequenceNumber={} "
+                    + "replayingSequenceNumber={}",
+                    claim.source(), claim.requestId(), record.parkingSequenceNumber(),
+                    claim.sequenceNumber());
+            decision = new GuardDecision.Run(claim);
+        } else {
+            // Not "the same sequence number" — that is decided on the read above. The record moved
+            // underneath us: a concurrent replay won, or the record is no longer parked.
+            LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
+                    claim.source(), claim.requestId());
+            decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
+        }
+        return decision;
+    }
+
+    /**
+     * Today's rule, kept only for a row this version did not park itself: a legacy row, or one an
+     * older consumer has re-parked without knowing the new columns exist. The legacy/stale heuristic
+     * that properly decides this case (FR-005) lands in a later phase; until then this is unchanged
+     * from before this feature, so a row outside the current phase's scope keeps behaving exactly as
+     * it always has.
+     */
+    private GuardDecision replayOrParkByMessageIdUntilTheLegacyHeuristicLands(
+            final ProcessedRequestRecord record, final RunClaim claim) {
         final GuardDecision decision;
         if (Objects.equals(record.exhaustedMessageId(), claim.messageId())) {
             LOG.warn("Redelivery of the identity that exhausted the retries; re-parking. "
                     + "source={} requestId={}", claim.source(), claim.requestId());
             decision = new GuardDecision.DeadLetter(
                     DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED);
-        } else if (repository.replayFailed(claim, replayNote(record))) {
+        } else if (repository.replayFailed(
+                claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
             LOG.info("Parked request replayed under a fresh identity. source={} requestId={}",
                     claim.source(), claim.requestId());
             decision = new GuardDecision.Run(claim);
         } else {
-            // Not "the same identity" — that is decided on the read. The record moved underneath us.
             LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
                     claim.source(), claim.requestId());
             decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);

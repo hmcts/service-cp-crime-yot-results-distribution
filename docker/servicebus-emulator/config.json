@@ -17,6 +17,20 @@
               "RequiresDuplicateDetection": true,
               "RequiresSession": false
             }
+          },
+          {
+            "Name": "yotresultsdistribution.requests.resend-window-test",
+            "Properties": {
+              "DeadLetteringOnMessageExpiration": true,
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT10S",
+              "ForwardDeadLetteredMessagesTo": "",
+              "ForwardTo": "",
+              "LockDuration": "PT1M",
+              "MaxDeliveryCount": 5,
+              "RequiresDuplicateDetection": true,
+              "RequiresSession": false
+            }
           }
         ]
       }

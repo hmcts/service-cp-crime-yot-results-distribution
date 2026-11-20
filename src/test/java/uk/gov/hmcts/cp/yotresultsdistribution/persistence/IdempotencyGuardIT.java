@@ -54,12 +54,23 @@ class IdempotencyGuardIT {
 
     // --- helpers ---------------------------------------------------------------------------
 
+    /**
+     * Every delivery in this file already carries a distinct {@code "msg-N"} identity per distinct
+     * delivery intention, so the broker sequence number this feature's decision turns on is derived
+     * from that same {@code N} rather than threaded through as a second parameter everywhere: two
+     * deliveries meant to be the same one share a messageId and therefore a sequence number, and two
+     * meant to differ already use different numbers today.
+     */
     private static DeliveryIdentity delivery(final String messageId, final String owner) {
-        return new DeliveryIdentity(messageId, owner);
+        return new DeliveryIdentity(messageId, owner, false, sequenceNumberOf(messageId), 0L, null);
     }
 
     private static DeliveryIdentity delivery(final String messageId) {
         return delivery(messageId, OWNER);
+    }
+
+    private static long sequenceNumberOf(final String messageId) {
+        return Long.parseLong(messageId.substring(messageId.lastIndexOf('-') + 1));
     }
 
     private Row row() {
