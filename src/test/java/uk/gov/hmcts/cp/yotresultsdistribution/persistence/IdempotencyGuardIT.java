@@ -547,7 +547,7 @@ class IdempotencyGuardIT {
                             return Optional.empty();
                         }
                     },
-                    metrics);
+                    metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
 
             final GuardDecision decision = blindGuard.admit(command, delivery("msg-2"));
 

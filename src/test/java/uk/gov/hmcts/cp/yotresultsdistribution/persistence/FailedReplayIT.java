@@ -14,6 +14,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import uk.gov.hmcts.cp.yotresultsdistribution.application.IdempotencyGuard;
@@ -345,7 +346,7 @@ class FailedReplayIT {
                                 Instant.now()));
                     }
                 },
-                metrics);
+                metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
 
         final GuardDecision decision = staleReadingGuard.admit(command, delivery("msg-5", 6));
 
@@ -403,5 +404,273 @@ class FailedReplayIT {
         assertThat(second).isEqualTo(new GuardDecision.Abandon(ReasonCode.CLAIM_NOT_ACQUIRED));
         assertThat(row().status()).isEqualTo("RECEIVED");
         assertThat(row().attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
+    }
+
+    // --- US3: requests parked before this change can be recovered (spec 007, FR-005) -------------
+
+    /**
+     * A row with no recorded parking sequence number — parked before this feature shipped, or by an
+     * older consumer mid-rollout — has no exact signal to decide a redelivery by. FR-005's two-
+     * condition heuristic applies instead: a first delivery (the broker's count is zero-based) whose
+     * enqueue time is later than the row's own {@code updated_at} (the parking time, for a row
+     * nothing else touches while it stays {@code FAILED}) by more than the configured margin is
+     * treated as a resubmission; anything that fails either condition — including a delivery with no
+     * enqueue time at all — is re-parked. Replay is still the same compare-and-set as the exact row
+     * (FR-006); its null-safe half matches a {@code NULL} {@code parking_sequence_number} exactly as
+     * it matches any other recorded value.
+     *
+     * <p>Every test here deliberately gives the legacy delivery a {@code messageId} the pre-FR-005
+     * code's own messageId-identity fallback would have decided the <em>opposite</em> way, so each
+     * one is a genuine pin of the new heuristic rather than an assertion the old code already
+     * satisfied by coincidence.
+     */
+    @Nested
+    @DisplayName("a FAILED row with no recorded parking sequence number (spec 007, US3, FR-005)")
+    class LegacyRecords {
+
+        /**
+         * Parks the request through the normal five deliveries, then simulates a row that predates
+         * this feature (or was parked by an older consumer mid-rollout) by forgetting the parking
+         * triple this version's own exhaustion just wrote. {@code exhausted_message_id},
+         * {@code failure_reason} and {@code attempts} are left exactly as the real parking wrote
+         * them — only the three new columns are forgotten.
+         */
+        private void parkThenForgetTheParkingTriple() {
+            exhaustEveryPermittedDelivery();
+            final int cleared = ProcessedLogTestSupport.jdbcClient()
+                    .sql("""
+                            UPDATE processed_request
+                               SET parking_sequence_number = NULL, parking_category = NULL,
+                                   parking_attempt_count = NULL
+                             WHERE source = :source AND request_id = :requestId
+                            """)
+                    .param("source", command.source())
+                    .param("requestId", command.requestId())
+                    .update();
+            assertThat(cleared).isEqualTo(1);
+        }
+
+        private static DeliveryIdentity legacyDelivery(
+                final String messageId, final long sequenceNumber, final long deliveryCount,
+                final Instant enqueueTime) {
+            return new DeliveryIdentity(
+                    messageId, "runner-1/legacy", false, sequenceNumber, deliveryCount, enqueueTime);
+        }
+
+        @Test
+        @DisplayName("count 0, enqueued well after the margin, replays (FR-005)")
+        void should_replay_a_first_delivery_enqueued_well_after_the_margin() {
+            parkThenForgetTheParkingTriple();
+            final Instant parkedAt = row().updatedAt();
+
+            // "msg-5" is the parking messageId itself - the old code's fallback would re-park this
+            // outright as a redelivery of the exhausting identity. FR-005 does not look at it.
+            final GuardDecision decision = guard.admit(command, legacyDelivery(
+                    "msg-5", 5, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+
+            assertThat(decision).isInstanceOf(GuardDecision.Run.class);
+            final Row row = row();
+            assertThat(row.status()).isEqualTo("RECEIVED");
+            assertThat(row.attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
+            assertThat(row.parkingSequenceNumber()).isNull();
+        }
+
+        @Test
+        @DisplayName("count 1 or more re-parks, whatever the enqueue time (FR-005)")
+        void should_re_park_a_redelivery_whatever_the_enqueue_time() {
+            parkThenForgetTheParkingTriple();
+            final Instant parkedAt = row().updatedAt();
+            final Row before = row();
+
+            // A fresh messageId - the old code's fallback would replay this outright.
+            final GuardDecision decision = guard.admit(command, legacyDelivery(
+                    "msg-6", 6, 1L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+
+            assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row()).isEqualTo(before);
+        }
+
+        @Test
+        @DisplayName("enqueue time not later than the margin re-parks (FR-005)")
+        void should_re_park_a_first_delivery_enqueued_before_the_margin_elapses() {
+            parkThenForgetTheParkingTriple();
+            final Instant parkedAt = row().updatedAt();
+            final Row before = row();
+
+            final GuardDecision decision = guard.admit(command, legacyDelivery(
+                    "msg-6", 6, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).minusSeconds(1)));
+
+            assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row()).isEqualTo(before);
+        }
+
+        @Test
+        @DisplayName("no enqueue time at all re-parks (FR-005)")
+        void should_re_park_a_first_delivery_with_no_enqueue_time() {
+            parkThenForgetTheParkingTriple();
+            final Row before = row();
+
+            final GuardDecision decision = guard.admit(command, legacyDelivery("msg-6", 6, 0L, null));
+
+            assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row()).isEqualTo(before);
+        }
+
+        @Test
+        @DisplayName("an enqueue time exactly equal to the margin re-parks - the boundary is "
+                + "exclusive (T034)")
+        void should_re_park_a_first_delivery_enqueued_exactly_at_the_margin() {
+            parkThenForgetTheParkingTriple();
+            final Instant parkedAt = row().updatedAt();
+            final Row before = row();
+
+            final GuardDecision decision = guard.admit(command, legacyDelivery(
+                    "msg-6", 6, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN)));
+
+            assertThat(decision)
+                    .as("later than the margin is required; exactly equal still re-parks")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row()).isEqualTo(before);
+        }
+
+        /**
+         * FR-005's own accepted residual risk, demonstrated rather than narrated (T034a): the broker
+         * does not increment the delivery count when a message is released by a closed connection —
+         * which this service causes deliberately on every stop and whenever it suspends intake — and
+         * the enqueue-time test compares broker time with database time. A false replay needs both a
+         * release without an increment <strong>and</strong> a broker clock ahead of the database
+         * clock by more than the margin; this test constructs exactly that combination (count 0,
+         * reusing the parking delivery's own identity — the connection-closed release this stands in
+         * for never minted a new one — and an enqueue time a simulated clock lead reads as later than
+         * it genuinely was) and asserts the heuristic still admits it, pinning it as observed,
+         * reviewed behaviour rather than an assumption nothing exercises.
+         */
+        @Test
+        @DisplayName("a simulated broker-clock lead past the margin still replays - FR-005's "
+                + "accepted residual risk (T034a)")
+        void should_still_replay_under_a_simulated_broker_clock_lead_past_the_margin() {
+            parkThenForgetTheParkingTriple();
+            final Instant parkedAt = row().updatedAt();
+
+            final GuardDecision decision = guard.admit(command, legacyDelivery(
+                    "msg-5", 5, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+
+            assertThat(decision)
+                    .as("FR-005 cannot tell this apart from a genuine resubmission, and its own text "
+                            + "does not claim to")
+                    .isInstanceOf(GuardDecision.Run.class);
+        }
+
+        /**
+         * US3 Acceptance Scenario 3: a legacy resubmission handed back before replay admission — the
+         * store was unavailable and intake suspended, or a concurrent replay won the compare-and-set
+         * — is judged afresh on its next delivery, not remembered. Nothing records "this delivery was
+         * already seen and refused"; the broker's own redelivery count is the only state that moves.
+         */
+        @Test
+        @DisplayName("a legacy resubmission handed back once is judged afresh, not remembered "
+                + "(US3 Acceptance Scenario 3)")
+        void should_judge_a_handed_back_legacy_resubmission_afresh_on_its_next_delivery() {
+            parkThenForgetTheParkingTriple();
+            final Instant qualifyingEnqueueTime =
+                    row().updatedAt().plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1);
+
+            // The first attempt loses the compare-and-set (or finds the store unavailable) - stood in
+            // for here, as FailedReplayIT's stale-decision case does, by a repository whose replay
+            // statement always reports no row affected.
+            final IdempotencyGuard contestedGuard = new IdempotencyGuard(
+                    new ProcessedRequestRepository(ProcessedLogTestSupport.jdbcClient(), LEASE) {
+                        @Override
+                        public boolean replayFailed(
+                                final RunClaim runClaim, final int observedAttempts,
+                                final Long observedParkingSequenceNumber, final String auditNote) {
+                            return false;
+                        }
+                    },
+                    metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
+            final GuardDecision handedBack = contestedGuard.admit(
+                    command, legacyDelivery("msg-6", 6, 0L, qualifyingEnqueueTime));
+            assertThat(handedBack).isEqualTo(new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED));
+            assertThat(row().status())
+                    .as("a delivery handed back for this reason leaves the row exactly as it was")
+                    .isEqualTo("FAILED");
+
+            // Its redelivery (broker count now 1, the same stored message) reaches the real guard and
+            // is judged afresh against the row as it stands now - re-parked, because count is no
+            // longer 0, not replayed on the strength of an earlier attempt nothing remembers.
+            final GuardDecision redelivered = guard.admit(
+                    command, legacyDelivery("msg-6", 6, 1L, qualifyingEnqueueTime));
+
+            assertThat(redelivered)
+                    .as("judged afresh: the same messageId that would have replayed at count 0 "
+                            + "re-parks at count 1")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+        }
+
+        /**
+         * FR-005a / research.md R6 (T036): a row whose parking fields are present but stale — an
+         * older consumer re-parked it without knowing these columns, so {@code parking_attempt_count}
+         * no longer matches {@code attempts} — is decided by the legacy heuristic, not as exact, and
+         * its stale {@code parking_sequence_number} is never read for the decision (only for the
+         * compare-and-set's null-safe match against whatever is actually stored).
+         */
+        @Test
+        @DisplayName("stale parking fields (attempts moved on) are judged by the legacy heuristic, "
+                + "not as exact (FR-005a, T036)")
+        void should_judge_a_stale_parking_row_by_the_legacy_heuristic() {
+            exhaustEveryPermittedDelivery();
+            final Row parked = row();
+            // An older consumer re-parks this row with a statement that has no idea the parking
+            // triple exists: attempts moves on, but parking_sequence_number/parking_attempt_count are
+            // left exactly as this version's own exhaustion wrote them (5) - stale, now that
+            // attempts is 6.
+            final int restaled = ProcessedLogTestSupport.jdbcClient()
+                    .sql("""
+                            UPDATE processed_request
+                               SET attempts = :attempts, failure_reason = :reason,
+                                   exhausted_message_id = :messageId
+                             WHERE source = :source AND request_id = :requestId
+                            """)
+                    .param("attempts", parked.attempts() + 1)
+                    .param("reason", ReasonCode.PIPELINE_TRANSIENT_FAILURE.code())
+                    .param("messageId", "msg-6")
+                    .param("source", command.source())
+                    .param("requestId", command.requestId())
+                    .update();
+            assertThat(restaled).isEqualTo(1);
+            final Instant parkedAt = row().updatedAt();
+            final Row before = row();
+            assertThat(before.parkingSequenceNumber())
+                    .as("the stale triple is still there, just no longer describing the current "
+                            + "generation")
+                    .isEqualTo(PERMITTED_DELIVERIES);
+
+            // Delivery count 1, a different sequence number (99) from the stale parking_sequence_number
+            // (5): if this row were (wrongly) judged exact, a differing sequence number would replay
+            // it outright. Judged correctly by the legacy heuristic, delivery count 1 refuses it.
+            final GuardDecision reParked = guard.admit(command, legacyDelivery(
+                    "msg-99", 99, 1L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+            assertThat(reParked)
+                    .as("the legacy heuristic refuses it on delivery count alone, not on sequence "
+                            + "number")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row()).isEqualTo(before);
+
+            // Count 0, past the margin, carrying the STALE parking_sequence_number (5) itself: still
+            // replayed, because the legacy heuristic never compares against it.
+            final GuardDecision replayed = guard.admit(command, legacyDelivery(
+                    "msg-100", PERMITTED_DELIVERIES, 0L,
+                    parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+            assertThat(replayed)
+                    .as("the stale parking_sequence_number is present but irrelevant to this row's "
+                            + "decision")
+                    .isInstanceOf(GuardDecision.Run.class);
+        }
     }
 }

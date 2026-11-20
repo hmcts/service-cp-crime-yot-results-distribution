@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.application;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,13 +34,16 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.ProcessedRequestReposi
  *     new request                      -&gt; Run         (inserted, claimed, attempts = 1)
  *     same key, different request      -&gt; DeadLetter  (collision; the row is not touched)
  *     COMPLETED                        -&gt; Complete    (acknowledged, nothing re-run)
- *     FAILED, same sequence as parked  -&gt; DeadLetter  (an earlier park that did not settle,
+ *     FAILED, exact row, same sequence -&gt; DeadLetter  (an earlier park that did not settle,
  *                                                       whatever its messageId - spec
  *                                                       007-replay-by-sequence-number, FR-003/FR-004)
- *     FAILED, different sequence       -&gt; Run         (a deliberate replay, audit note written,
- *                                                       whatever its messageId; messageId decides
- *                                                       only a legacy/stale row this version did not
- *                                                       park, pending FR-005)
+ *     FAILED, exact row, different seq -&gt; Run         (a deliberate replay, audit note written,
+ *                                                       whatever its messageId - FR-004)
+ *     FAILED, legacy/stale row,        -&gt; Run         (the two-condition heuristic admits it:
+ *       count 0, enqueued past margin               first delivery, enqueued well after parking
+ *                                                       - FR-005)
+ *     FAILED, legacy/stale row,        -&gt; DeadLetter  (either condition fails, or no enqueue
+ *       otherwise                                      time at all - FR-005)
  *     RECEIVED / RETRYING, claim free  -&gt; Run         (the previous claim has expired)
  *     RECEIVED / RETRYING, claim held  -&gt; Abandon     (another runner has it; broker retries)
  *
@@ -89,18 +93,23 @@ public class IdempotencyGuard {
 
     private final ProcessedRequestRepository repository;
     private final ProcessingMetrics metrics;
+    private final Duration legacyMargin;
 
     /**
      * Creates the guard over the processed-request log.
      *
-     * @param repository the processed log's statements
-     * @param metrics    the instruments a discarded outcome is counted on
+     * @param repository   the processed log's statements
+     * @param metrics      the instruments a discarded outcome is counted on
+     * @param legacyMargin the safety margin a legacy or stale row's enqueue-time test is measured
+     *                     against (spec 007-replay-by-sequence-number, FR-005)
      */
     public IdempotencyGuard(
             final ProcessedRequestRepository repository,
-            final ProcessingMetrics metrics) {
+            final ProcessingMetrics metrics,
+            final Duration legacyMargin) {
         this.repository = repository;
         this.metrics = metrics;
+        this.legacyMargin = legacyMargin;
     }
 
     /**
@@ -129,7 +138,7 @@ public class IdempotencyGuard {
             final Optional<ProcessedRequestRecord> found =
                     repository.read(command.source(), command.requestId());
             decision = found
-                    .map(record -> branch(record, command, fingerprint, claim))
+                    .map(record -> branch(record, command, fingerprint, claim, delivery))
                     .orElseGet(() -> recordAbsent(command));
         }
         return decision;
@@ -255,11 +264,12 @@ public class IdempotencyGuard {
             final ProcessedRequestRecord record,
             final DistributionCommand command,
             final String fingerprint,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
 
         final GuardDecision decision;
         if (fingerprint.equals(record.fingerprint())) {
-            decision = byState(record, command, claim);
+            decision = byState(record, command, claim, delivery);
         } else {
             // The key has been reused for a different request. The record is not written to at all:
             // absorbing this delivery would silently drop one of the two hearings' registers.
@@ -276,7 +286,8 @@ public class IdempotencyGuard {
     private GuardDecision byState(
             final ProcessedRequestRecord record,
             final DistributionCommand command,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
 
         return switch (record.status()) {
             case COMPLETED -> {
@@ -284,7 +295,7 @@ public class IdempotencyGuard {
                         command.source(), command.requestId());
                 yield new GuardDecision.Complete(ReasonCode.ALREADY_COMPLETED);
             }
-            case FAILED -> replayOrPark(record, claim);
+            case FAILED -> replayOrPark(record, claim, delivery);
             case RECEIVED, RETRYING -> claimOrHandBack(claim);
         };
     }
@@ -303,17 +314,16 @@ public class IdempotencyGuard {
      * recover a dead-lettered court register — admitted by a compare-and-set against the exact
      * failure generation observed (FR-006), whatever the delivery's {@code messageId} is (FR-004).
      *
-     * <p>A row with no recorded parking sequence number, or a stale one, is not decided here yet:
-     * that is the legacy/stale heuristic (FR-005), landing in a later phase. Until then this method
-     * falls back to today's {@code messageId}-identity test for that one case, so a row outside this
-     * feature's current scope is decided exactly as it always has been.
+     * <p>A row with no recorded parking sequence number, or a stale one (FR-005a), has no exact
+     * signal to decide by and falls to the legacy/stale heuristic instead (FR-005).
      */
     private GuardDecision replayOrPark(
             final ProcessedRequestRecord record,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
         return isExactParking(record)
                 ? replayOrParkExact(record, claim)
-                : replayOrParkByMessageIdUntilTheLegacyHeuristicLands(record, claim);
+                : replayOrParkLegacy(record, claim, delivery);
     }
 
     /**
@@ -362,31 +372,63 @@ public class IdempotencyGuard {
     }
 
     /**
-     * Today's rule, kept only for a row this version did not park itself: a legacy row, or one an
-     * older consumer has re-parked without knowing the new columns exist. The legacy/stale heuristic
-     * that properly decides this case (FR-005) lands in a later phase; until then this is unchanged
-     * from before this feature, so a row outside the current phase's scope keeps behaving exactly as
-     * it always has.
+     * A row with no exact signal to decide by — parked before this feature shipped, or re-parked by
+     * an older consumer mid-rollout without knowing the parking triple exists (FR-005a) — decided by
+     * FR-005's two-condition heuristic: a first delivery (the broker's count is zero-based) enqueued
+     * later than this row's own {@code updated_at} — which, for a {@code FAILED} row nothing else
+     * touches, is the parking time — by more than the configured {@link #legacyMargin} is treated as
+     * a deliberate resubmission and replayed. Anything that fails either condition, including a
+     * delivery with no enqueue time at all, is re-parked.
+     *
+     * <p>Neither condition is proof on its own, and the residual false-replay risk this accepts is
+     * deliberate: the broker does not increment the delivery count when a message is released by a
+     * closed connection — which this service causes deliberately on every stop and whenever it
+     * suspends intake during a processed-log outage — and the enqueue-time test compares broker time
+     * with database time. A false replay needs both a release without an increment <strong>and</strong>
+     * a broker clock ahead of the database clock by more than the margin.
+     *
+     * <p>{@code record.parkingSequenceNumber()}'s own value — present but stale, or absent — plays no
+     * part in this decision; only the compare-and-set's null-safe match against whatever is actually
+     * stored cares what it is. The re-park branch still reports the generic
+     * {@code exhausted / DELIVERY_LIMIT_EXHAUSTED} reason, unchanged from before this feature — FR-009
+     * replaces it, alongside the exact branch's own, in a separate later phase.
      */
-    private GuardDecision replayOrParkByMessageIdUntilTheLegacyHeuristicLands(
-            final ProcessedRequestRecord record, final RunClaim claim) {
+    private GuardDecision replayOrParkLegacy(
+            final ProcessedRequestRecord record, final RunClaim claim, final DeliveryIdentity delivery) {
         final GuardDecision decision;
-        if (Objects.equals(record.exhaustedMessageId(), claim.messageId())) {
-            LOG.warn("Redelivery of the identity that exhausted the retries; re-parking. "
-                    + "source={} requestId={}", claim.source(), claim.requestId());
+        if (isLegacyResubmission(record, delivery)) {
+            if (repository.replayFailed(
+                    claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
+                LOG.info("Parked request replayed under the legacy heuristic. source={} requestId={} "
+                        + "deliveryCount={} enqueueTime={}",
+                        claim.source(), claim.requestId(), delivery.deliveryCount(),
+                        delivery.enqueueTime());
+                decision = new GuardDecision.Run(claim);
+            } else {
+                LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
+                        claim.source(), claim.requestId());
+                decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
+            }
+        } else {
+            LOG.warn("Legacy heuristic refused; re-parking. source={} requestId={} deliveryCount={} "
+                    + "enqueueTime={}",
+                    claim.source(), claim.requestId(), delivery.deliveryCount(), delivery.enqueueTime());
             decision = new GuardDecision.DeadLetter(
                     DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED);
-        } else if (repository.replayFailed(
-                claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
-            LOG.info("Parked request replayed under a fresh identity. source={} requestId={}",
-                    claim.source(), claim.requestId());
-            decision = new GuardDecision.Run(claim);
-        } else {
-            LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
-                    claim.source(), claim.requestId());
-            decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
         }
         return decision;
+    }
+
+    /**
+     * FR-005's own two conditions, both required: a first delivery, enqueued strictly later than the
+     * parking time plus the margin. The boundary is exclusive — an enqueue time exactly equal to
+     * {@code updated_at + legacyMargin} re-parks, not replays.
+     */
+    private boolean isLegacyResubmission(
+            final ProcessedRequestRecord record, final DeliveryIdentity delivery) {
+        return delivery.deliveryCount() == 0
+                && delivery.enqueueTime() != null
+                && delivery.enqueueTime().isAfter(record.updatedAt().plus(legacyMargin));
     }
 
     /**

@@ -309,29 +309,29 @@ fails either condition and observe a re-park.
 
 ### Tests for User Story 3 (write first) ⚠️
 
-- [ ] T032 [P] [US3] Write failing case: a `FAILED` row with no recorded parking sequence number,
+- [X] T032 [P] [US3] Write failing case: a `FAILED` row with no recorded parking sequence number,
       delivered with count **0** and enqueue time later than `updated_at + legacy-margin`, is
       replayed (FR-005).
-- [ ] T033 [P] [US3] Write failing case: the same row, delivered with count **≥ 1**, or enqueue time
+- [X] T033 [P] [US3] Write failing case: the same row, delivered with count **≥ 1**, or enqueue time
       not later than `updated_at + legacy-margin`, or with no enqueue time at all, is re-parked
       (FR-005).
-- [ ] T034 [US3] Write failing case: an enqueue time **exactly equal** to `updated_at + legacy-margin`
+- [X] T034 [US3] Write failing case: an enqueue time **exactly equal** to `updated_at + legacy-margin`
       re-parks — the boundary is exclusive.
-- [ ] T034a [US3] Write failing case demonstrating, not just narrating, FR-005's accepted residual
+- [X] T034a [US3] Write failing case demonstrating, not just narrating, FR-005's accepted residual
       risk: a legacy row released without a delivery-count increment (the connection-closed path,
       not an abandon), delivered with an **enqueue time read as later than it genuinely was** by
       more than the margin (a simulated broker-clock lead over the database clock) — assert the
       heuristic still admits it as a replay. This is the one case FR-005's own text accepts rather
       than guards against; the test's purpose is to pin it as observed, reviewed behaviour rather
       than an assumption nothing exercises.
-- [ ] T035 [US3] Write failing case: a legacy resubmission handed back once (store outage suspended
+- [X] T035 [US3] Write failing case: a legacy resubmission handed back once (store outage suspended
       intake, or it lost a compare-and-set race) is judged afresh on its next delivery, not
       remembered (US3 Acceptance Scenario 3).
-- [ ] T036 [P] [US3] Write failing case: a row whose `parking_sequence_number`/`parking_category` are
+- [X] T036 [P] [US3] Write failing case: a row whose `parking_sequence_number`/`parking_category` are
       present but whose current `attempts` differs from its recorded `parking_attempt_count` is
       decided by the legacy heuristic, not as exact, and its stale `parking_category` is never read
       (FR-005a, research.md R6).
-- [ ] T037 [US3] Write failing case for the **replay** half of the rolling-deployment edge case,
+- [X] T037 [US3] Write failing case for the **replay** half of the rolling-deployment edge case,
       distinct from T036's re-park half: a row parked by a newer consumer (parking triple set) is
       then moved `FAILED → RECEIVED` by a statement shaped like the *old* `REPLAY_FAILED` — one that
       clears only the pre-existing columns (`exhausted_message_id`, `failure_reason`, `audit_note`)
@@ -346,13 +346,26 @@ fails either condition and observe a re-park.
       Pinned by T007's migration (the constraint under test already exists); no new production code
       in this phase guards this case.
 
+      T032-T036 and T034a all live in `FailedReplayIT`'s new `@Nested LegacyRecords` class,
+      mirroring the exact/legacy split informant-register's own `FailedReplayIT` took for the same
+      phase. T037 lives in `SchemaMigrationIT.ProcessedRequest.ParkingIdentity`, alongside T007's
+      migration it pins.
+
 ### Implementation for User Story 3
 
-- [ ] T038 [US3] `application/IdempotencyGuard.java`: add the legacy/stale branch to `replayOrPark` —
+- [X] T038 [US3] `application/IdempotencyGuard.java`: add the legacy/stale branch to `replayOrPark` —
       for a row with absent or stale parking fields, apply `deliveryCount == 0 && enqueueTime >
       updatedAt.plus(legacyMargin)`, replaying via the same compare-and-set (its null-safe half
       matches whatever was observed) or re-parking otherwise. Depends on T026, T014 (needs
       `legacyMargin`). Makes T032-T034, T034a, T035-T037 pass.
+
+      `legacyMargin` reaches the guard as a new required constructor parameter (`Duration`), wired
+      from `YotResultsDistributionProperties.replay().legacyMargin()` in production
+      (`ProcessedLogConfig`) and from `ProcessedLogTestSupport.LEGACY_MARGIN` (5 minutes, mirroring
+      the configured default) in every test construction site. `admit()` now threads the
+      `DeliveryIdentity` itself down through `branch`/`byState`/`replayOrPark`, alongside the
+      `RunClaim` it already carried, since the legacy branch needs `deliveryCount`/`enqueueTime` -
+      facts the claim alone does not carry.
 
 **Checkpoint**: all three replay-admission paths — exact-equal, exact-different, legacy/stale
 heuristic — are complete and independently provable.

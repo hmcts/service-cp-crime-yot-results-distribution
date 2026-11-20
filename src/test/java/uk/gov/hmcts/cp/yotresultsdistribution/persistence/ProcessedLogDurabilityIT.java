@@ -90,7 +90,7 @@ class ProcessedLogDurabilityIT {
     void a_recorded_request_should_be_read_back_unchanged_after_a_restart() {
         final IdempotencyGuard guard = new IdempotencyGuard(
                 new ProcessedRequestRepository(JdbcClient.create(POOL.get()), LEASE),
-                new ProcessingMetrics(new SimpleMeterRegistry()));
+                new ProcessingMetrics(new SimpleMeterRegistry()), ProcessedLogTestSupport.LEGACY_MARGIN);
         final GuardDecision admission =
                 guard.admit(command, new DeliveryIdentity("msg-1", "runner-1/delivery-1"));
         assertThat(admission).isInstanceOf(GuardDecision.Run.class);

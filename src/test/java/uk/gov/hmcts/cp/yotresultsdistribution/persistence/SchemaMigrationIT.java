@@ -556,6 +556,78 @@ class SchemaMigrationIT {
                                 + "'NON_TRANSIENT', 5")))
                         .doesNotThrowAnyException();
             }
+
+            /**
+             * Spec 007-replay-by-sequence-number, tasks.md T037: the precursor state to T036's own
+             * case, proven as a transition rather than a static end state. A row parked by a newer
+             * consumer (parking triple set) is moved {@code FAILED -&gt; RECEIVED} by a statement
+             * shaped like the <em>old</em> {@code REPLAY_FAILED} — one that clears only the
+             * pre-existing columns ({@code exhausted_message_id}, {@code failure_reason},
+             * {@code audit_note}) and has no idea the three new columns exist. The "old" statement is
+             * simulated directly here (a hand-written {@code UPDATE} mirroring the pre-this-feature
+             * shape) rather than invoked through production code — there is no older version of this
+             * statement left to call.
+             *
+             * <p>No new production code guards this case: {@link #triple_check_should_accept_a_legacy_row_with_all_three_null()}
+             * and this test together are T007's migration doing the work, and FR-014's point is
+             * exactly that clearing the triple on the way out of {@code FAILED} is a write rule, not
+             * a database constraint — so an older consumer's statement, which cannot write what it
+             * does not know exists, does not fail outright either.
+             */
+            @Test
+            @SuppressWarnings("PMD.CheckResultSet")
+            // row.next()'s return is asserted true via assertThat, which PMD's static rule does not
+            // trace through — it is checked, just in this file's own idiom for a single-row read.
+            void an_old_shaped_replay_should_leave_the_parking_triple_stale_but_constraint_valid()
+                    throws SQLException {
+                final UUID requestId = UUID.randomUUID();
+                try (Connection connection = connection()) {
+                    connection.setAutoCommit(false);
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate(insertRequest(
+                                "source, request_id, hearing_id, hearing_day, shared_time, "
+                                        + "event_type, request_fingerprint, status, attempts, "
+                                        + "failure_reason, exhausted_message_id, "
+                                        + "parking_sequence_number, parking_category, "
+                                        + "parking_attempt_count",
+                                "'RESULTS', '" + requestId + "', '" + UUID.randomUUID() + "', "
+                                        + "DATE '2026-08-20', TIMESTAMPTZ '2026-08-20T09:00:00Z', "
+                                        + "'Hearing_Resulted', 'fingerprint', 'FAILED', 5, "
+                                        + "'PIPELINE_TRANSIENT_FAILURE', 'msg-5', 5, 'EXHAUSTED', 5"));
+
+                        // The old REPLAY_FAILED shape: WHERE exhausted_message_id <> :messageId,
+                        // clearing only the three columns that existed before this feature. It has
+                        // no idea parking_sequence_number/parking_category/parking_attempt_count
+                        // exist, so it does not - and cannot - clear them.
+                        final int replayed = statement.executeUpdate(
+                                "UPDATE " + REQUEST_TABLE + " SET status = 'RECEIVED', "
+                                        + "attempts = attempts + 1, exhausted_message_id = NULL, "
+                                        + "failure_reason = NULL, "
+                                        + "audit_note = 'REPLAYED_AFTER_FAILURE prior=PIPELINE_TRANSIENT_FAILURE' "
+                                        + "WHERE source = 'RESULTS' AND request_id = '" + requestId
+                                        + "' AND status = 'FAILED' AND exhausted_message_id <> 'msg-6'");
+                        assertThat(replayed).isEqualTo(1);
+
+                        try (ResultSet row = statement.executeQuery(
+                                "SELECT status, attempts, parking_sequence_number, "
+                                        + "parking_category, parking_attempt_count FROM "
+                                        + REQUEST_TABLE + " WHERE source = 'RESULTS' "
+                                        + "AND request_id = '" + requestId + "'")) {
+                            assertThat(row.next()).isTrue();
+                            assertThat(row.getString("status")).isEqualTo("RECEIVED");
+                            assertThat(row.getInt("attempts")).isEqualTo(6);
+                            assertThat(row.getObject("parking_sequence_number"))
+                                    .as("the triple survives, stale and non-null, on the now-"
+                                            + "RECEIVED row - the old statement never knew to clear it")
+                                    .isEqualTo(5L);
+                            assertThat(row.getString("parking_category")).isEqualTo("EXHAUSTED");
+                            assertThat(row.getObject("parking_attempt_count")).isEqualTo(5);
+                        }
+                    } finally {
+                        connection.rollback();
+                    }
+                }
+            }
         }
     }
 
