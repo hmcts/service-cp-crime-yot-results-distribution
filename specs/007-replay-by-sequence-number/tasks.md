@@ -40,7 +40,7 @@ starts. Never two committing agents at once in this tree.
 guard's behaviour (constitution Governance; FR-013). This repository has no `doc/API_CONTRACTS.md`
 for the delta to land in — the artefact of record is `.claude/rules/*` and `.claude/agents/*`.
 
-- [ ] T001 Apply `specs/007-replay-by-sequence-number/contracts/replay-rule-delta.md` verbatim to
+- [X] T001 Apply `specs/007-replay-by-sequence-number/contracts/replay-rule-delta.md` verbatim to
       `.claude/rules/design_rules.md` (§1a, §1b), `.claude/rules/technical-rules.md` (§2), and
       `.claude/agents/{code-reviewer,qa,software-engineer,spec-validator}.md` (§3). Documentation-only
       — exempt from the TDD loop per `.claude/rules/workflow.md`'s "What Requires the Loop" table
