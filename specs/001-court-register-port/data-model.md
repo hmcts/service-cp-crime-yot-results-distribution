@@ -25,6 +25,15 @@ authority (every timestamp written and compared in SQL). See the informant data-
 column table and fingerprint canonicalisation; `RequestFingerprint` covers the same four immutable
 fields.
 
+**Amended by spec `007-replay-by-sequence-number` (migration V9)**: three nullable columns —
+`parking_sequence_number`, `parking_category`, `parking_attempt_count` — and two CHECKs
+(`processed_request_parking_category_chk`, `processed_request_parking_triple_chk`) land on this
+same table, and the FAILED-replay decision this section describes as transferring "verbatim" from
+the informant guard no longer does: a `FAILED` row is now decided by the broker's own sequence
+number where that triple describes the current generation, falling back to a two-condition legacy
+heuristic otherwise — `exhausted_message_id` alone no longer decides it. See that spec's own
+data-model.md for the amended decision table and the column definitions in full.
+
 ### processed_output — the one structural change
 
 One row per **submitted command** (0..1), not per fan-out unit: the court register makes exactly

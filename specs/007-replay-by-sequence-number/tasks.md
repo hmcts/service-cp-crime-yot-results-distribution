@@ -437,23 +437,71 @@ and category. All four user stories and FR-001–FR-015 are behaviourally comple
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T044 [P] Review `doc/DEFECT-FIXES.md` row C17's pinning-test note for wording only (no rewrite —
+- [X] T044 [P] Review `doc/DEFECT-FIXES.md` row C17's pinning-test note for wording only (no rewrite —
       Constitution Check, Principle I); confirm `RequestDedupeIT`'s "distinct `messageId`s" framing
       still holds under the new decision path.
-- [ ] T045 [P] Review/update `specs/001-court-register-port/spec.md` (User Story 2's narrative and
+
+      Confirmed, no rewrite: C17 is about COMPLETED-row dedup and fingerprint-collision parking, both
+      untouched by this feature's FAILED-row sequence-number decision. `RequestDedupeIT`'s two cases
+      use `ServiceTestSupport.publish`'s fresh-`messageId` convention purely to bypass the broker's
+      own duplicate detection for test isolation (so the queue's dedupe cannot answer for the guard),
+      which remains exactly true.
+- [X] T045 [P] Review/update `specs/001-court-register-port/spec.md` (User Story 2's narrative and
       acceptance scenario 4) and `specs/001-court-register-port/data-model.md` (processed-log
       constraint summary, state-transition reference) to defer to this feature's amended table.
-- [ ] T046 [P] Review narrative-only mentions of "fresh `messageId`"/"the resubmission runbook" in
+
+      Both updated with an "Amended by spec 007-replay-by-sequence-number" note each: spec.md's User
+      Story 2 narrative and Acceptance Scenario 4 (the old "fresh message identity" rule, now the
+      broker's own sequence number); data-model.md's `processed_request` section (the three new
+      nullable columns and two CHECKs migration V9 adds, and that "transfers verbatim" no longer
+      describes the FAILED-replay decision). Neither rewritten — both point to spec 007's own tables
+      as the current authority, per Principle I (the historical record of what 001 built stays;
+      001 did not get this wrong, 007 changed it afterward).
+- [X] T046 [P] Review narrative-only mentions of "fresh `messageId`"/"the resubmission runbook" in
       `e2e/DuplicateDetectionIT`, `e2e/RequestDedupeIT`, `e2e/MessageAccountingIT` comments and
       javadoc; confirm `ServiceTestSupport.publish`'s fresh-`messageId` convention is re-justified as
       bypassing broker dedupe for test isolation, not as a replay requirement — correct the wording
       where it still claims the latter.
-- [ ] T047 [P] Review `README.md` and any other location the spec's "Documents the implementation must
+
+      Fixed in two files: `RequestDedupeIT`'s class javadoc said this suite was "about every
+      deliberate replay, because the resubmission runbook requires a fresh messageId" — rewritten to
+      say the suite is about COMPLETED-row dedup, not sequence-number replay, and that a resubmission
+      no longer needs a fresh identity at all. `DuplicateDetectionIT`'s javadoc said the runbook
+      "insists on" a fresh identity — rewritten to describe the one case that is still true (a
+      same-identity re-send *inside* the duplicate-detection window is still silently dropped) and
+      name both of support's now-equal options (wait, or mint fresh) rather than one mandatory rule.
+      `MessageAccountingIT` and `ServiceTestSupport.publish` confirmed already correct — their fresh
+      identity is for broker-dedupe test isolation, never stated as a replay requirement.
+- [X] T047 [P] Review `README.md` and any other location the spec's "Documents the implementation must
       update" names for a restated fresh-`messageId` rule.
-- [ ] T048 Run `specs/007-replay-by-sequence-number/quickstart.md` end to end: the manual portal-style
+
+      `README.md` has no mention of the rule at all — nothing to fix. Every other named location
+      (`.claude/rules/design_rules.md`, `.claude/rules/technical-rules.md`, the four `.claude/agents/
+      *.md` files, `IdempotencyGuard`/`ProcessedRequestRepository`/`DeliveryIdentity`/`RunClaim`/
+      `ProcessedRequestRecord`/`RequestStatus` source comments, `application.yaml`,
+      `YotResultsDistributionProperties`, `PropertiesValidator`) was already corrected in an earlier
+      phase (T001 and the Foundational work) — confirmed by a repository-wide grep finding only
+      already-amended phrasing ("no longer required, only still useful") left anywhere outside this
+      feature's own spec folder.
+- [X] T048 Run `specs/007-replay-by-sequence-number/quickstart.md` end to end: the manual portal-style
       re-send reproduction, the legacy-heuristic reproduction, and the full verification commands.
-- [ ] T049 Final gate: `./gradlew checkstyleMain checkstyleTest pmdMain pmdTest jacocoTestReport build`
+
+      Ran quickstart's own nine listed test suites directly (`FailedReplayIT`, `IdempotencyGuardIT`,
+      `SchemaMigrationIT`, `MessageListenerSettlementTest`, `SettlementFailureEdgeTest`,
+      `DeliveryExhaustionIT`, `QueueSettlementIT`, `DuplicateDetectionIT`, `RequestDedupeIT`) — all
+      green. The manual portal-style walkthrough (steps 2-6: park a request, receive its
+      dead-lettered body, re-send it unchanged after the duplicate-detection window, observe
+      `FAILED → RECEIVED → COMPLETED`) has no practical way to drive interactively in this
+      environment (no `docker compose up`/interactive AMQP client session); ran
+      `UnchangedResendRecoveryIT` instead, which performs exactly those broker operations
+      automatically against the real emulator — green. The legacy/stale-row heuristic reproduction is
+      `FailedReplayIT.LegacyRecords`, already run green above.
+- [X] T049 Final gate: `./gradlew checkstyleMain checkstyleTest pmdMain pmdTest jacocoTestReport build`
       green; confirm the JaCoCo ratchet (LINE ≥ 0.88 / BRANCH ≥ 0.85) is not loosened by this feature.
+
+      `./gradlew build` green (tests, Checkstyle, PMD, the JaCoCo coverage gate). `git log
+      fedbcd39..HEAD -- gradle/test.gradle build.gradle` is empty — the thresholds (`gradle/
+      test.gradle`: LINE 0.88, BRANCH 0.85) were never touched by any commit in this feature.
 
 ---
 

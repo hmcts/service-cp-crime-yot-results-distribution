@@ -83,8 +83,9 @@ response code.
 
 Requests legitimately arrive more than once. The service recognises a request it has completed and
 acknowledges it without reprocessing; concurrent deliveries of one request never run concurrently;
-a replay of a parked request under a fresh message identity runs afresh. The legacy app had no
-idempotency at all — duplicate Event Grid deliveries started duplicate orchestrations and duplicate
+a replay of a parked request runs afresh (originally under a fresh message identity; amended by spec
+`007-replay-by-sequence-number` to the broker's own sequence number — see Acceptance Scenario 4). The
+legacy app had no idempotency at all — duplicate Event Grid deliveries started duplicate orchestrations and duplicate
 POSTs (C17).
 
 **Why this priority**: `progression.add-court-register` is not idempotent (every POST appends a new
@@ -106,6 +107,12 @@ second delivery acknowledged without processing.
 4. **Given** a request recorded FAILED, **When** a delivery arrives under a fresh message identity,
    **Then** the record transitions to RECEIVED (attempts preserved, audit note) and the pipeline
    runs again; under the exhausting identity the record stays FAILED and dead-lettering repeats.
+   **Amended by spec `007-replay-by-sequence-number`**: the decision is now the broker's own sequence
+   number, not `messageId` — a redelivery carrying the sequence number that parked the request stays
+   FAILED whatever its `messageId`, and a different sequence number replays it, whatever its
+   `messageId`. A fresh message identity is no longer required for a replay, only still useful to
+   bypass the broker's duplicate-detection window immediately. See that spec for the current rule
+   and its own acceptance scenarios.
 
 ---
 
