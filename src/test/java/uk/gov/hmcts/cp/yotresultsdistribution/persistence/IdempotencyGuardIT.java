@@ -439,7 +439,7 @@ class IdempotencyGuardIT {
             final GuardDecision decision = guard.admit(command, delivery("msg-5"));
 
             assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                    DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
         }
 
@@ -462,7 +462,7 @@ class IdempotencyGuardIT {
                     .as("the sequence number alone decides; this delivery's own messageId never "
                             + "matched the one that parked the row")
                     .isEqualTo(new GuardDecision.DeadLetter(
-                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                            DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row())
                     .as("the row is byte-identical: no state changed for a delivery that ran nothing")
                     .isEqualTo(before);

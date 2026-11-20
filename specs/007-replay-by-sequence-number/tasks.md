@@ -388,25 +388,47 @@ or `PAYLOAD_READ_REFUSED`); trigger a re-park; read the dead-letter reason and d
 
 ### Tests for User Story 4 (write first) ⚠️
 
-- [ ] T039 [P] [US4] Write failing case: a request parked `non-transient` with a recognised failure
+- [X] T039 [P] [US4] Write failing case: a request parked `non-transient` with a recognised failure
       reason, re-parked, dead-letters with reason `non-transient` and that failure reason as detail
       (FR-009).
-- [ ] T040 [US4] Write failing case: a request parked `exhausted` with a transient failure reason,
+- [X] T040 [US4] Write failing case: a request parked `exhausted` with a transient failure reason,
       re-parked, dead-letters `exhausted` with that reason as detail; the **first** parking of an
       exhausted request is unchanged (`exhausted`/`DELIVERY_LIMIT_EXHAUSTED`).
-- [ ] T041 [P] [US4] Write failing case: a row with no recorded category (legacy, or stale per
+- [X] T041 [P] [US4] Write failing case: a row with no recorded category (legacy, or stale per
       FR-005a) is re-parked using `FailureCategoryMapping.categoryFor` on its stored reason, never a
       stale recorded category.
-- [ ] T042 [US4] Write failing case: a row with a missing or unrecognised stored failure reason is
+- [X] T042 [US4] Write failing case: a row with a missing or unrecognised stored failure reason is
       re-parked as `exhausted`/`UNEXPECTED_FAILURE`, logs a sanitised data-anomaly error, never
       emits the unrecognised text, never throws.
 
+      T039/T040/T042 live as top-level `FailedReplayIT` tests; T041 gained two cases in
+      `LegacyRecords` rather than one — the task's own "never a stale recorded category" clause
+      turned out to be a real, previously-unimplemented rule (FR-005a extends to the category, not
+      only the sequence number) rather than a restatement of "no category recorded at all", so the
+      no-category case and the stale-but-physically-present-category case are pinned separately,
+      each with the other's answer distinguishable from its own.
+
 ### Implementation for User Story 4
 
-- [ ] T043 [US4] `application/IdempotencyGuard.java`: wire `ReasonCode.fromCode`/
+- [X] T043 [US4] `application/IdempotencyGuard.java`: wire `ReasonCode.fromCode`/
       `FailureCategoryMapping.categoryFor` into both re-park branches (T026's exact-equal branch,
       T038's legacy branch), per data-model.md's decision table, replacing the generic exhaustion
       reason. Depends on T026, T038, T011, T012. Makes T039-T042 pass.
+
+      `reParkDecision` is the shared helper both branches call, taking an explicit `trustedCategory`
+      parameter rather than reading `record.parkingCategory()` directly: the exact branch passes the
+      column as read, the legacy/stale branch always passes `null`, because FR-005a's "decided as
+      though it had no recorded parking sequence number and no recorded category" applies to the
+      category even where the column itself is still non-null — a stale leftover from a parking this
+      decision has already judged is not the current one. Found while writing T041's own test, not
+      assumed from the task description; the first implementation checked only for physical
+      nullness and was corrected before being committed.
+
+      Existing re-park assertions elsewhere (`FailedReplayIT`'s FR-003 pair, `IdempotencyGuardIT`'s
+      `ParkedRequest` pair) updated from the generic `DELIVERY_LIMIT_EXHAUSTED` to the fixture's
+      actual stored reason, `PIPELINE_TRANSIENT_FAILURE` — the behaviour change this phase exists to
+      make, not a regression. `recordExhaustion`'s own first-parking decision is untouched and still
+      reports `DELIVERY_LIMIT_EXHAUSTED`, matching T040's explicit "first parking is unchanged".
 
 **Checkpoint**: every re-park, exact or legacy, reports the request's own recorded or mapped reason
 and category. All four user stories and FR-001–FR-015 are behaviourally complete.

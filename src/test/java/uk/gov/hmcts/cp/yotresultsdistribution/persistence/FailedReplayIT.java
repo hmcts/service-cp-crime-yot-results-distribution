@@ -289,7 +289,7 @@ class FailedReplayIT {
         final GuardDecision decision = guard.admit(command, delivery("msg-5", 5));
 
         assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
         assertThat(row()).isEqualTo(before);
     }
 
@@ -303,7 +303,7 @@ class FailedReplayIT {
         final GuardDecision decision = guard.admit(command, delivery("msg-looks-fresh-but-isnt", 5));
 
         assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
         assertThat(row()).isEqualTo(before);
     }
 
@@ -406,6 +406,86 @@ class FailedReplayIT {
         assertThat(row().attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
     }
 
+    // --- US4: a re-parked delivery says why the request failed (spec 007, FR-009/FR-010) ----------
+
+    /**
+     * FR-009, T039: a request parked {@code non-transient} with a recognised stored failure reason
+     * is re-parked under that same reason and category, never the generic
+     * {@code exhausted / DELIVERY_LIMIT_EXHAUSTED}.
+     */
+    @Test
+    @DisplayName("a re-park of a non-transient failure dead-letters with the request's own reason "
+            + "and category (FR-009)")
+    void a_re_park_should_report_the_requests_own_non_transient_reason_and_category() {
+        final RunClaim firstRun = runClaimOf(guard.admit(command, delivery("msg-1", 1)));
+        guard.recordNonTransientFailure(firstRun, ReasonCode.OUTBOUND_CONTRACT_VIOLATION);
+
+        final GuardDecision reParked = guard.admit(command, delivery("msg-1", 1));
+
+        assertThat(reParked).isEqualTo(new GuardDecision.DeadLetter(
+                DeadLetterReason.NON_TRANSIENT, ReasonCode.OUTBOUND_CONTRACT_VIOLATION));
+    }
+
+    /**
+     * FR-009, T040: a request parked {@code exhausted} with a transient failure reason is re-parked
+     * under that reason, still categorised {@code exhausted} — but the <em>first</em> parking of an
+     * exhausted request is unchanged, because {@code recordExhaustion} does not go through a re-park
+     * decision at all. Both halves are asserted here together, so neither can be mistaken for having
+     * covered the other.
+     */
+    @Test
+    @DisplayName("the first parking of an exhausted request is unchanged; its re-park reports the "
+            + "request's own transient reason, still exhausted (FR-009)")
+    void the_first_parking_should_be_generic_but_its_re_park_should_report_the_real_reason() {
+        final RunClaim firstRun = runClaimOf(guard.admit(command, delivery("msg-1", 1)));
+
+        final GuardDecision firstParking =
+                guard.recordExhaustion(firstRun, ReasonCode.PAYLOAD_UNAVAILABLE);
+        assertThat(firstParking)
+                .as("the first parking of an exhausted request is unchanged by this feature")
+                .isEqualTo(new GuardDecision.DeadLetter(
+                        DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+
+        final GuardDecision reParked = guard.admit(command, delivery("msg-1", 1));
+        assertThat(reParked)
+                .as("a re-park of the same delivery reports the request's own recorded reason")
+                .isEqualTo(new GuardDecision.DeadLetter(
+                        DeadLetterReason.EXHAUSTED, ReasonCode.PAYLOAD_UNAVAILABLE));
+    }
+
+    /**
+     * FR-009, T042: a stored failure reason this version cannot classify — missing, or written by a
+     * version that does not exist yet — is re-parked as {@code exhausted / UNEXPECTED_FAILURE}
+     * rather than propagate text this service did not write. Logs a sanitised data-anomaly error
+     * (identifiers only), never emits the unrecognised text, never throws.
+     */
+    @Test
+    @DisplayName("an unrecognised stored failure reason re-parks as exhausted/UNEXPECTED_FAILURE "
+            + "without emitting it, and logs a sanitised anomaly (FR-009)")
+    void a_re_park_of_an_unrecognised_stored_reason_should_not_emit_it() {
+        final RunClaim firstRun = runClaimOf(guard.admit(command, delivery("msg-1", 1)));
+        guard.recordNonTransientFailure(firstRun, ReasonCode.OUTBOUND_CONTRACT_VIOLATION);
+        final String unrecognisedReason = "A_FUTURE_REASON_THIS_VERSION_HAS_NEVER_HEARD_OF";
+        final int restaled = ProcessedLogTestSupport.jdbcClient()
+                .sql("UPDATE processed_request SET failure_reason = :reason "
+                        + "WHERE source = :source AND request_id = :requestId")
+                .param("reason", unrecognisedReason)
+                .param("source", command.source())
+                .param("requestId", command.requestId())
+                .update();
+        assertThat(restaled).isEqualTo(1);
+
+        final GuardDecision reParked = guard.admit(command, delivery("msg-1", 1));
+
+        assertThat(reParked)
+                .as("never thrown, never the unrecognised text itself")
+                .isEqualTo(new GuardDecision.DeadLetter(
+                        DeadLetterReason.EXHAUSTED, ReasonCode.UNEXPECTED_FAILURE));
+        assertThat(captured.list)
+                .as("the anomaly is logged, but the unrecognised text itself is never emitted")
+                .noneMatch(event -> event.getFormattedMessage().contains(unrecognisedReason));
+    }
+
     // --- US3: requests parked before this change can be recovered (spec 007, FR-005) -------------
 
     /**
@@ -490,7 +570,7 @@ class FailedReplayIT {
                     "msg-6", 6, 1L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
 
             assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                    DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
         }
 
@@ -505,7 +585,7 @@ class FailedReplayIT {
                     "msg-6", 6, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).minusSeconds(1)));
 
             assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                    DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
         }
 
@@ -518,7 +598,7 @@ class FailedReplayIT {
             final GuardDecision decision = guard.admit(command, legacyDelivery("msg-6", 6, 0L, null));
 
             assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                    DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
         }
 
@@ -536,7 +616,7 @@ class FailedReplayIT {
             assertThat(decision)
                     .as("later than the margin is required; exactly equal still re-parks")
                     .isEqualTo(new GuardDecision.DeadLetter(
-                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                            DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
         }
 
@@ -619,7 +699,7 @@ class FailedReplayIT {
                     .as("judged afresh: the same messageId that would have replayed at count 0 "
                             + "re-parks at count 1")
                     .isEqualTo(new GuardDecision.DeadLetter(
-                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                            DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
         }
 
         /**
@@ -669,7 +749,7 @@ class FailedReplayIT {
                     .as("the legacy heuristic refuses it on delivery count alone, not on sequence "
                             + "number")
                     .isEqualTo(new GuardDecision.DeadLetter(
-                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                            DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
 
             // Count 0, past the margin, carrying the STALE parking_sequence_number (5) itself: still
@@ -681,6 +761,90 @@ class FailedReplayIT {
                     .as("the stale parking_sequence_number is present but irrelevant to this row's "
                             + "decision")
                     .isInstanceOf(GuardDecision.Run.class);
+        }
+
+        /**
+         * FR-010, T041: a legacy row has no recorded {@code parking_category} at all, so a re-park
+         * reports {@link uk.gov.hmcts.cp.yotresultsdistribution.domain.FailureCategoryMapping}'s own
+         * answer for its stored reason, never the generic {@code exhausted}.
+         */
+        @Test
+        @DisplayName("a legacy row with no recorded category is re-parked using the mapping "
+                + "(FR-010, T041)")
+        void should_re_park_a_legacy_row_using_the_category_mapping() {
+            final RunClaim firstRun = runClaimOf(guard.admit(command, delivery("msg-1", 1)));
+            guard.recordNonTransientFailure(firstRun, ReasonCode.OUTBOUND_CONTRACT_VIOLATION);
+            final int cleared = ProcessedLogTestSupport.jdbcClient()
+                    .sql("""
+                            UPDATE processed_request
+                               SET parking_sequence_number = NULL, parking_category = NULL,
+                                   parking_attempt_count = NULL
+                             WHERE source = :source AND request_id = :requestId
+                            """)
+                    .param("source", command.source())
+                    .param("requestId", command.requestId())
+                    .update();
+            assertThat(cleared).isEqualTo(1);
+            final Instant parkedAt = row().updatedAt();
+
+            final GuardDecision reParked = guard.admit(command, legacyDelivery(
+                    "msg-2", 2, 1L,
+                    parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plus(Duration.ofHours(1))));
+
+            assertThat(reParked)
+                    .as("OUTBOUND_CONTRACT_VIOLATION maps to non-transient; nothing recorded the "
+                            + "category directly, so the mapping answers it")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.NON_TRANSIENT, ReasonCode.OUTBOUND_CONTRACT_VIOLATION));
+        }
+
+        /**
+         * FR-005a's own extension of FR-010: a row whose parking triple is physically present but
+         * stale (attempts has moved on) must not have its {@code parking_category} trusted either,
+         * even though the column itself is non-null — the same "decide as though absent" rule FR-005
+         * already applies to the sequence number applies to the category too. Deliberately records a
+         * category the mapping would <em>not</em> have produced from the same reason, so a guard that
+         * wrongly trusted the stale column would report something this test can tell apart from the
+         * mapping's own answer.
+         */
+        @Test
+        @DisplayName("a stale recorded category is never trusted either - FR-005a decides it as "
+                + "though absent, same as the sequence number (FR-010)")
+        void should_ignore_a_stale_recorded_category_and_use_the_mapping_instead() {
+            exhaustEveryPermittedDelivery();
+            final Row parked = row();
+            assertThat(parked.parkingCategory())
+                    .as("this version's own exhaustion recorded EXHAUSTED")
+                    .isEqualTo("EXHAUSTED");
+            // An older consumer re-parks over it: attempts moves on, the stored reason becomes one
+            // that maps to NON_TRANSIENT - deliberately disagreeing with the still-present, now-stale
+            // "EXHAUSTED" category, so trusting the column would read as a different answer.
+            final int restaled = ProcessedLogTestSupport.jdbcClient()
+                    .sql("""
+                            UPDATE processed_request
+                               SET attempts = :attempts, failure_reason = :reason
+                             WHERE source = :source AND request_id = :requestId
+                            """)
+                    .param("attempts", parked.attempts() + 1)
+                    .param("reason", ReasonCode.OUTBOUND_CONTRACT_VIOLATION.code())
+                    .param("source", command.source())
+                    .param("requestId", command.requestId())
+                    .update();
+            assertThat(restaled).isEqualTo(1);
+            assertThat(row().parkingCategory())
+                    .as("the stale category is still physically there, non-null")
+                    .isEqualTo("EXHAUSTED");
+            final Instant parkedAt = row().updatedAt();
+
+            final GuardDecision reParked = guard.admit(command, legacyDelivery(
+                    "msg-9", 9, 1L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+
+            assertThat(reParked)
+                    .as("decided as though no category were recorded at all: the mapping's own "
+                            + "answer for OUTBOUND_CONTRACT_VIOLATION, non-transient - not the stale "
+                            + "EXHAUSTED the column still physically holds")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.NON_TRANSIENT, ReasonCode.OUTBOUND_CONTRACT_VIOLATION));
         }
     }
 }
