@@ -185,6 +185,16 @@ and the pipeline running again.
 - [X] T021 [P] [US1] Write failing case: a replay of a request whose register is already recorded in
       `record` mode (or, in `progression-post` mode, already `POSTED`) records/sends nothing a second
       time — the independent-enqueue regression, re-asserted under the new decision path.
+
+      `FailedReplayIT.a_replay_of_an_already_posted_register_should_not_post_it_again`: a run POSTs
+      the output row, the request itself still ends up `FAILED` (a non-transient failure unrelated to
+      the POST), and a same-`messageId` replay admitted by sequence number alone finds the output
+      claim refused. The qa review found the task checked off against
+      `SubmissionRedeliveryIT.a_replay_of_a_posted_register_does_not_post_it_again` alone, which
+      constructs its `RunClaim` directly and never exercises `guard.admit()` — it would pass
+      identically whether T025/T026 existed or not. The new case goes through `guard.admit()` and
+      reuses the parking `messageId`, so it is red against the pre-T025/T026 code (confirmed in a
+      disposable worktree at `0abc5d44`) and green after.
 - [X] T022 [US1] Write failing log-assertion case: an admitted replay logs the request identifiers,
       the parked delivery's sequence number, and the replaying delivery's sequence number —
       identifiers only, no defendant detail (FR-008).

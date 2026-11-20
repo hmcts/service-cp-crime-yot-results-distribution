@@ -8,6 +8,7 @@ import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.DeadLetterReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.DeliveryIdentity;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.DistributionCommand;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.GuardDecision;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.ProcessedOutputClaim;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.ProcessedRequestRecord;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.ReasonCode;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.RequestFingerprint;
@@ -54,6 +56,14 @@ class FailedReplayIT {
 
     private static final Duration LEASE = Duration.ofMinutes(5);
     private static final int PERMITTED_DELIVERIES = 5;
+
+    private static final UUID COURT_CENTRE = UUID.fromString("6b1d3f2a-88c4-4a2e-9f10-2d7c5b9e0a41");
+    private static final String OU_CODE = "B01LY";
+    private static final LocalDate REGISTER_DATE = LocalDate.of(2026, 8, 20);
+    private static final String FILE_NAME = "court-register-B01LY-20260820.pdf";
+    private static final String OUTPUT_DIGEST =
+            "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752";
+    private static final int ACCEPTED = 202;
 
     private final ProcessingMetrics metrics = new ProcessingMetrics(new SimpleMeterRegistry());
     private final IdempotencyGuard guard = ProcessedLogTestSupport.guard(LEASE, metrics);
@@ -214,6 +224,56 @@ class FailedReplayIT {
         assertThat(row.completionReason()).isEqualTo("no-subscriptions");
         assertThat(row.failureReason()).isNull();
         assertThat(row.auditNote()).contains("PIPELINE_TRANSIENT_FAILURE");
+    }
+
+    /**
+     * The independent-enqueue regression, re-asserted under the new decision path: admitting a
+     * replay by sequence number must not disturb the output row's own idempotency gate.
+     *
+     * <p>{@code guard.admit()} only decides whether the <em>request</em> runs again; whether a
+     * register is sent a second time is {@code ProcessedOutputRepository}'s own claim, proven in
+     * isolation by {@code OutputClaimFencingIT} and {@code SubmissionRedeliveryIT}. Those suites
+     * never go through {@code guard.admit()} at all, so neither can say whether admitting a replay by
+     * sequence number — rather than by a fresh {@code messageId} — changes what reaches the output
+     * row.
+     *
+     * <p>The scenario this proves: a first run POSTs the register, then the request itself still
+     * ends up {@code FAILED} (a non-transient failure unrelated to the POST, the only way a
+     * {@code FAILED} row and an already-{@code POSTED} output row coexist). The replay below reuses
+     * that <strong>same</strong> {@code messageId} — the headline case this feature exists for — so
+     * it is the sequence number alone, not a fresh identity, that gets it admitted; the output claim
+     * it then attempts is still refused by the row the first run already settled.
+     */
+    @Test
+    @DisplayName("a replay of an already-POSTED register still posts nothing a second time, "
+            + "admitted by sequence number alone")
+    void a_replay_of_an_already_posted_register_should_not_post_it_again() {
+        final ProcessedOutputRepository outputs =
+                new ProcessedOutputRepository(ProcessedLogTestSupport.jdbcClient());
+        final RunClaim firstRun = runClaimOf(guard.admit(command, delivery("msg-1", 1)));
+        assertThat(outputs.claimPending(firstRun, outputClaim()))
+                .as("the first run claims the output row")
+                .isTrue();
+        assertThat(outputs.recordPosted(firstRun, ACCEPTED))
+                .as("the first run's POST was accepted and settled")
+                .isTrue();
+        guard.recordNonTransientFailure(firstRun, ReasonCode.REGISTER_NOT_RECORDED);
+        assertThat(row().status()).isEqualTo("FAILED");
+
+        final RunClaim secondRun = runClaimOf(guard.admit(command, delivery("msg-1", 2)));
+        final boolean secondClaim = outputs.claimPending(secondRun, outputClaim());
+
+        assertThat(secondClaim)
+                .as("a request admitted again under the SAME messageId, by sequence number alone, "
+                        + "still finds its output row POSTED, and the claim that would let it "
+                        + "submit a second time is refused")
+                .isFalse();
+    }
+
+    private static ProcessedOutputClaim outputClaim() {
+        return new ProcessedOutputClaim(
+                UUID.randomUUID(), COURT_CENTRE, OU_CODE, REGISTER_DATE, FILE_NAME,
+                OUTPUT_DIGEST, null);
     }
 
     @Test
