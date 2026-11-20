@@ -91,12 +91,22 @@ public record DeliveryIdentity(
 ```
 
 `messageId` is retained — FR-004 still replays regardless of `messageId`, and FR-008's audit trail
-still wants it recorded. The two- and three-argument convenience constructors used throughout the
-existing test suite are replaced by ones that take the broker facts; every existing call site
-(chiefly `FailedReplayIT`'s delivery-building helper and its siblings in `IdempotencyGuardIT`,
-`MessageListenerSettlementTest`, `DeliveryExhaustionIT`, `DuplicateDetectionIT`, `RequestDedupeIT`,
-`MessageAccountingIT`) is updated to supply a sequence number, each synthetic delivery distinct on
-both axes.
+still wants it recorded. **The existing two- and three-argument convenience constructors are kept**,
+not replaced: `new DeliveryIdentity(messageId, claimOwner[, finalPermittedDelivery])` defaults
+`sequenceNumber` to the sentinel `-1L`, `deliveryCount` to `0` and `enqueueTime` to `null`. This is
+safe because every call site using them today — `IdempotencyCollisionIT`, `ProcessedLogDurabilityIT`,
+`CrashWindowIT`, `OutputClaimFencingIT`, `StaleRunnerRejectionIT`, `PipelineCompositionTest` — drives
+only the insert/collision/claim/crash-window paths and never reaches `replayOrPark`'s sequence-number
+comparison; touching seven files that have nothing to do with this feature to satisfy a record's
+canonical constructor would be exactly the needless blast radius Principle V's minimalism exists to
+avoid. A **new** factory/constructor taking the broker facts explicitly is added for the persistence- and
+listener-level tests that construct a `DeliveryIdentity` by hand and do exercise replay —
+`FailedReplayIT`'s delivery-building helper and its siblings in `IdempotencyGuardIT` and
+`MessageListenerSettlementTest` — each synthetic delivery distinct on both axes there. The
+emulator-backed suites (`DeliveryExhaustionIT`, `QueueSettlementIT`, `DuplicateDetectionIT`,
+`RequestDedupeIT`, `MessageAccountingIT`) need no such change: their sequence numbers come from the
+real broker automatically; they only gain new *assertions* reading `message.getSequenceNumber()`
+off deliveries they already drive.
 
 ### `RunClaim` (gains the parking delivery's own sequence number)
 
