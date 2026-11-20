@@ -442,6 +442,31 @@ class IdempotencyGuardIT {
                     DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
             assertThat(row()).isEqualTo(before);
         }
+
+        /**
+         * Spec 007-replay-by-sequence-number, tasks.md T028 (US2): the delivery that parked the
+         * current {@code FAILED} generation is never re-run, whatever {@code messageId} the same
+         * stored message happens to carry on a given delivery attempt — same sequence number is the
+         * whole of the decision (FR-003 same-branch). The test above pins this for the ordinary
+         * case where the messageId also matches; this pins it for a different one, so the two
+         * cannot be mistaken for testing the same thing.
+         */
+        @Test
+        void should_stay_parked_under_a_different_messageId_carrying_the_same_sequence_number() {
+            driveToFailed("msg-5");
+            final Row before = row();
+
+            final GuardDecision decision = guard.admit(command, delivery("retry-5", OTHER_OWNER));
+
+            assertThat(decision)
+                    .as("the sequence number alone decides; this delivery's own messageId never "
+                            + "matched the one that parked the row")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+            assertThat(row())
+                    .as("the row is byte-identical: no state changed for a delivery that ran nothing")
+                    .isEqualTo(before);
+        }
     }
 
     // --- COMPLETED is terminal ---------------------------------------------------------------

@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,6 +96,16 @@ class DeliveryExhaustionIT {
 
     private static final Duration REPLAYED_WITHIN = Duration.ofSeconds(60);
 
+    /** Bounds a held delivery's wait for the transport cut, so a failure times out rather than hangs. */
+    private static final Duration HELD_AT_MOST = Duration.ofMinutes(2);
+
+    /**
+     * The exhausting delivery's lock (the queue's own {@code LockDuration}, one minute) may still
+     * have nearly its full life left when the transport is cut underneath it, so the redelivery this
+     * suite waits for budgets for that in full, on top of the broker round trips either side of it.
+     */
+    private static final Duration RE_PARKED_WITHIN = Duration.ofSeconds(150);
+
     /**
      * How often a broker-backed condition is re-asked. Deliberately a second rather than
      * Awaitility's default hundred milliseconds: every peek opens its own AMQP connection, and a
@@ -162,6 +174,10 @@ class DeliveryExhaustionIT {
     @AfterEach
     void releaseTheDeliveryLog() {
         deliveryLog.close();
+        // Idempotent (ServiceBusEmulatorTestSupport.restore()'s own contract): a failing assertion
+        // in the transport-cut scenario must not leave the broker disconnected for the suites that
+        // run after this one.
+        ServiceBusEmulatorTestSupport.restore();
     }
 
     // --- helpers ---------------------------------------------------------------------------
@@ -278,6 +294,87 @@ class DeliveryExhaustionIT {
         assertThat(signals().minus(before))
                 .as("every failed run counted, one request parked, one dead-letter performed")
                 .isEqualTo(new Signals(PERMITTED_DELIVERIES, 1, 1));
+    }
+
+    // --- US2: the delivery that parked the current failure is never re-run (spec 007) ------------
+
+    /**
+     * Spec 007-replay-by-sequence-number, tasks.md T030: the delivery recorded as parking the
+     * current {@code FAILED} generation must never be re-run, even if its own dead-letter operation
+     * did not settle and the broker simply offers the same stored message again.
+     *
+     * <p>The transport is cut through Toxiproxy exactly as {@code QueueOutageRecoveryIT} cuts it — a
+     * sequence rather than a race: the exhausting (fifth) delivery is held open until it is
+     * confirmed in flight, the transport is cut underneath it, and only then is it let finish. The
+     * {@code processed_request} write that parks the row reaches Postgres regardless, because the
+     * connection cut is Service-Bus-only; the {@code deadLetter()} settlement that would otherwise
+     * follow it is refused by the severed transport and never reaches the broker. Once the transport
+     * is restored, the broker — having never heard that delivery settle — offers the same stored
+     * message again: a genuine redelivery, under the same sequence number, with one more delivery
+     * count. The guard must re-park it without ever invoking the payload port again.
+     */
+    @Test
+    @DisplayName("a delivery whose settlement is lost to a closed connection returns under its "
+            + "original sequence number and is re-parked without running")
+    void should_re_park_without_running_when_the_exhausting_deliverys_settlement_is_lost()
+            throws InterruptedException {
+        final CountDownLatch exhaustingDeliveryInFlight = new CountDownLatch(1);
+        final CountDownLatch transportCut = new CountDownLatch(1);
+
+        when(payloadSource.fetch(any(DistributionCommand.class))).thenAnswer(invocation -> {
+            final DistributionCommand incoming = invocation.getArgument(0);
+            if (!requestId.equals(incoming.requestId())) {
+                return PLACEHOLDER;
+            }
+            runStartedWith.add(
+                    ProcessedLogTestSupport.requireRow(ProcessedLogTestSupport.SOURCE, requestId));
+            if (runStartedWith.size() == PERMITTED_DELIVERIES) {
+                exhaustingDeliveryInFlight.countDown();
+                transportCut.await(HELD_AT_MOST.toSeconds(), TimeUnit.SECONDS);
+            }
+            throw new PayloadUnavailableException(ReasonCode.PAYLOAD_UNAVAILABLE);
+        });
+
+        final String exhausting = publish();
+
+        assertThat(exhaustingDeliveryInFlight.await(PARKED_WITHIN.toSeconds(), TimeUnit.SECONDS))
+                .as("the fifth, exhausting delivery must genuinely be in flight before the "
+                        + "transport is cut")
+                .isTrue();
+        ServiceBusEmulatorTestSupport.disconnect();
+        transportCut.countDown();
+
+        await().atMost(PARKED_WITHIN).pollInterval(POLL).until(() -> row()
+                .filter(found -> RequestStatus.FAILED.name().equals(found.status()))
+                .isPresent());
+        final Row writtenButUnsettled = requireRow();
+        assertThat(writtenButUnsettled.attempts())
+                .as("the park write reached Postgres - a connection the Service-Bus-only cut "
+                        + "never touched")
+                .isEqualTo(PERMITTED_DELIVERIES);
+        assertThat(writtenButUnsettled.parkingSequenceNumber()).isNotNull();
+
+        ServiceBusEmulatorTestSupport.restore();
+
+        await().atMost(RE_PARKED_WITHIN).pollInterval(POLL).until(() -> ServiceBusEmulatorTestSupport
+                .peekFor(exhausting, SubQueue.DEAD_LETTER_QUEUE).isPresent());
+
+        final Row reparked = requireRow();
+        assertThat(reparked.attempts())
+                .as("nothing ran again; the lifetime tally stays at five")
+                .isEqualTo(PERMITTED_DELIVERIES);
+        assertThat(reparked.parkingSequenceNumber())
+                .as("the same stored message re-parked under the sequence number it already carried")
+                .isEqualTo(writtenButUnsettled.parkingSequenceNumber());
+        assertThat(runStartedWith)
+                .as("the redelivery was re-parked before the pipeline ever ran again")
+                .hasSize(PERMITTED_DELIVERIES);
+
+        final ServiceBusReceivedMessage deadLettered = ServiceBusEmulatorTestSupport
+                .peekFor(exhausting, SubQueue.DEAD_LETTER_QUEUE).orElseThrow();
+        assertThat(deadLettered.getSequenceNumber())
+                .as("the broker never re-enqueued this delivery; it is the one it always was")
+                .isEqualTo(reparked.parkingSequenceNumber());
     }
 
     /**

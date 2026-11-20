@@ -247,22 +247,50 @@ delivered again; observe that nothing runs and the message is dead-lettered agai
 
 ### Tests for User Story 2 (write first) ⚠️
 
-- [ ] T028 [P] [US2] Write failing `IdempotencyGuardIT`/`FailedReplayIT` case: a delivery carrying
+- [X] T028 [P] [US2] Write failing `IdempotencyGuardIT`/`FailedReplayIT` case: a delivery carrying
       the **same** sequence number as the one recorded when the request was parked runs nothing,
       changes no state, and is dead-lettered again (FR-003 same-branch).
-- [ ] T029 [US2] Write failing case: exactly one explicit settlement attempt is made for the
+
+      `IdempotencyGuardIT.ParkedRequest.should_stay_parked_under_a_different_messageId_carrying_the_same_sequence_number`:
+      a **different** `messageId` from the parking delivery, same sequence number — the case the
+      pre-existing `should_stay_parked_under_the_identity_that_exhausted_the_retries` cannot
+      distinguish from "same messageId" on its own. The two together pin the decision as sequence
+      number alone, not messageId. (`FailedReplayIT` already carries the Phase 3 pair of the same
+      shape, written before this phase existed.)
+- [X] T029 [US2] Write failing case: exactly one explicit settlement attempt is made for the
       re-parked delivery (settlement-discipline regression under the new branch).
-- [ ] T030 [P] [US2] Extend `e2e/DeliveryExhaustionIT`: a stored message released by a lost lock or a
+
+      Satisfied by composition, not a new test: `MessageListenerSettlementTest.Parked.should_dead_letter_it_exactly_once_with_a_bounded_reason_and_description`
+      already asserts `verify(context).deadLetter(...)` (Mockito's default `times(1)`) for *any*
+      `GuardDecision.DeadLetter` the listener is handed, and the listener's settlement code has no
+      branch-specific logic to tell "equal-sequence re-park" apart from any other `DeadLetter` — it
+      only ever sees the decision type. There is no additional code path for a dedicated mock-based
+      test to regress. The T030 e2e test below additionally proves this holds for the real branch
+      end to end: the message would not reach the dead-letter sub-queue at all if its settlement had
+      failed or been attempted more than once.
+- [X] T030 [P] [US2] Extend `e2e/DeliveryExhaustionIT`: a stored message released by a lost lock or a
       closed connection (this service's own intake-suspend/shutdown path) returns under its original
       sequence number and is parked again without running.
 
+      `should_re_park_without_running_when_the_exhausting_deliverys_settlement_is_lost`: the
+      exhausting (fifth) delivery is held in flight until confirmed, the Service Bus transport is
+      cut through Toxiproxy underneath it (`ServiceBusEmulatorTestSupport.disconnect()`, the same
+      technique `QueueOutageRecoveryIT` already uses), and only then released — its
+      `processed_request` write reaches Postgres (an unaffected connection) but its `deadLetter()`
+      settlement is refused by the severed transport. Once the transport is restored, the broker
+      offers the same stored message again; the guard re-parks it under the sequence number it
+      already carried, without the payload port being invoked a sixth time, and the message lands on
+      the dead-letter queue under its original sequence number. Confirmed stable across four runs.
+
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] `application/IdempotencyGuard.java`: confirm, under this story's own dedicated test
+- [X] T031 [US2] `application/IdempotencyGuard.java`: confirm, under this story's own dedicated test
       names, the equal-sequence-number branch T026 already implements — add no new production code
       unless T028/T029/T030 find a gap (expected: none; this phase is the proof that the protection
       already holds, matching the spec's own framing of US2 as "the protection the current test
       exists for must survive"). Depends on T026.
+
+      No gap found; no production code changed in this phase.
 
 **Checkpoint**: User Stories 1 and 2 together complete the exact-row decision table (FR-003, FR-004,
 FR-006, FR-007, FR-008). A re-park's dead-letter reason is still the pre-existing generic one until
