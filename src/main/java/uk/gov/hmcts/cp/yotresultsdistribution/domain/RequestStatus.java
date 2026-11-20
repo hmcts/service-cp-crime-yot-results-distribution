@@ -7,8 +7,9 @@ package uk.gov.hmcts.cp.yotresultsdistribution.domain;
  * the V1 check constraint, so a rename here is a schema change, not a refactor.
  *
  * <p>{@code COMPLETED} and {@code FAILED} are terminal, but terminal is not the same as final: a
- * {@code FAILED} record is replayable under a fresh message identity, while a {@code COMPLETED} one
- * is never run again.
+ * {@code FAILED} record is replayable by a delivery carrying a different broker sequence number from
+ * the one that parked it, whatever its {@code messageId} (spec 007-replay-by-sequence-number), while
+ * a {@code COMPLETED} one is never run again.
  */
 public enum RequestStatus {
 
@@ -21,7 +22,7 @@ public enum RequestStatus {
     /** The run succeeded and its outcome is durable. */
     COMPLETED,
 
-    /** The permitted deliveries were exhausted; parked, and replayable under a fresh identity. */
+    /** The permitted deliveries were exhausted; parked, and replayable by a resubmission. */
     FAILED;
 
     /**
@@ -32,8 +33,8 @@ public enum RequestStatus {
      * property of the state and not of the measurement: a fifth constant added later has to decide
      * which side of this line it falls on, and deciding it here is deciding it once.
      *
-     * <p>Terminal is not the same as final. A {@code FAILED} record is replayable under a fresh
-     * message identity, and the run that reached it still finished.
+     * <p>Terminal is not the same as final. A {@code FAILED} record is replayable by a resubmission,
+     * and the run that reached it still finished.
      *
      * @return whether a run in this state has finished
      */

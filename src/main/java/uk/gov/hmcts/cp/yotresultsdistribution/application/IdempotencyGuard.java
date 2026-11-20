@@ -113,7 +113,7 @@ public class IdempotencyGuard {
         final String fingerprint = RequestFingerprint.of(command);
         final RunClaim claim = new RunClaim(
                 command.source(), command.requestId(), delivery.claimOwner(), UUID.randomUUID(),
-                delivery.messageId());
+                delivery.messageId(), delivery.sequenceNumber());
         final GuardDecision decision;
 
         if (repository.insertNew(command, fingerprint, claim)) {
@@ -196,10 +196,11 @@ public class IdempotencyGuard {
      * {@code DELIVERY_LIMIT_EXHAUSTED} — a reason that tells support the service ran out of tries
      * rather than that the register was unusable.
      *
-     * <p>The row is written by the same statement an exhaustion uses, so the identity of this
-     * delivery is stamped onto it: a redelivery of the same message re-parks without re-running,
-     * while a deliberate resubmission under a fresh identity replays. That is the behaviour a parked
-     * request already has, and a non-transient failure is not a different kind of parking.
+     * <p>The row is written by the same statement an exhaustion uses, so the identity and the broker
+     * sequence number of this delivery are stamped onto it: a redelivery carrying the same sequence
+     * number re-parks without re-running, while a different one replays, whatever its
+     * {@code messageId} (spec 007-replay-by-sequence-number, FR-003/FR-004). That is the behaviour a
+     * parked request already has, and a non-transient failure is not a different kind of parking.
      *
      * @param claim  the claim the run was made under
      * @param reason the bounded reason the run failed for
@@ -207,7 +208,7 @@ public class IdempotencyGuard {
      */
     public GuardDecision recordNonTransientFailure(final RunClaim claim, final ReasonCode reason) {
         final GuardDecision decision;
-        if (repository.recordFailed(claim, reason.code())) {
+        if (repository.recordFailed(claim, reason.code(), DeadLetterReason.NON_TRANSIENT.name())) {
             LOG.info("Request parked; no redelivery could change it. source={} requestId={} reason={}",
                     claim.source(), claim.requestId(), reason.code());
             decision = new GuardDecision.DeadLetter(DeadLetterReason.NON_TRANSIENT, reason);
@@ -231,7 +232,7 @@ public class IdempotencyGuard {
      */
     public GuardDecision recordExhaustion(final RunClaim claim, final ReasonCode reason) {
         final GuardDecision decision;
-        if (repository.recordFailed(claim, reason.code())) {
+        if (repository.recordFailed(claim, reason.code(), DeadLetterReason.EXHAUSTED.name())) {
             LOG.info("Request parked after its final permitted delivery. source={} requestId={} reason={}",
                     claim.source(), claim.requestId(), reason.code());
             decision = new GuardDecision.DeadLetter(

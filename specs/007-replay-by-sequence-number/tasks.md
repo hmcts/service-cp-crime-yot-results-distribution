@@ -56,29 +56,29 @@ story's tests are built on. No user-story work can begin until this phase is gre
 
 ### Tests for Foundational (write first) ⚠️
 
-- [ ] T002 [P] Write failing `SchemaMigrationIT` cases in
+- [X] T002 [P] Write failing `SchemaMigrationIT` cases in
       `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/persistence/SchemaMigrationIT.java`: `V9`
       leaves every existing `FAILED` row valid; `processed_request_parking_triple_chk` admits an
       all-null triple and an all-present triple, and rejects a partially-set one;
       `processed_request_parking_category_chk` admits `NULL`, `'EXHAUSTED'`, `'NON_TRANSIENT'`, and
       rejects any other value.
-- [ ] T003 [P] Write failing `domain/ReasonCodeTest` (new file) in
+- [X] T003 [P] Write failing `domain/ReasonCodeTest` (new file) in
       `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/domain/ReasonCodeTest.java`:
       `fromCode(String)` round-trips every declared `ReasonCode` value via its own `code()`, and
       returns `Optional.empty()` for `null`, blank, and an unrecognised string.
-- [ ] T004 [P] Write failing `domain/FailureCategoryMappingTest` (new file) in
+- [X] T004 [P] Write failing `domain/FailureCategoryMappingTest` (new file) in
       `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/domain/FailureCategoryMappingTest.java`:
       the seven non-transient-path codes (`PAYLOAD_READ_REFUSED`, `REFERENCE_DATA_REFUSED`,
       `TRANSFORMATION_FAILED`, `OUTBOUND_CONTRACT_VIOLATION`, `REGISTER_NOT_RECORDED`,
       `SUBMISSION_REJECTED`, `SUBMISSION_NOT_ACCEPTED`) map to `DeadLetterReason.NON_TRANSIENT`;
       every other declared `ReasonCode`, `null`, and an unrecognised string map to
       `DeadLetterReason.EXHAUSTED`; the method never throws.
-- [ ] T005 [P] Write failing `config/ConfigurationValidationTest` case in
+- [X] T005 [P] Write failing `config/ConfigurationValidationTest` case in
       `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/config/ConfigurationValidationTest.java`:
       start-up refuses a configured `yotresultsdistribution.replay.legacy-margin` shorter than
       `yotresultsdistribution.servicebus.lock-duration`, naming only the two setting keys (no value
       echoed).
-- [ ] T006 [P] Write failing cases in
+- [X] T006 [P] Write failing cases in
       `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/inbound/MessageListenerSettlementTest.java`
       and `SettlementFailureEdgeTest.java`: each of `getSequenceNumber()`, `getDeliveryCount()`,
       `getMessageId()`, `getLockToken()`, `getEnqueuedTime()` is invoked **at most once** per
@@ -86,50 +86,49 @@ story's tests are built on. No user-story work can begin until this phase is gre
       throws still produces exactly one settlement, and that settlement is always `abandon()`,
       **never** `deadLetter()`, because the final-delivery position could not be determined; a
       `null`/absent enqueue time is recorded as absent and the delivery proceeds normally.
-- [ ] T006a [P] Write failing `persistence/IdempotencyGuardIT` or `FailedReplayIT` case in
-      `src/test/java/uk/gov/hmcts/cp/yotresultsdistribution/persistence/` (co-located with whichever
-      suite the implementer finds the cleaner fit): two runners race to park the same request — the
-      runner whose claim was reclaimed while it was working (the existing stale-runner scenario the
-      suite already drives for `status`/`failure_reason`) must not have its
-      `parking_sequence_number`/`parking_category`/`parking_attempt_count` applied either; the
-      winner's values are the ones that land (FR-002, FR-015 "a stale runner cannot overwrite the
-      parking metadata"). Mirrors the existing owner/token-predicate proof this suite already has for
-      the pre-existing columns — this case is the same proof extended to the three new ones.
+- [X] T006a [P] Satisfied by extending `support/ProcessedLogTestSupport.Row` (and its backing read)
+      with the three new columns, rather than a new dedicated test method: `StaleRunnerRejectionIT`'s
+      existing `a_stale_outcome_write_should_be_rejected(EXHAUSTION)` case already asserts the full
+      row is unchanged (`assertThat(row()).isEqualTo(before)`) after a superseded runner's
+      `recordExhaustion` write is refused — once `Row` carries `parkingSequenceNumber`/
+      `parkingCategory`/`parkingAttemptCount`, that existing full-row comparison proves FR-002 for the
+      three new columns for free, exactly mirroring the pre-existing owner/token-predicate proof for
+      `status`/`failure_reason`. Verified green (`StaleRunnerRejectionIT`: 13/13).
 
 ### Implementation for Foundational
 
-- [ ] T007 [P] Create `src/main/resources/db/migration/V9__add_parking_sequence_category_and_attempts.sql`:
+- [X] T007 [P] Create `src/main/resources/db/migration/V9__add_parking_sequence_category_and_attempts.sql`:
       `ALTER TABLE processed_request ADD COLUMN parking_sequence_number bigint, ADD COLUMN
       parking_category text, ADD COLUMN parking_attempt_count integer;` plus
       `processed_request_parking_category_chk` and `processed_request_parking_triple_chk`
       (data-model.md). Makes T002 pass.
-- [ ] T008 [P] `domain/DeliveryIdentity.java`: add `sequenceNumber` (`long`), `deliveryCount`
+- [X] T008 [P] `domain/DeliveryIdentity.java`: add `sequenceNumber` (`long`), `deliveryCount`
       (`long`), `enqueueTime` (`Instant`, nullable). Keep the existing 2-/3-arg convenience
       constructors, defaulting the three new fields to `-1L`, `0`, `null` respectively (data-model.md
       — these constructors are used by seven test files unrelated to replay and must not be forced
       to change). Add a new constructor or factory taking all six fields explicitly, for callers that
       do exercise replay.
-- [ ] T009 [P] `domain/RunClaim.java`: add `sequenceNumber` (`long`) — the claim's own delivery's
+- [X] T009 [P] `domain/RunClaim.java`: add `sequenceNumber` (`long`) — the claim's own delivery's
       sequence number, following the existing `messageId` field's javadoc convention verbatim.
-- [ ] T010 [P] `domain/ProcessedRequestRecord.java`: add `parkingSequenceNumber` (`Long`),
+- [X] T010 [P] `domain/ProcessedRequestRecord.java`: add `parkingSequenceNumber` (`Long`),
       `parkingCategory` (`String`), `parkingAttemptCount` (`Integer`), `updatedAt` (`Instant`).
-- [ ] T011 [P] `domain/ReasonCode.java`: add `public static Optional<ReasonCode> fromCode(String
+- [X] T011 [P] `domain/ReasonCode.java`: add `public static Optional<ReasonCode> fromCode(String
       storedCode)`, total over the declared enum. Makes T003 pass.
-- [ ] T012 [P] Create `domain/FailureCategoryMapping.java`: `public static DeadLetterReason
+- [X] T012 [P] Create `domain/FailureCategoryMapping.java`: `public static DeadLetterReason
       categoryFor(String storedReasonCode)` implementing the FR-010 table. Makes T004 pass.
-- [ ] T013 `config/YotResultsDistributionProperties.java`: add `lockDuration` (`@DefaultValue("1m")
+- [X] T013 `config/YotResultsDistributionProperties.java`: add `lockDuration` (`@DefaultValue("1m")
       Duration`) to the existing `Servicebus` record, beside `maxDeliveryCount`; add a new nested
       `Replay(@DefaultValue("5m") Duration legacyMargin)` record and wire it into the top-level
       properties record's component list and constructor javadoc. Depends on T008 (same `Duration`
       import conventions already used there).
-- [ ] T014 `config/PropertiesValidator.java`: add a start-up check refusing
+- [X] T014 `config/PropertiesValidator.java`: add a start-up check refusing
       `replay.legacyMargin < servicebus.lockDuration`, naming only the two setting keys, following
       the existing `validateLockOutlivesTheRun` pattern. Depends on T013. Makes T005 pass.
-- [ ] T015 [P] `src/main/resources/application.yaml`: add `servicebus.lock-duration: 1m` (comment:
+- [X] T015 [P] `src/main/resources/application.yaml`: add `servicebus.lock-duration: 1m` (comment:
       "Mirrors the broker queue's own setting. Must be changed here and on the queue together.",
       matching `max-delivery-count`'s existing comment style) and a new `replay:` block with
       `legacy-margin: 5m`. Depends on T013.
-- [ ] T016 `persistence/ProcessedRequestRepository.java`: extend `READ_RECORD`'s `SELECT` list with
+- [X] T016 `persistence/ProcessedRequestRepository.java`: extend `READ_RECORD`'s `SELECT` list with
       `parking_sequence_number, parking_category, parking_attempt_count, updated_at`, and the
       `read(...)` row mapper to populate the four new `ProcessedRequestRecord` fields; extend
       `RECORD_FAILED`'s `SET` clause with `parking_sequence_number = :sequenceNumber,
@@ -139,7 +138,7 @@ story's tests are built on. No user-story work can begin until this phase is gre
       stays predicated on `claim_owner = :owner AND claim_token = :token`, unchanged, which is what
       makes T006a's stale-runner case pass alongside the existing ones. Depends on T007, T009, T010.
       Makes T006a pass.
-- [ ] T017 `inbound/YotResultsDistributionMessageListener.java`: add a listener-local
+- [X] T017 `inbound/YotResultsDistributionMessageListener.java`: add a listener-local
       `BrokerDeliverySnapshot` record (`sequenceNumber`, `deliveryCount`, `messageId`, `lockToken`,
       `enqueueTime`, `finalPermittedDelivery`); build it once at the top of `process`'s existing call
       frame, inside `decide`/`examine`'s total `try`/`catch RuntimeException` boundary; rewrite

@@ -412,6 +412,39 @@ class ConfigurationValidationTest {
     }
 
     @Nested
+    @DisplayName("the legacy replay margin cannot be shorter than the broker's lock duration "
+            + "(spec 007-replay-by-sequence-number, FR-005)")
+    class LegacyMarginAgainstLockDuration {
+
+        @Test
+        void a_margin_shorter_than_the_lock_duration_should_fail_startup() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.lock-duration=1m",
+                    "yotresultsdistribution.replay.legacy-margin=PT59S").run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .hasMessageContaining("yotresultsdistribution.replay.legacy-margin")
+                                .hasMessageContaining("yotresultsdistribution.servicebus.lock-duration");
+                    });
+        }
+
+        @Test
+        void a_margin_exactly_the_lock_duration_should_start() {
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY,
+                    "yotresultsdistribution.servicebus.lock-duration=1m",
+                    "yotresultsdistribution.replay.legacy-margin=1m").run(context ->
+                            assertThat(context).hasNotFailed());
+        }
+
+        @Test
+        void the_shipped_defaults_should_start() {
+            // lock-duration 1m, legacy-margin 5m - well above it, as the spec's Assumptions state.
+            runner.withPropertyValues(CONNECTION_STRING_PROPERTY).run(context ->
+                    assertThat(context).hasNotFailed());
+        }
+    }
+
+    @Nested
     @DisplayName("exactly one credential source")
     class CredentialSelection {
 

@@ -204,7 +204,10 @@ public final class ProcessedLogTestSupport {
             UUID claimToken,
             Instant claimExpiresAt,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            Long parkingSequenceNumber,
+            String parkingCategory,
+            Integer parkingAttemptCount) {
     }
 
     /**
@@ -225,7 +228,8 @@ public final class ProcessedLogTestSupport {
                         SELECT source, request_id, hearing_id, hearing_day, shared_time, event_type,
                                request_fingerprint, status, attempts, completion_reason,
                                failure_reason, exhausted_message_id, audit_note, claim_owner,
-                               claim_token, claim_expires_at, created_at, updated_at
+                               claim_token, claim_expires_at, created_at, updated_at,
+                               parking_sequence_number, parking_category, parking_attempt_count
                           FROM processed_request
                          WHERE source = :source AND request_id = :requestId
                         """)
@@ -249,7 +253,10 @@ public final class ProcessedLogTestSupport {
                         rs.getObject("claim_token", UUID.class),
                         instant(rs.getObject("claim_expires_at", OffsetDateTime.class)),
                         instant(rs.getObject("created_at", OffsetDateTime.class)),
-                        instant(rs.getObject("updated_at", OffsetDateTime.class))))
+                        instant(rs.getObject("updated_at", OffsetDateTime.class)),
+                        (Long) rs.getObject("parking_sequence_number"),
+                        rs.getString("parking_category"),
+                        (Integer) rs.getObject("parking_attempt_count")))
                 .optional();
     }
 

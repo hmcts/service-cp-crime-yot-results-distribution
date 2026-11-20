@@ -7,6 +7,8 @@ import com.azure.messaging.servicebus.ServiceBusFailureReason;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessage;
 import com.azure.messaging.servicebus.ServiceBusReceivedMessageContext;
 import com.azure.messaging.servicebus.models.DeadLetterOptions;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -334,6 +336,11 @@ public class YotResultsDistributionMessageListener {
 
     /**
      * Runs a validated request, under the correlation identifiers it carries.
+     *
+     * <p>{@link #snapshotOf} is called exactly once here, inside the boundary {@link #decide}
+     * already guarantees a settlement for (spec 007-replay-by-sequence-number, FR-011). Every later
+     * use in this class — the receipt line below, {@link #identityOf} — reads the snapshot's fields;
+     * none calls a {@link ServiceBusReceivedMessage} accessor a second time.
      */
     private GuardDecision process(
             final DistributionCommand command, final ServiceBusReceivedMessage message) {
@@ -341,10 +348,16 @@ public class YotResultsDistributionMessageListener {
         MDC.put(REQUEST_ID, command.requestId().toString());
         MDC.put(HEARING_ID, command.hearingId().toString());
         MDC.put(HEARING_DAY, command.hearingDay().toString());
-        LOG.info("Delivery received. source={} eventType={} deliveryCount={} finalPermittedDelivery={}",
-                command.source(), command.eventType(), message.getDeliveryCount(),
-                isFinalPermittedDelivery(message));
-        return pipeline.process(command, identityOf(message), flagState());
+        final BrokerDeliverySnapshot snapshot = snapshotOf(message);
+        // Argument order/position is pinned: DeliveryExhaustionIT reads deliveryCount from this
+        // line's own argument array by index, so the four original arguments keep their original
+        // positions and the two new ones are appended, never inserted.
+        LOG.info("Delivery received. source={} eventType={} deliveryCount={} finalPermittedDelivery={} "
+                        + "sequenceNumber={} enqueueTime={}",
+                command.source(), command.eventType(), snapshot.deliveryCount(),
+                snapshot.finalPermittedDelivery(), snapshot.sequenceNumber(),
+                snapshot.enqueueTime() == null ? "none" : snapshot.enqueueTime());
+        return pipeline.process(command, identityOf(snapshot), flagState());
     }
 
     /**
@@ -597,16 +610,79 @@ public class YotResultsDistributionMessageListener {
     }
 
     /**
+     * One capture of every broker fact this listener reads about a delivery, taken exactly once
+     * (spec 007-replay-by-sequence-number, FR-011).
+     *
+     * <p>Listener-local: it is built and consumed entirely inside this class and never crosses into
+     * {@code application} or {@code domain} — those see only {@link DeliveryIdentity}, built from
+     * this snapshot's fields, never from a {@link ServiceBusReceivedMessage} (constitution
+     * Principle V).
+     *
+     * @param sequenceNumber         the broker's own identity for this delivery
+     * @param deliveryCount          the broker's zero-based delivery count for this delivery
+     * @param messageId              the broker's messageId for this delivery
+     * @param lockToken              this delivery's lock token
+     * @param enqueueTime            the broker's enqueue time for this delivery, or {@code null}
+     *                               when the broker annotation is absent — recorded as absent, not
+     *                               defaulted (FR-011)
+     * @param finalPermittedDelivery whether the queue's delivery budget ends with this delivery
+     */
+    private record BrokerDeliverySnapshot(
+            long sequenceNumber,
+            long deliveryCount,
+            String messageId,
+            String lockToken,
+            Instant enqueueTime,
+            boolean finalPermittedDelivery) {
+    }
+
+    /**
+     * Reads every broker fact this listener needs about a delivery, in one pass.
+     *
+     * <p>Called exactly once per delivery, from inside {@link #process}, which is itself inside
+     * {@link #decide}'s total {@code try}/{@code catch RuntimeException} boundary: a throw from any
+     * accessor here is caught by the same branch that already classifies "anything else at all" as
+     * {@code unexpectedFailure} — exactly one settlement, and always {@code abandon()}, because the
+     * final-delivery position could not be determined for a snapshot that was never built (spec
+     * FR-012).
+     */
+    private BrokerDeliverySnapshot snapshotOf(final ServiceBusReceivedMessage message) {
+        final long deliveryCount = message.getDeliveryCount();
+        return new BrokerDeliverySnapshot(
+                message.getSequenceNumber(),
+                deliveryCount,
+                message.getMessageId(),
+                message.getLockToken(),
+                enqueueTimeOf(message),
+                isFinalPermittedDelivery(deliveryCount));
+    }
+
+    /**
+     * The broker's enqueue time, or {@code null} where the annotation is absent — never defaulted
+     * (spec FR-011).
+     */
+    private static Instant enqueueTimeOf(final ServiceBusReceivedMessage message) {
+        final OffsetDateTime enqueuedTime = message.getEnqueuedTime();
+        return enqueuedTime == null ? null : enqueuedTime.toInstant();
+    }
+
+    /**
      * Who is running this delivery: this pod, and this lock.
      *
      * <p>The lock token is the delivery half — it is unique to the delivery and changes on every
      * redelivery, which is exactly the granularity {@code claim_owner} wants.
+     *
+     * <p>Reads only the snapshot — never the {@link ServiceBusReceivedMessage} — so every broker
+     * accessor this identity needs has already been read exactly once (FR-011).
      */
-    private DeliveryIdentity identityOf(final ServiceBusReceivedMessage message) {
+    private DeliveryIdentity identityOf(final BrokerDeliverySnapshot snapshot) {
         return new DeliveryIdentity(
-                message.getMessageId(),
-                INSTANCE + '/' + message.getLockToken(),
-                isFinalPermittedDelivery(message));
+                snapshot.messageId(),
+                INSTANCE + '/' + snapshot.lockToken(),
+                snapshot.finalPermittedDelivery(),
+                snapshot.sequenceNumber(),
+                snapshot.deliveryCount(),
+                snapshot.enqueueTime());
     }
 
     /**
@@ -626,9 +702,12 @@ public class YotResultsDistributionMessageListener {
      * comparison is {@code >=} so that a message somehow arriving past the budget — a queue
      * reconfigured downwards while messages were in flight — is still parked rather than never
      * parked at all.
+     *
+     * <p>Takes the already-read count rather than the message itself (spec FR-011) — called once,
+     * from {@link #snapshotOf}, rather than once per caller as it was before.
      */
-    private boolean isFinalPermittedDelivery(final ServiceBusReceivedMessage message) {
-        return message.getDeliveryCount() >= (long) maxDeliveryCount - 1;
+    private boolean isFinalPermittedDelivery(final long deliveryCount) {
+        return deliveryCount >= (long) maxDeliveryCount - 1;
     }
 
     private static void clearCorrelation() {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -183,7 +184,11 @@ class FailedReplayIT {
                                 "msg-5",
                                 5,
                                 null,
-                                null));
+                                null,
+                                null,
+                                null,
+                                null,
+                                Instant.now()));
                     }
                 },
                 metrics);

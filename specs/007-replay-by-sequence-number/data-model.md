@@ -125,6 +125,17 @@ Same reasoning as the existing `messageId` field's javadoc: "the delivery that a
 definition the one whose failure parks the request," so the sequence number travels with the claim
 rather than being passed separately into `recordNonTransientFailure`/`recordExhaustion`.
 
+`RunClaim` has no auxiliary constructor today — every call site supplies all five existing
+components directly — and thirteen test files do (`PipelineCompositionTest`, `TelemetryPrivacyTest`,
+`GeneratedRegisters`, `ProgressionRegisterSubmissionClientTest`, `RegisterStoreReportReadsIT`,
+`MessageListenerSettlementTest`, `ProcessedOutputRepositoryIT`, `RegisterStoreIT`,
+`StaleReleaseConcurrencyIT`, `DistributionPipelineTest`, `SubmissionRedeliveryIT`,
+`OutcomeOvertakesRequestIT`, `OperationsConcurrencyIT`), none of which exercise replay. The same
+minimalism applies as to `DeliveryIdentity`: a new 5-arg constructor is added, defaulting
+`sequenceNumber` to the sentinel `-1L`, so none of the thirteen needs to change; only the one
+production call site, `IdempotencyGuard.admit`, is updated to supply the real value via the 6-arg
+canonical constructor, from the `DeliveryIdentity` it was handed.
+
 ### New: `BrokerDeliverySnapshot` (listener-local; never crosses into `application`/`domain`)
 
 ```java

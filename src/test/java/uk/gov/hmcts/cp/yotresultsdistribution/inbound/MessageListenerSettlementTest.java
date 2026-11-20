@@ -3,6 +3,7 @@ package uk.gov.hmcts.cp.yotresultsdistribution.inbound;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atMostOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -17,6 +18,7 @@ import com.azure.messaging.servicebus.models.DeadLetterOptions;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -597,6 +599,100 @@ class MessageListenerSettlementTest {
             verify(pipeline).process(any(DistributionCommand.class), any(DeliveryIdentity.class),
                     attached.capture());
             assertThat(attached.getValue()).isEqualTo(RecordedFlagState.UNKNOWN);
+        }
+    }
+
+    // --- broker metadata, read exactly once (spec 007-replay-by-sequence-number) ------------------
+
+    @Nested
+    @DisplayName("the broker metadata the snapshot captures")
+    class BrokerMetadataReadOnce {
+
+        @Test
+        void every_accessor_should_be_invoked_at_most_once_per_delivery() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Complete(ReasonCode.RUN_COMPLETED));
+
+            listener.onMessage(context);
+
+            final ServiceBusReceivedMessage message = context.getMessage();
+            verify(message, atMostOnce()).getSequenceNumber();
+            verify(message, atMostOnce()).getDeliveryCount();
+            verify(message, atMostOnce()).getMessageId();
+            verify(message, atMostOnce()).getLockToken();
+            verify(message, atMostOnce()).getEnqueuedTime();
+        }
+
+        @Test
+        void the_sequence_number_and_enqueue_time_should_reach_the_delivery_identity() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(message.getSequenceNumber()).thenReturn(42L);
+            final OffsetDateTime enqueuedAt = OffsetDateTime.parse("2026-08-31T08:00:00Z");
+            when(message.getEnqueuedTime()).thenReturn(enqueuedAt);
+            pipelineDecides(new GuardDecision.Complete(ReasonCode.RUN_COMPLETED));
+
+            listener.onMessage(context);
+
+            final ArgumentCaptor<DeliveryIdentity> identity =
+                    ArgumentCaptor.forClass(DeliveryIdentity.class);
+            verify(pipeline).process(any(DistributionCommand.class), identity.capture(),
+                    any(RecordedFlagState.class));
+            assertThat(identity.getValue().sequenceNumber()).isEqualTo(42L);
+            assertThat(identity.getValue().enqueueTime()).isEqualTo(enqueuedAt.toInstant());
+        }
+
+        @Test
+        void an_absent_enqueue_time_should_continue_normally() {
+            // deliveryOf() never stubs getEnqueuedTime(); Mockito's default for an unstubbed Object
+            // accessor is null, which is exactly "the broker annotation is absent" (FR-011) - not a
+            // failure, and not a value to be guessed at.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            pipelineDecides(new GuardDecision.Complete(ReasonCode.RUN_COMPLETED));
+
+            listener.onMessage(context);
+
+            final ArgumentCaptor<DeliveryIdentity> identity =
+                    ArgumentCaptor.forClass(DeliveryIdentity.class);
+            verify(pipeline).process(any(DistributionCommand.class), identity.capture(),
+                    any(RecordedFlagState.class));
+            assertThat(identity.getValue().enqueueTime()).isNull();
+            verify(context).complete();
+            assertSettledExactlyOnce(context);
+        }
+
+        @Test
+        void a_failure_to_read_the_delivery_count_should_still_settle_exactly_once_by_abandoning() {
+            // The conservative rule (FR-012): the final-delivery position cannot be determined for a
+            // snapshot that was never built, so the delivery is handed back rather than parked - even
+            // though this might, in fact, have been the final permitted delivery. There is no
+            // reliable way to know that it was.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(message.getDeliveryCount())
+                    .thenThrow(new IllegalStateException("the delivery-count annotation is unreadable"));
+
+            listener.onMessage(context);
+
+            verify(context).abandon();
+            verify(context, never()).deadLetter(any(DeadLetterOptions.class));
+            assertSettledExactlyOnce(context);
+            verifyNoInteractions(pipeline);
+        }
+
+        @Test
+        void a_failure_to_read_the_sequence_number_should_still_settle_exactly_once_by_abandoning() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(message.getSequenceNumber())
+                    .thenThrow(new IllegalStateException("the sequence-number annotation is unreadable"));
+
+            listener.onMessage(context);
+
+            verify(context).abandon();
+            verify(context, never()).deadLetter(any(DeadLetterOptions.class));
+            assertSettledExactlyOnce(context);
+            verifyNoInteractions(pipeline);
         }
     }
 }

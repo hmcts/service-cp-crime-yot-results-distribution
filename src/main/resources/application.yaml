@@ -98,12 +98,22 @@ yotresultsdistribution:
     # Mirrors the broker queue's own setting. Used to recognise the final permitted delivery, so it
     # must be changed here and on the queue together.
     max-delivery-count: 5
+    # Mirrors the broker queue's own setting. Not the renewal window below - this is the single
+    # lock's own duration, which until spec 007-replay-by-sequence-number the service had no way to
+    # state. Must be changed here and on the queue together; validated at startup against
+    # replay.legacy-margin.
+    lock-duration: 1m
     # Must be at least the processing deadline plus the fixed 30s renewal margin, so the broker lock
     # always outlives a legitimate run. Validated at startup.
     max-auto-lock-renew-duration: 5m
     # An unresolved connection error older than this, with no traffic since, stops being reported as
     # an outage: an idle queue produces no traffic, and absence of traffic is not a failure.
     health-staleness: 60s
+
+  replay:
+    # The legacy/stale-row heuristic's safety margin (spec 007-replay-by-sequence-number, FR-005).
+    # Must be at least servicebus.lock-duration, validated at startup.
+    legacy-margin: 5m
 
   claim:
     # How long an acquired claim stays live, written as now() + lease by the database.
