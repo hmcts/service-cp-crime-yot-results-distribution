@@ -329,8 +329,14 @@ fails either condition and observe a re-park.
       remembered (US3 Acceptance Scenario 3).
 - [X] T036 [P] [US3] Write failing case: a row whose `parking_sequence_number`/`parking_category` are
       present but whose current `attempts` differs from its recorded `parking_attempt_count` is
-      decided by the legacy heuristic, not as exact, and its stale `parking_category` is never read
-      (FR-005a, research.md R6).
+      decided by the legacy heuristic, not as exact, and its stale `parking_sequence_number` is never
+      consulted for the decision (FR-005a, research.md R6).
+
+      Corrected during review: the original wording named `parking_category` here, but neither
+      `replayOrParkLegacy` nor `isLegacyResubmission` reads `parking_category` at all in any branch
+      (exact or legacy) — the pinning test's load-bearing assertion is that the stale
+      `parking_sequence_number` plays no part in the legacy decision, only in the CAS's own
+      null-safe match (a different concern, FR-006).
 - [X] T037 [US3] Write failing case for the **replay** half of the rolling-deployment edge case,
       distinct from T036's re-park half: a row parked by a newer consumer (parking triple set) is
       then moved `FAILED → RECEIVED` by a statement shaped like the *old* `REPLAY_FAILED` — one that

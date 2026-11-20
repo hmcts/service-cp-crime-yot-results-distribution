@@ -464,9 +464,12 @@ class FailedReplayIT {
             final Instant parkedAt = row().updatedAt();
 
             // "msg-5" is the parking messageId itself - the old code's fallback would re-park this
-            // outright as a redelivery of the exhausting identity. FR-005 does not look at it.
+            // outright as a redelivery of the exhausting identity. FR-005 does not look at it. An
+            // hour clear of the margin, deliberately: unambiguous, nowhere near the boundary where
+            // T034a (below) sits on purpose.
             final GuardDecision decision = guard.admit(command, legacyDelivery(
-                    "msg-5", 5, 0L, parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plusSeconds(1)));
+                    "msg-5", 5, 0L,
+                    parkedAt.plus(ProcessedLogTestSupport.LEGACY_MARGIN).plus(Duration.ofHours(1))));
 
             assertThat(decision).isInstanceOf(GuardDecision.Run.class);
             final Row row = row();
@@ -543,11 +546,18 @@ class FailedReplayIT {
          * which this service causes deliberately on every stop and whenever it suspends intake — and
          * the enqueue-time test compares broker time with database time. A false replay needs both a
          * release without an increment <strong>and</strong> a broker clock ahead of the database
-         * clock by more than the margin; this test constructs exactly that combination (count 0,
-         * reusing the parking delivery's own identity — the connection-closed release this stands in
-         * for never minted a new one — and an enqueue time a simulated clock lead reads as later than
-         * it genuinely was) and asserts the heuristic still admits it, pinning it as observed,
-         * reviewed behaviour rather than an assumption nothing exercises.
+         * clock by more than the margin.
+         *
+         * <p>By design, the heuristic cannot tell this apart from the ordinary case above: the row
+         * this test admits is decided by exactly the same two conditions, because the whole of
+         * FR-005's accepted risk <em>is</em> that the heuristic cannot distinguish a clock-skewed
+         * false positive from a genuine resubmission. What is deliberately different here is how
+         * close to the boundary the enqueue time sits — one second past the margin, not an hour, as
+         * above — because a second of apparent lead is exactly the order of clock skew between a
+         * broker and a database that FR-005's own text accepts as plausible, where an hour would not
+         * read as a clock discrepancy at all. This test exists so that a later reader who tries to
+         * tighten the heuristic finds a named, reviewed case protecting today's accepted behaviour,
+         * not merely an inference drawn from the test above.
          */
         @Test
         @DisplayName("a simulated broker-clock lead past the margin still replays - FR-005's "
