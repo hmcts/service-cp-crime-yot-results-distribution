@@ -694,5 +694,39 @@ class MessageListenerSettlementTest {
             assertSettledExactlyOnce(context);
             verifyNoInteractions(pipeline);
         }
+
+        @Test
+        void a_failure_to_read_the_message_id_should_still_settle_exactly_once_by_abandoning() {
+            // FR-012 names "any required accessor" - getSequenceNumber()/getDeliveryCount() are
+            // covered above by the two cases most likely to regress independently; this and the
+            // lock-token case below close the remaining two of the five snapshotOf() reads under
+            // the same shared catch boundary.
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(message.getMessageId())
+                    .thenThrow(new IllegalStateException("the messageId annotation is unreadable"));
+
+            listener.onMessage(context);
+
+            verify(context).abandon();
+            verify(context, never()).deadLetter(any(DeadLetterOptions.class));
+            assertSettledExactlyOnce(context);
+            verifyNoInteractions(pipeline);
+        }
+
+        @Test
+        void a_failure_to_read_the_lock_token_should_still_settle_exactly_once_by_abandoning() {
+            final ServiceBusReceivedMessageContext context = validDelivery();
+            final ServiceBusReceivedMessage message = context.getMessage();
+            when(message.getLockToken())
+                    .thenThrow(new IllegalStateException("the lock token is unreadable"));
+
+            listener.onMessage(context);
+
+            verify(context).abandon();
+            verify(context, never()).deadLetter(any(DeadLetterOptions.class));
+            assertSettledExactlyOnce(context);
+            verifyNoInteractions(pipeline);
+        }
     }
 }

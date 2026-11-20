@@ -456,6 +456,23 @@ class SchemaMigrationIT {
             }
 
             @Test
+            void category_check_should_accept_non_transient_as_a_full_triple() throws SQLException {
+                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
+                        "42", "'NON_TRANSIENT'", "5")))
+                        .doesNotThrowAnyException();
+            }
+
+            @Test
+            void category_check_should_accept_exhausted_as_a_full_triple() throws SQLException {
+                // category_check_should_admit_the_two_declared_values_and_null above only confirms
+                // 'EXHAUSTED' is named in the constraint's text; this is the behavioural proof that
+                // a whole triple carrying it is actually accepted, not merely named.
+                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
+                        "99", "'EXHAUSTED'", "4")))
+                        .doesNotThrowAnyException();
+            }
+
+            @Test
             void triple_check_should_bind_all_three_columns_together() throws SQLException {
                 assertThat(constraintsOf(REQUEST_TABLE).get("processed_request_parking_triple_chk"))
                         .isNotNull()
@@ -471,33 +488,54 @@ class SchemaMigrationIT {
                         .doesNotThrowAnyException();
             }
 
-            @Test
-            void triple_check_should_accept_a_row_with_all_three_set() throws SQLException {
-                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
-                        "42", "'NON_TRANSIENT'", "5")))
-                        .doesNotThrowAnyException();
+            /**
+             * Which of the parking triple's three columns a candidate row populates, mirroring
+             * {@link ProcessedRequest.ClaimTriple}'s pattern for the same kind of constraint.
+             */
+            record ParkingTriple(boolean sequenceNumber, boolean category, boolean attemptCount) {
+                @Override
+                public String toString() {
+                    return "sequenceNumber=" + state(sequenceNumber) + ", category=" + state(category)
+                            + ", attemptCount=" + state(attemptCount);
+                }
+
+                private static String state(final boolean populated) {
+                    return populated ? "set" : "null";
+                }
+
+                private String sequenceNumberLiteral() {
+                    return sequenceNumber ? "42" : "NULL";
+                }
+
+                private String categoryLiteral() {
+                    return category ? "'EXHAUSTED'" : "NULL";
+                }
+
+                private String attemptCountLiteral() {
+                    return attemptCount ? "5" : "NULL";
+                }
             }
 
-            @Test
-            void triple_check_should_reject_a_sequence_number_with_no_category_or_attempt_count() {
-                assertThatThrownBy(() -> inRolledBackTransaction(insertFailedWithParking(
-                        "42", "NULL", "NULL")))
-                        .isInstanceOf(SQLException.class)
-                        .hasMessageContaining("processed_request_parking_triple_chk");
+            /** The six ways the parking triple can be half-written. All must be refused. */
+            static Stream<ParkingTriple> partiallyWrittenParkingTriples() {
+                return Stream.of(
+                        new ParkingTriple(true, false, false),
+                        new ParkingTriple(false, true, false),
+                        new ParkingTriple(false, false, true),
+                        new ParkingTriple(true, true, false),
+                        new ParkingTriple(true, false, true),
+                        new ParkingTriple(false, true, true));
             }
 
-            @Test
-            void triple_check_should_reject_a_category_with_no_sequence_number_or_attempt_count() {
+            @ParameterizedTest(name = "{0}")
+            @MethodSource("partiallyWrittenParkingTriples")
+            void triple_check_should_reject_every_partially_written_triple(final ParkingTriple triple) {
+                // Enumerated rather than sampled, exactly as claim_triple_chk's own test is: the
+                // constraint is two equalities, and a single example would pass against several
+                // wrong ways of writing them.
                 assertThatThrownBy(() -> inRolledBackTransaction(insertFailedWithParking(
-                        "NULL", "'EXHAUSTED'", "NULL")))
-                        .isInstanceOf(SQLException.class)
-                        .hasMessageContaining("processed_request_parking_triple_chk");
-            }
-
-            @Test
-            void triple_check_should_reject_an_attempt_count_with_no_sequence_number_or_category() {
-                assertThatThrownBy(() -> inRolledBackTransaction(insertFailedWithParking(
-                        "NULL", "NULL", "5")))
+                        triple.sequenceNumberLiteral(), triple.categoryLiteral(),
+                        triple.attemptCountLiteral())))
                         .isInstanceOf(SQLException.class)
                         .hasMessageContaining("processed_request_parking_triple_chk");
             }
