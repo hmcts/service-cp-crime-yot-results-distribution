@@ -50,20 +50,33 @@ queue.
    non-transiently (for example, make the register store refuse the recording) or deliver it five
    times into a transient failure, until `processed_request.status = 'FAILED'`. Note the row's
    `parking_sequence_number`, `parking_category` and `parking_attempt_count`.
-3. Using a short AMQP client, receive the message from the queue's dead-letter sub-queue and
+3. **Before re-sending, check whether a later share of the same hearing has already been batched**
+   (query `register_batch`/`register_record` for the hearing, or check whether a later
+   `requestId` for it completed and was picked up by an 18:00 run). This feature does not change
+   the register store's write-time supersession, which compares a replay only against the hearing's
+   **unbatched** active register (Edge Cases, "Replay of an older share after a newer share was
+   recorded"): once the newer share has been batched, re-sending this older, parked one would record
+   it as active and send it in a later batch — the Youth Offending Team receiving superseded content
+   *after* the current one. If a later share has been batched, do not re-send; this is exactly what
+   the check exists to catch.
+4. **Wait past the broker's duplicate-detection window** (`PT5M` in
+   `docker/servicebus-emulator/config.json`) from the original send noted in step 2, or mint a fresh
+   `messageId` for the body before re-sending. Skipping this is the one way the next step silently
+   does nothing at all — see step 8.
+5. Using a short AMQP client, receive the message from the queue's dead-letter sub-queue and
    re-send its body — **byte for byte, same `messageId`** — onto `yotresultsdistribution.requests`.
-4. **Before this feature**: the service dead-letters it again, under `exhausted` /
+6. **Before this feature**: the service dead-letters it again, under `exhausted` /
    `DELIVERY_LIMIT_EXHAUSTED`, and the row stays `FAILED` unchanged. This is the defect.
-5. **After this feature**: because the broker accepted and enqueued the re-send, it carries a
+7. **After this feature**: because the broker accepted and enqueued the re-send, it carries a
    **new sequence number**, different from the one recorded on the row. The service treats it as a
    resubmission: `processed_request.status` moves to `RECEIVED`, then (assuming the underlying
    cause is fixed) to `COMPLETED`, and the dead-letter entry from step 2 is the last one for this
    request.
-6. Repeat step 3 **without waiting**, immediately after step 2, and the broker's own
-   duplicate-detection window (`PT5M` in `docker/servicebus-emulator/config.json`) silently
-   discards the second re-send — nothing arrives at the service at all. This is unchanged by this
-   feature and is the one case where a fresh `messageId` still helps (see
-   `contracts/replay-rule-delta.md`).
+8. Repeat step 5 **without waiting**, immediately after step 2 (skipping step 4), and the broker's
+   own duplicate-detection window silently discards the second re-send — nothing arrives at the
+   service at all. This is unchanged by this feature and is the one case where a fresh `messageId`
+   still helps (see `contracts/replay-rule-delta.md`) — which is exactly what step 4 offers as the
+   alternative to waiting.
 
 ## Proving the legacy/stale-row heuristic (User Story 3)
 
