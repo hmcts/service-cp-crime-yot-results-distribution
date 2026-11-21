@@ -388,23 +388,127 @@ class FailedReplayIT {
         assertThat(row.claimOwner()).isEqualTo(stray.owner());
     }
 
+    /**
+     * Two deliveries reaching {@code admit()} one after the other, not racing on the same read: the
+     * first replay has already moved the record to {@code RECEIVED} by the time the second's own
+     * read runs, so the second is decided by {@code claimOrHandBack}, not by {@code replayOrPark} —
+     * the record is simply no longer {@code FAILED} for it to race on. This pins that the ordinary
+     * single-runner claim still catches a second resubmission once the first is already running;
+     * the genuine compare-and-set race — two deliveries whose reads land before either's write, both
+     * racing {@code replayOrPark} itself — is pinned separately below, because sequential admission
+     * cannot exercise it: {@code admit()} always reads fresh, so a second call made after the first
+     * has returned never observes stale data to race on.
+     */
     @Test
-    @DisplayName("two concurrent resubmissions admit exactly one replay; the loser is handed back "
-            + "(FR-006 concurrency)")
-    void two_concurrent_resubmissions_should_admit_exactly_one_replay() {
+    @DisplayName("a resubmission that arrives once the first is already running is handed back by "
+            + "the ordinary claim, not a second replay decision")
+    void a_resubmission_arriving_after_the_first_already_claimed_should_be_handed_back() {
         exhaustEveryPermittedDelivery();
 
         final GuardDecision first = guard.admit(command, delivery("msg-5", 6));
-        // Both deliveries read the same FAILED/attempts=5/sequenceNumber=5 generation in a real race;
-        // here the first admit() has already moved the record on, so the second's own read (inside
-        // its own admit() call) sees the new RECEIVED state and is decided by claimOrHandBack, not by
-        // replayOrPark - the record is simply no longer FAILED for it to race on.
         final GuardDecision second = guard.admit(command, delivery("msg-6", 7));
 
         assertThat(first).isInstanceOf(GuardDecision.Run.class);
         assertThat(second).isEqualTo(new GuardDecision.Abandon(ReasonCode.CLAIM_NOT_ACQUIRED));
         assertThat(row().status()).isEqualTo("RECEIVED");
         assertThat(row().attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
+    }
+
+    /**
+     * FR-006's actual race, T020: two deliveries whose reads land <strong>before</strong> either's
+     * write — both see the identical {@code FAILED} generation ({@code attempts} = 5,
+     * {@code parking_sequence_number} = 5) — and only the first's write can win the compare-and-set.
+     * {@code admit()} always reads fresh on every call, so the only way to put two deliveries on the
+     * identical stale read deterministically is to pin a guard's own read to a snapshot taken once,
+     * then drive two admissions through it with different delivery identities: both compute the same
+     * compare-and-set parameters from that shared snapshot, and the database itself decides which
+     * write actually matches a row that only one of them can still affect.
+     */
+    @Test
+    @DisplayName("two readers of the identical failure generation race on the compare-and-set; only "
+            + "the first write is admitted (FR-006, T020)")
+    void two_readers_of_the_identical_generation_should_admit_exactly_one_replay() {
+        exhaustEveryPermittedDelivery();
+        final ProcessedRequestRecord sharedRead = new ProcessedRequestRepository(
+                ProcessedLogTestSupport.jdbcClient(), LEASE)
+                .read(command.source(), command.requestId())
+                .orElseThrow();
+
+        final IdempotencyGuard bothReaders = new IdempotencyGuard(
+                new ProcessedRequestRepository(ProcessedLogTestSupport.jdbcClient(), LEASE) {
+                    @Override
+                    public Optional<ProcessedRequestRecord> read(
+                            final String source, final UUID requestId) {
+                        return Optional.of(sharedRead);
+                    }
+                },
+                metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
+
+        final GuardDecision first = bothReaders.admit(command, delivery("msg-first", 10));
+        final GuardDecision second = bothReaders.admit(command, delivery("msg-second", 11));
+
+        assertThat(first)
+                .as("the first write still matches the row exactly as both of them read it")
+                .isInstanceOf(GuardDecision.Run.class);
+        assertThat(second)
+                .as("the second write no longer matches: the first's write already moved attempts on")
+                .isEqualTo(new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED));
+        assertThat(row().status())
+                .as("the winner's run stands; the loser's decision touched nothing")
+                .isEqualTo("RECEIVED");
+        assertThat(row().attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
+    }
+
+    /**
+     * FR-006, T019's own distinction from T019a sharpened: a reader holding a stale snapshot of an
+     * <em>older</em> {@code FAILED} generation must be refused even where the real row has since
+     * failed again under a newer one — not merely moved to a terminal state, which the existing
+     * stale-decision case above already covers. {@code a_stray_copy_arriving_after_a_newer_failure_}
+     * {@code should_replay_the_current_failure} shows the opposite outcome for a delivery that reads
+     * <strong>fresh</strong> after the same kind of newer failure; what distinguishes this case is
+     * that the delivery here decides against a snapshot taken <em>before</em> that newer failure
+     * landed, exactly as a genuinely concurrent reader would have.
+     */
+    @Test
+    @DisplayName("a reader holding a stale snapshot is refused once a newer failure has already "
+            + "landed, not merely once the row has gone terminal (FR-006, T019/T019a contrast)")
+    void a_stale_reader_should_be_refused_once_a_newer_failure_has_landed() {
+        exhaustEveryPermittedDelivery();
+        final ProcessedRequestRecord staleSnapshot = new ProcessedRequestRepository(
+                ProcessedLogTestSupport.jdbcClient(), LEASE)
+                .read(command.source(), command.requestId())
+                .orElseThrow();
+
+        // The real row moves on without the stale reader's knowledge: a replay runs and fails again,
+        // parking a newer generation under a different sequence number.
+        guard.recordExhaustion(
+                runClaimOf(guard.admit(command, delivery("msg-5", 6))),
+                ReasonCode.PIPELINE_TRANSIENT_FAILURE);
+        final Row newerGeneration = row();
+        assertThat(newerGeneration.parkingSequenceNumber())
+                .as("a newer generation, not the one the stale reader is about to decide against")
+                .isEqualTo(6L);
+
+        final IdempotencyGuard staleReader = new IdempotencyGuard(
+                new ProcessedRequestRepository(ProcessedLogTestSupport.jdbcClient(), LEASE) {
+                    @Override
+                    public Optional<ProcessedRequestRecord> read(
+                            final String source, final UUID requestId) {
+                        return Optional.of(staleSnapshot);
+                    }
+                },
+                metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
+
+        final GuardDecision decision = staleReader.admit(command, delivery("msg-stale", 99));
+
+        assertThat(decision)
+                .as("the compare-and-set carries the stale generation's own attempts (5), which no "
+                        + "longer matches the row (6)")
+                .isEqualTo(new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED));
+        assertThat(row())
+                .as("the refused decision touched nothing; the newer generation stands exactly as "
+                        + "it was")
+                .isEqualTo(newerGeneration);
     }
 
     // --- US4: a re-parked delivery says why the request failed (spec 007, FR-009/FR-010) ----------
