@@ -50,15 +50,16 @@ queue.
    non-transiently (for example, make the register store refuse the recording) or deliver it five
    times into a transient failure, until `processed_request.status = 'FAILED'`. Note the row's
    `parking_sequence_number`, `parking_category` and `parking_attempt_count`.
-3. **Before re-sending, check whether a later share of the same hearing has already been batched**
-   (query `register_batch`/`register_record` for the hearing, or check whether a later
-   `requestId` for it completed and was picked up by an 18:00 run). This feature does not change
-   the register store's write-time supersession, which compares a replay only against the hearing's
-   **unbatched** active register (Edge Cases, "Replay of an older share after a newer share was
-   recorded"): once the newer share has been batched, re-sending this older, parked one would record
-   it as active and send it in a later batch — the Youth Offending Team receiving superseded content
-   *after* the current one. If a later share has been batched, do not re-send; this is exactly what
-   the check exists to catch.
+3. **Before re-sending, check whether a later share of the same hearing has already been batched** —
+   query `processed_output.hearing_id` for the active (`superseded_at IS NULL`) row recorded for
+   this hearing, and whether its `batch_id` is non-null (join to `register_batch` on `batch_id` for
+   that batch's own status). This feature does not change the register store's write-time
+   supersession, which compares a replay only against the hearing's **unbatched** active register
+   (Edge Cases, "Replay of an older share after a newer share was recorded"): once the newer share
+   has been batched — the active row's `batch_id` is set — re-sending this older, parked one would
+   record it as active and send it in a later batch — the Youth Offending Team receiving superseded
+   content *after* the current one. If the active row is already batched, do not re-send; this is
+   exactly what the check exists to catch.
 4. **Wait past the broker's duplicate-detection window** (`PT5M` in
    `docker/servicebus-emulator/config.json`) from the original send noted in step 2, or mint a fresh
    `messageId` for the body before re-sending. Skipping this is the one way the next step silently
