@@ -399,9 +399,11 @@ public class IdempotencyGuard {
             if (repository.replayFailed(
                     claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
                 LOG.info("Parked request replayed under the legacy heuristic. source={} requestId={} "
+                        + "parkingGeneration={} parkedSequenceNumber={} replayingSequenceNumber={} "
                         + "deliveryCount={} enqueueTime={}",
-                        claim.source(), claim.requestId(), delivery.deliveryCount(),
-                        delivery.enqueueTime());
+                        claim.source(), claim.requestId(), parkingGenerationLabel(record),
+                        parkedSequenceNumberOrNone(record), claim.sequenceNumber(),
+                        delivery.deliveryCount(), delivery.enqueueTime());
                 decision = new GuardDecision.Run(claim);
             } else {
                 LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
@@ -409,9 +411,12 @@ public class IdempotencyGuard {
                 decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
             }
         } else {
-            LOG.warn("Legacy heuristic refused; re-parking. source={} requestId={} deliveryCount={} "
-                    + "enqueueTime={}",
-                    claim.source(), claim.requestId(), delivery.deliveryCount(), delivery.enqueueTime());
+            LOG.warn("Legacy heuristic refused; re-parking. source={} requestId={} "
+                    + "parkingGeneration={} parkedSequenceNumber={} deliveredSequenceNumber={} "
+                    + "deliveryCount={} enqueueTime={}",
+                    claim.source(), claim.requestId(), parkingGenerationLabel(record),
+                    parkedSequenceNumberOrNone(record), claim.sequenceNumber(),
+                    delivery.deliveryCount(), delivery.enqueueTime());
             // No trusted category, ever — a legacy/stale row's own parking_category column, even
             // where physically non-null, describes a parking this decision has already judged not
             // to be the current one (isExactParking returned false to route here at all); FR-005a
@@ -419,6 +424,30 @@ public class IdempotencyGuard {
             decision = reParkDecision(record, claim, Optional.empty());
         }
         return decision;
+    }
+
+    /**
+     * FR-008's "or {@code none}": this branch is reached only when {@link #isExactParking} answered
+     * false, which a {@code null} {@code parking_sequence_number} alone is enough to cause — so a
+     * {@code null} here always means the column is genuinely empty, never that this method chose not
+     * to read it.
+     */
+    private static String parkedSequenceNumberOrNone(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() == null
+                ? "none" : String.valueOf(record.parkingSequenceNumber());
+    }
+
+    /**
+     * FR-005a's two ways a row ends up in this branch, named rather than conflated: {@code absent} —
+     * no parking triple was ever recorded (a row from before this feature, or one a legacy consumer
+     * wrote under the pre-this-feature columns alone) — and {@code stale} — a triple was recorded,
+     * by this version or a newer one, but {@code parking_attempt_count} no longer matches
+     * {@code attempts}, so {@link #isExactParking} refused it. Support reading the log cannot tell
+     * these apart from {@link #parkedSequenceNumberOrNone} alone, since a stale triple still prints a
+     * real number.
+     */
+    private static String parkingGenerationLabel(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() == null ? "absent" : "stale";
     }
 
     /**

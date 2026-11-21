@@ -664,6 +664,13 @@ class FailedReplayIT {
             assertThat(row.status()).isEqualTo("RECEIVED");
             assertThat(row.attempts()).isEqualTo(PERMITTED_DELIVERIES + 1);
             assertThat(row.parkingSequenceNumber()).isNull();
+            assertThat(captured.list)
+                    .as("FR-008: identifiers, the parked sequence number (none - truly absent, not "
+                            + "merely unread) and the replaying delivery's own, on an admitted "
+                            + "legacy replay")
+                    .anyMatch(event -> event.getFormattedMessage().contains("parkingGeneration=absent")
+                            && event.getFormattedMessage().contains("parkedSequenceNumber=none")
+                            && event.getFormattedMessage().contains("replayingSequenceNumber=5"));
         }
 
         @Test
@@ -859,6 +866,14 @@ class FailedReplayIT {
                     .isEqualTo(new GuardDecision.DeadLetter(
                             DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
+            assertThat(captured.list)
+                    .as("FR-008/FR-005a: the re-park log says the parking triple was stale, not "
+                            + "absent, and names both the stale parked sequence number and this "
+                            + "delivery's own")
+                    .anyMatch(event -> event.getFormattedMessage().contains("parkingGeneration=stale")
+                            && event.getFormattedMessage().contains(
+                                    "parkedSequenceNumber=" + PERMITTED_DELIVERIES)
+                            && event.getFormattedMessage().contains("deliveredSequenceNumber=99"));
 
             // Count 0, past the margin, carrying the STALE parking_sequence_number (5) itself: still
             // replayed, because the legacy heuristic never compares against it.
