@@ -536,10 +536,19 @@ public class IdempotencyGuard {
      */
     private GuardDecision rejectStaleRunner(final RunClaim claim) {
         LOG.warn("Outcome discarded: this runner's claim was reclaimed while it worked. "
-                        + "source={} requestId={} owner={}",
-                claim.source(), claim.requestId(), claim.owner());
+                        + "source={} requestId={} ownerInstance={}",
+                claim.source(), claim.requestId(), runnerInstanceOf(claim.owner()));
         metrics.staleRunnerRejected();
         return new GuardDecision.Abandon(ReasonCode.STALE_RUNNER);
+    }
+
+    /**
+     * The pod-identity half of {@code claim_owner}, without the broker lock token it is paired with
+     * — never logged in full (technical-rules.md: never log tokens).
+     */
+    private static String runnerInstanceOf(final String owner) {
+        final int separator = owner.indexOf('/');
+        return separator < 0 ? owner : owner.substring(0, separator);
     }
 
     /**
