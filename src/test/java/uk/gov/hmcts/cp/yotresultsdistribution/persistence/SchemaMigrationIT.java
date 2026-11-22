@@ -599,29 +599,37 @@ class SchemaMigrationIT {
                         // clearing only the three columns that existed before this feature. It has
                         // no idea parking_sequence_number/parking_category/parking_attempt_count
                         // exist, so it does not - and cannot - clear them.
-                        final int replayed = statement.executeUpdate(
+                        final int replayed;
+                        try (PreparedStatement replay = connection.prepareStatement(
                                 "UPDATE " + REQUEST_TABLE + " SET status = 'RECEIVED', "
                                         + "attempts = attempts + 1, exhausted_message_id = NULL, "
                                         + "failure_reason = NULL, "
                                         + "audit_note = 'REPLAYED_AFTER_FAILURE prior=PIPELINE_TRANSIENT_FAILURE' "
-                                        + "WHERE source = 'RESULTS' AND request_id = '" + requestId
-                                        + "' AND status = 'FAILED' AND exhausted_message_id <> 'msg-6'");
+                                        + "WHERE source = 'RESULTS' AND request_id = ? "
+                                        + "AND status = 'FAILED' AND exhausted_message_id <> 'msg-6'")) {
+                            replay.setObject(1, requestId);
+                            replayed = replay.executeUpdate();
+                        }
                         assertThat(replayed).isEqualTo(1);
 
-                        try (ResultSet row = statement.executeQuery(
+                        try (PreparedStatement select = connection.prepareStatement(
                                 "SELECT status, attempts, parking_sequence_number, "
                                         + "parking_category, parking_attempt_count FROM "
                                         + REQUEST_TABLE + " WHERE source = 'RESULTS' "
-                                        + "AND request_id = '" + requestId + "'")) {
-                            assertThat(row.next()).isTrue();
-                            assertThat(row.getString("status")).isEqualTo("RECEIVED");
-                            assertThat(row.getInt("attempts")).isEqualTo(6);
-                            assertThat(row.getObject("parking_sequence_number"))
-                                    .as("the triple survives, stale and non-null, on the now-"
-                                            + "RECEIVED row - the old statement never knew to clear it")
-                                    .isEqualTo(5L);
-                            assertThat(row.getString("parking_category")).isEqualTo("EXHAUSTED");
-                            assertThat(row.getObject("parking_attempt_count")).isEqualTo(5);
+                                        + "AND request_id = ?")) {
+                            select.setObject(1, requestId);
+                            try (ResultSet row = select.executeQuery()) {
+                                assertThat(row.next()).isTrue();
+                                assertThat(row.getString("status")).isEqualTo("RECEIVED");
+                                assertThat(row.getInt("attempts")).isEqualTo(6);
+                                assertThat(row.getObject("parking_sequence_number"))
+                                        .as("the triple survives, stale and non-null, on the now-"
+                                                + "RECEIVED row - the old statement never knew to "
+                                                + "clear it")
+                                        .isEqualTo(5L);
+                                assertThat(row.getString("parking_category")).isEqualTo("EXHAUSTED");
+                                assertThat(row.getObject("parking_attempt_count")).isEqualTo(5);
+                            }
                         }
                     } finally {
                         connection.rollback();
