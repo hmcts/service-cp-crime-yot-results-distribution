@@ -535,20 +535,14 @@ public class IdempotencyGuard {
      * otherwise leave, and a rise in them means runs are outliving their leases.
      */
     private GuardDecision rejectStaleRunner(final RunClaim claim) {
+        // claim.owner() carries the broker's own lock token (never logged, technical-rules.md) -
+        // source and requestId are enough to correlate which request lost its claim; which runner
+        // held it is in the row itself for anyone who needs to go further.
         LOG.warn("Outcome discarded: this runner's claim was reclaimed while it worked. "
-                        + "source={} requestId={} ownerInstance={}",
-                claim.source(), claim.requestId(), runnerInstanceOf(claim.owner()));
+                        + "source={} requestId={}",
+                claim.source(), claim.requestId());
         metrics.staleRunnerRejected();
         return new GuardDecision.Abandon(ReasonCode.STALE_RUNNER);
-    }
-
-    /**
-     * The pod-identity half of {@code claim_owner}, without the broker lock token it is paired with
-     * — never logged in full (technical-rules.md: never log tokens).
-     */
-    private static String runnerInstanceOf(final String owner) {
-        final int separator = owner.indexOf('/');
-        return separator < 0 ? owner : owner.substring(0, separator);
     }
 
     /**
