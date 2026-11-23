@@ -82,8 +82,8 @@ dependencies {
   // --- Scheduling: one nightly generation run even if the deployment is ever scaled beyond one pod ---
   // The lock table lives in this service's own Postgres, so the jdbc-template provider. Not managed
   // by any BOM on this build, so the version is declared here for dependabot to track.
-  implementation 'net.javacrumbs.shedlock:shedlock-spring:7.10.1'
-  implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
+  implementation 'net.javacrumbs.shedlock:shedlock-spring:7.11.0'
+  implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.11.0'
 
   // --- Payload source: Redis cache (Lettuce) + results-query-api fallback ---
   // Lettuce directly rather than spring-boot-starter-data-redis: this service reads one string key
