@@ -27,7 +27,7 @@ class RequestStatusTest {
                 .isTrue();
         assertThat(RequestStatus.FAILED.isTerminal())
                 .as("and a parked one has finished too - terminal is not the same as final, "
-                        + "because FAILED is replayable under a fresh message identity")
+                        + "because FAILED is replayable by a resubmission")
                 .isTrue();
     }
 

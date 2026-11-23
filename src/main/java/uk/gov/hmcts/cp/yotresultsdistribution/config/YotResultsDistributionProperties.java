@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param consumer      whether intake runs at all
  * @param intake        the intake half's own settings, read where neither other half runs
  * @param servicebus    broker connection and consumer settings
+ * @param replay        the legacy/stale-row replay heuristic's own margin
  * @param claim         the single-runner claim's timings
  * @param notification  the notifying leg's own claim timing
  * @param store         processed-log store probing
@@ -43,6 +44,7 @@ public record YotResultsDistributionProperties(
         @DefaultValue Consumer consumer,
         @DefaultValue Intake intake,
         @DefaultValue Servicebus servicebus,
+        @DefaultValue Replay replay,
         @DefaultValue Claim claim,
         @DefaultValue Notification notification,
         @DefaultValue Store store,
@@ -86,6 +88,12 @@ public record YotResultsDistributionProperties(
      * @param queueName                the inbound queue
      * @param maxConcurrentCalls       processor concurrency
      * @param maxDeliveryCount         mirrors the broker queue setting; recognises the final delivery
+     * @param lockDuration             mirrors the broker queue's own lock duration; changed here and
+     *                                 on the queue together, exactly as {@code maxDeliveryCount} is.
+     *                                 Distinct from {@code maxAutoLockRenewDuration}: that is how
+     *                                 long the renewal window may keep extending this lock, not the
+     *                                 lock's own duration, which until this setting existed the
+     *                                 service had no way to state (spec 007-replay-by-sequence-number)
      * @param maxAutoLockRenewDuration must outlive any legitimate run
      * @param healthStaleness          age past which an unresolved error with no traffic stops being
      *                                 reported as an outage
@@ -96,8 +104,25 @@ public record YotResultsDistributionProperties(
             @DefaultValue("yotresultsdistribution.requests") String queueName,
             @DefaultValue("2") int maxConcurrentCalls,
             @DefaultValue("5") int maxDeliveryCount,
+            @DefaultValue("1m") Duration lockDuration,
             @DefaultValue("5m") Duration maxAutoLockRenewDuration,
             @DefaultValue("60s") Duration healthStaleness) {
+    }
+
+    /**
+     * The legacy/stale-row replay heuristic's own safety margin (spec 007-replay-by-sequence-number,
+     * FR-005).
+     *
+     * <p>A {@code FAILED} request with no recorded parking sequence number — parked before this
+     * feature, or re-parked by an older consumer mid-rollout — is judged a resubmission only when the
+     * delivery's broker enqueue time is later than the time the request was parked by more than this
+     * margin. Refused at start-up if shorter than {@link Servicebus#lockDuration()}
+     * ({@code PropertiesValidator}): a margin that short would accept a false replay on every legacy
+     * row the lock alone could explain.
+     *
+     * @param legacyMargin the safety margin
+     */
+    public record Replay(@DefaultValue("5m") Duration legacyMargin) {
     }
 
     /**

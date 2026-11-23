@@ -35,6 +35,9 @@ public final class ProcessedLogTestSupport {
     /** The single value {@code source} is permitted to take. */
     public static final String SOURCE = "RESULTS";
 
+    /** Mirrors {@code application.yaml}'s {@code replay.legacy-margin} default. */
+    public static final Duration LEGACY_MARGIN = Duration.ofMinutes(5);
+
     /** The single row a fixture update is expected to touch. */
     private static final int ONE_ROW = 1;
 
@@ -132,10 +135,20 @@ public final class ProcessedLogTestSupport {
     }
 
     /**
-     * A guard holding the claim lease a suite wants, instrumented by the given metrics.
+     * A guard holding the claim lease a suite wants, instrumented by the given metrics, deciding a
+     * legacy/stale row by {@link #LEGACY_MARGIN}.
      */
     public static IdempotencyGuard guard(final Duration lease, final ProcessingMetrics metrics) {
-        return new IdempotencyGuard(repository(lease), metrics);
+        return guard(lease, metrics, LEGACY_MARGIN);
+    }
+
+    /**
+     * {@link #guard(Duration, ProcessingMetrics)}, with an explicit legacy margin for the one suite
+     * that needs to vary it.
+     */
+    public static IdempotencyGuard guard(
+            final Duration lease, final ProcessingMetrics metrics, final Duration legacyMargin) {
+        return new IdempotencyGuard(repository(lease), metrics, legacyMargin);
     }
 
     /**
@@ -204,7 +217,10 @@ public final class ProcessedLogTestSupport {
             UUID claimToken,
             Instant claimExpiresAt,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            Long parkingSequenceNumber,
+            String parkingCategory,
+            Integer parkingAttemptCount) {
     }
 
     /**
@@ -225,7 +241,8 @@ public final class ProcessedLogTestSupport {
                         SELECT source, request_id, hearing_id, hearing_day, shared_time, event_type,
                                request_fingerprint, status, attempts, completion_reason,
                                failure_reason, exhausted_message_id, audit_note, claim_owner,
-                               claim_token, claim_expires_at, created_at, updated_at
+                               claim_token, claim_expires_at, created_at, updated_at,
+                               parking_sequence_number, parking_category, parking_attempt_count
                           FROM processed_request
                          WHERE source = :source AND request_id = :requestId
                         """)
@@ -249,7 +266,10 @@ public final class ProcessedLogTestSupport {
                         rs.getObject("claim_token", UUID.class),
                         instant(rs.getObject("claim_expires_at", OffsetDateTime.class)),
                         instant(rs.getObject("created_at", OffsetDateTime.class)),
-                        instant(rs.getObject("updated_at", OffsetDateTime.class))))
+                        instant(rs.getObject("updated_at", OffsetDateTime.class)),
+                        (Long) rs.getObject("parking_sequence_number"),
+                        rs.getString("parking_category"),
+                        (Integer) rs.getObject("parking_attempt_count")))
                 .optional();
     }
 

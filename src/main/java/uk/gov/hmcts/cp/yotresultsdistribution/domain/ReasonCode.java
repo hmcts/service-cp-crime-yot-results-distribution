@@ -1,5 +1,7 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.domain;
 
+import java.util.Optional;
+
 /**
  * The bounded reason codes the guard decides with and records.
  *
@@ -203,5 +205,28 @@ public enum ReasonCode {
      */
     public String code() {
         return storedCode;
+    }
+
+    /**
+     * Resolves a stored {@code failure_reason} back to its reason, for a re-park's dead-letter detail
+     * (spec 007-replay-by-sequence-number, FR-009).
+     *
+     * <p>Total: there is no input this method throws on. A re-park with no match — a {@code null}
+     * value, a blank one, or text that was never one of these codes — is the data anomaly FR-009
+     * exists for, and the empty answer is what tells the caller to fall back to
+     * {@code UNEXPECTED_FAILURE} rather than emit text a producer or an earlier version wrote.
+     *
+     * @param storedCode the text read from {@code processed_request.failure_reason}, or {@code null}
+     * @return the matching reason, or empty if nothing declared here matches it
+     */
+    public static Optional<ReasonCode> fromCode(final String storedCode) {
+        Optional<ReasonCode> match = Optional.empty();
+        for (final ReasonCode candidate : values()) {
+            if (candidate.storedCode.equals(storedCode)) {
+                match = Optional.of(candidate);
+                break;
+            }
+        }
+        return match;
     }
 }

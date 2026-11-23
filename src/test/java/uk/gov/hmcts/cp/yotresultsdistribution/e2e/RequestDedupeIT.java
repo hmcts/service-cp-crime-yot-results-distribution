@@ -34,12 +34,16 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.ServiceTestSupport;
  *
  * <p>{@code DuplicateDetectionIT} pins the first line: a republish under a broker identity the queue
  * has already seen is discarded before this service is involved at all. That is the queue's property,
- * not this service's, and it has a window. This suite is about what happens after the window — and
- * about every deliberate replay, because the resubmission runbook <em>requires</em> a fresh
- * {@code messageId} and the body's {@code requestId} to stay as it was.
+ * not this service's, and it has a window. This suite is about what happens after the window, for a
+ * request this service's own record already decided — not about replay by sequence number (spec
+ * 007-replay-by-sequence-number), which {@code FailedReplayIT} and {@code UnchangedResendRecoveryIT}
+ * own, same {@code messageId} included; that feature's point is precisely that a resubmission no
+ * longer needs a fresh one.
  *
- * <p>So every send here carries a distinct broker identity, on purpose. Reusing one would let the
- * queue answer the question and the suite would pin nothing about the processed log. What is under
+ * <p>Every send here carries a distinct broker identity anyway, on purpose — not because a
+ * resubmission requires one, but because this suite is isolating the <em>processed log's</em> own
+ * rule from the broker's: reusing an identity within the duplicate-detection window would let the
+ * queue answer the question and the suite would pin nothing about the record at all. What is under
  * test is the real composition — the emulator, the real listener, the real guard, real Postgres —
  * rather than the guard in isolation, because that composition is what C17's row claims and the
  * guard's own suites (`IdempotencyGuardIT`, `IdempotencyCollisionIT`) deliberately do not reach: a

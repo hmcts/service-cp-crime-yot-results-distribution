@@ -54,12 +54,23 @@ class IdempotencyGuardIT {
 
     // --- helpers ---------------------------------------------------------------------------
 
+    /**
+     * Every delivery in this file already carries a distinct {@code "msg-N"} identity per distinct
+     * delivery intention, so the broker sequence number this feature's decision turns on is derived
+     * from that same {@code N} rather than threaded through as a second parameter everywhere: two
+     * deliveries meant to be the same one share a messageId and therefore a sequence number, and two
+     * meant to differ already use different numbers today.
+     */
     private static DeliveryIdentity delivery(final String messageId, final String owner) {
-        return new DeliveryIdentity(messageId, owner);
+        return new DeliveryIdentity(messageId, owner, false, sequenceNumberOf(messageId), 0L, null);
     }
 
     private static DeliveryIdentity delivery(final String messageId) {
         return delivery(messageId, OWNER);
+    }
+
+    private static long sequenceNumberOf(final String messageId) {
+        return Long.parseLong(messageId.substring(messageId.lastIndexOf('-') + 1));
     }
 
     private Row row() {
@@ -428,8 +439,33 @@ class IdempotencyGuardIT {
             final GuardDecision decision = guard.admit(command, delivery("msg-5"));
 
             assertThat(decision).isEqualTo(new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED));
+                    DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
             assertThat(row()).isEqualTo(before);
+        }
+
+        /**
+         * Spec 007-replay-by-sequence-number, tasks.md T028 (US2): the delivery that parked the
+         * current {@code FAILED} generation is never re-run, whatever {@code messageId} the same
+         * stored message happens to carry on a given delivery attempt — same sequence number is the
+         * whole of the decision (FR-003 same-branch). The test above pins this for the ordinary
+         * case where the messageId also matches; this pins it for a different one, so the two
+         * cannot be mistaken for testing the same thing.
+         */
+        @Test
+        void should_stay_parked_under_a_different_messageId_carrying_the_same_sequence_number() {
+            driveToFailed("msg-5");
+            final Row before = row();
+
+            final GuardDecision decision = guard.admit(command, delivery("retry-5", OTHER_OWNER));
+
+            assertThat(decision)
+                    .as("the sequence number alone decides; this delivery's own messageId never "
+                            + "matched the one that parked the row")
+                    .isEqualTo(new GuardDecision.DeadLetter(
+                            DeadLetterReason.EXHAUSTED, ReasonCode.PIPELINE_TRANSIENT_FAILURE));
+            assertThat(row())
+                    .as("the row is byte-identical: no state changed for a delivery that ran nothing")
+                    .isEqualTo(before);
         }
     }
 
@@ -511,7 +547,7 @@ class IdempotencyGuardIT {
                             return Optional.empty();
                         }
                     },
-                    metrics);
+                    metrics, ProcessedLogTestSupport.LEGACY_MARGIN);
 
             final GuardDecision decision = blindGuard.admit(command, delivery("msg-2"));
 

@@ -38,11 +38,15 @@ import uk.gov.hmcts.cp.yotresultsdistribution.support.ServiceTestSupport;
  * environment, and the suite exists to pin it: two independent rules depend on the broker really
  * discarding a repeated identity.
  *
- * <p>The first is the reason the resubmission runbook insists on a <strong>fresh</strong> message
- * identity. A support replay that reuses the identity of the message it is replaying is not rejected,
- * not parked and not logged — it is silently dropped, and the operator watches for a register that
- * never arrives. The service cannot detect that case, which is why it is a documented operational
- * rule rather than a code path.
+ * <p>The first is why a same-identity re-send made <em>inside</em> the window is not rejected, not
+ * parked and not logged — it is silently dropped before this service ever sees it, and the operator
+ * watches for a register that never arrives. The service cannot detect that case, which is why
+ * support's two ways out of it — wait for the window to pass, or re-send under a fresh
+ * {@code messageId} — are a documented operational choice rather than a code path (spec
+ * 007-replay-by-sequence-number's "Re-send inside the duplicate-detection window" edge case). Neither
+ * is mandatory the way a fresh identity once was: outside the window, {@code FailedReplayIT} and
+ * {@code UnchangedResendRecoveryIT} prove the guard replays a re-send under the <strong>same</strong>
+ * {@code messageId} just as readily.
  *
  * <p>The second is the honest scope of the processed log. It is the <em>second</em> line of defence,
  * catching the duplicates the broker's window has expired on; if the broker discarded nothing, every

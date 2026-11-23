@@ -230,11 +230,13 @@ public class ProcessedLogConfig {
      *
      * @param repository the request half of the log
      * @param metrics    the instrument surface stale-runner rejections are counted on
+     * @param properties the service's own configuration, for the legacy/stale heuristic's margin
      * @return the guard
      */
     @Bean
     public IdempotencyGuard idempotencyGuard(
-            final ProcessedRequestRepository repository, final ProcessingMetrics metrics) {
-        return new IdempotencyGuard(repository, metrics);
+            final ProcessedRequestRepository repository, final ProcessingMetrics metrics,
+            final YotResultsDistributionProperties properties) {
+        return new IdempotencyGuard(repository, metrics, properties.replay().legacyMargin());
     }
 }

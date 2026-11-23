@@ -13,10 +13,10 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.testcontainers.azure.ServiceBusEmulatorContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.mssqlserver.MSSQLServerContainer;
@@ -37,6 +37,16 @@ import org.testcontainers.utility.MountableFile;
 public final class ServiceBusEmulatorTestSupport {
 
     public static final String QUEUE_NAME = "yotresultsdistribution.requests";
+
+    /**
+     * A second queue, identical to {@link #QUEUE_NAME} except for a short
+     * {@code DuplicateDetectionHistoryTimeWindow} (ten seconds, not five minutes). Dedicated to the
+     * one suite that needs the window to actually elapse during a test; every other suite's claim
+     * about duplicate detection is about the real, production-mirroring window on {@link
+     * #QUEUE_NAME} and must not be weakened by this one.
+     */
+    public static final String RESEND_WINDOW_TEST_QUEUE_NAME =
+            "yotresultsdistribution.requests.resend-window-test";
 
     /** How many messages one peek reads. The search pages, so this bounds a round trip, not a scan. */
     private static final int PEEK_PAGE_SIZE = 32;
@@ -97,9 +107,16 @@ public final class ServiceBusEmulatorTestSupport {
 
     private static Proxy brokerProxy;
 
-    /** One peeking client per sub-queue, reused across peeks — see {@link #peeker(SubQueue)}. */
-    private static final Map<SubQueue, ServiceBusReceiverClient> PEEKERS =
-            new EnumMap<>(SubQueue.class);
+    /**
+     * One peeking client per (queue, sub-queue) pair, reused across peeks — see
+     * {@link #peeker(String, SubQueue)}.
+     */
+    private static final Map<PeekerKey, ServiceBusReceiverClient> PEEKERS =
+            new ConcurrentHashMap<>();
+
+    /** The cache key for {@link #PEEKERS}: a queue is identified by name, not by an enum. */
+    private record PeekerKey(String queueName, SubQueue subQueue) {
+    }
 
     private ServiceBusEmulatorTestSupport() {
         // Static fixture holder.
@@ -249,13 +266,21 @@ public final class ServiceBusEmulatorTestSupport {
      *                  for its dead-letter queue
      * @return the message, if the queue holds one under that identity
      */
+    public static Optional<ServiceBusReceivedMessage> peekFor(
+            final String messageId, final SubQueue subQueue) {
+        return peekFor(QUEUE_NAME, messageId, subQueue);
+    }
+
+    /**
+     * {@link #peekFor(String, SubQueue)}, against a named queue rather than {@link #QUEUE_NAME}.
+     */
     @SuppressWarnings("PMD.AvoidCatchingGenericException")
     // A peek that failed says nothing about why; what matters is that this client is no longer
     // trusted, and the failure is rethrown rather than absorbed.
     public static Optional<ServiceBusReceivedMessage> peekFor(
-            final String messageId, final SubQueue subQueue) {
+            final String queueName, final String messageId, final SubQueue subQueue) {
         try {
-            return pageFor(peeker(subQueue), messageId);
+            return pageFor(peeker(queueName, subQueue), messageId);
         } catch (RuntimeException unanswered) {
             discardPeekers();
             throw unanswered;
@@ -263,7 +288,7 @@ public final class ServiceBusEmulatorTestSupport {
     }
 
     /**
-     * The peeking client for one sub-queue, opened once and kept.
+     * The peeking client for one (queue, sub-queue) pair, opened once and kept.
      *
      * <p>A client per call is the obvious shape and it does not survive a <em>red</em> run: a
      * condition that never comes true is re-asked for the whole of its timeout, and a fresh client
@@ -273,13 +298,15 @@ public final class ServiceBusEmulatorTestSupport {
      * every peek; it is discarded whenever the transport is cut or restored, and whenever a peek
      * fails, so no suite is ever answered over a connection that has been through an outage.
      */
-    private static synchronized ServiceBusReceiverClient peeker(final SubQueue subQueue) {
-        return PEEKERS.computeIfAbsent(subQueue, sub -> new ServiceBusClientBuilder()
-                .connectionString(connectionString())
-                .receiver()
-                .queueName(QUEUE_NAME)
-                .subQueue(sub)
-                .buildClient());
+    private static synchronized ServiceBusReceiverClient peeker(
+            final String queueName, final SubQueue subQueue) {
+        return PEEKERS.computeIfAbsent(new PeekerKey(queueName, subQueue),
+                key -> new ServiceBusClientBuilder()
+                        .connectionString(connectionString())
+                        .receiver()
+                        .queueName(key.queueName())
+                        .subQueue(key.subQueue())
+                        .buildClient());
     }
 
     /** Closes and forgets every peeking client, so the next peek opens a fresh one. */
