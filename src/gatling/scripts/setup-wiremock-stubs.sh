@@ -22,9 +22,10 @@
 # Expects: NAMESPACE and KUBECONFIG to be set by the calling pipeline. Gatling then runs with
 # -Dgatling.wiremockViaScript=true — build.gradle defaults it on wherever TF_BUILD is set, i.e. on
 # every Azure DevOps agent — so the simulations do not try to install the stubs again (they cannot
-# reach WireMock from the agent, and would abort). SERVICE_DEPLOYMENT names the service's
-# Deployment (default yotresultsdistribution-service, the release name); setting RESULTS_BASE_URL
-# skips reading it from that Deployment.
+# reach WireMock from the agent, and would abort). SERVICE_CONTEXT is the service's Helm release
+# (default yotresultsdistribution-service, the pipeline's `context`), whose Deployment is found by
+# its app.kubernetes.io/instance label as the pipeline finds the pod; setting RESULTS_BASE_URL skips
+# reading it from that Deployment.
 set -euo pipefail
 
 : "${NAMESPACE:?NAMESPACE must be set}"
@@ -61,10 +62,12 @@ wiremock() {
   kubectl exec "$WIREMOCK_POD" -n "$NAMESPACE" -c wildfly-app -- curl -sSf "$@"
 }
 
-# Remove per-hearing stubs a previous run left behind (Gatling removes its own at the end, but not
-# if it was killed). They are tagged metadata.nft=fallback-hearing; nothing else is touched, so any
-# mapping baked into the image stays. Left in place they pile up, and WireMock matches every
-# request against every mapping, so the fallback latency under test would grow run on run.
+# Remove per-hearing stubs an earlier run left on this WireMock. The shared pipeline gets a fresh
+# namespace per run, so there it is a no-op; on a reused WireMock it stops them piling up across
+# runs, which would grow the fallback latency under test (WireMock matches every request against
+# every mapping). Gatling leaves its own in place: the service may still be draining when a
+# simulation ends. They are tagged metadata.nft=fallback-hearing; nothing else is touched, so any
+# mapping baked into the image stays.
 if wiremock -X POST "http://localhost:8080/__admin/mappings/remove-by-metadata" \
   -H "Content-Type: application/json" \
   -d '{"matchesJsonPath":{"expression":"$.nft","equalTo":"fallback-hearing"}}' >/dev/null; then
@@ -95,23 +98,23 @@ done
 # WireMock's context root. Calling the pod directly at /results-query-api 404s in
 # WildFly — that context path exists only on the VirtualService — and would prove
 # nothing about whether the stubs match what the service actually sends. The URL is
-# read from the service's own Deployment (SERVICE_DEPLOYMENT) so it cannot drift from what the
-# service resolves; a kubectl failure stops the script rather than reading as "not set".
+# read from the service's own Deployment (selected by SERVICE_CONTEXT) so it cannot drift from what
+# the service resolves; a kubectl failure stops the script rather than reading as "not set".
 #
 # No -f here: a 404 (stub not matched) or 500 (WireMock error) must surface its
 # status and body, not die as a bare "exit code 22". The status is appended on its
 # own line via -w rather than --fail-with-body, which the image's curl may predate. A transport
 # failure (DNS, refused connection) still prints status 000 through -w; `|| true` keeps set -e from
 # ending the script there, so it reaches the diagnostics below like any other failure.
-SERVICE_DEPLOYMENT="${SERVICE_DEPLOYMENT:-yotresultsdistribution-service}"
+SERVICE_CONTEXT="${SERVICE_CONTEXT:-yotresultsdistribution-service}"
 if [ -z "${RESULTS_BASE_URL:-}" ]; then
-  SERVICE_ENV=$(kubectl get deployment "$SERVICE_DEPLOYMENT" -n "$NAMESPACE" \
-    -o jsonpath='{range .spec.template.spec.containers[*].env[?(@.name=="RESULTS_BASE_URL")]}{.value}{"\n"}{end}')
+  SERVICE_ENV=$(kubectl get deployments -n "$NAMESPACE" -l "app.kubernetes.io/instance=$SERVICE_CONTEXT" \
+    -o jsonpath='{range .items[*].spec.template.spec.containers[*].env[?(@.name=="RESULTS_BASE_URL")]}{.value}{"\n"}{end}')
   RESULTS_BASE_URL=$(printf '%s\n' "$SERVICE_ENV" | grep -m 1 . || true)
 fi
 if [ -z "$RESULTS_BASE_URL" ]; then
-  echo "ERROR: Deployment $SERVICE_DEPLOYMENT in $NAMESPACE does not set RESULTS_BASE_URL;"
-  echo "       cannot probe the route the service uses (set SERVICE_DEPLOYMENT or RESULTS_BASE_URL)."
+  echo "ERROR: no $SERVICE_CONTEXT Deployment in $NAMESPACE sets RESULTS_BASE_URL;"
+  echo "       cannot probe the route the service uses (set SERVICE_CONTEXT or RESULTS_BASE_URL)."
   exit 1
 fi
 

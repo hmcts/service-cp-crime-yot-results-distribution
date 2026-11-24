@@ -115,14 +115,15 @@ final class FallbackHearingStubs {
     }
 
     /**
-     * Logs how many stubs were registered and how many registrations failed, removes this run's
-     * stubs, then closes.
+     * Logs how many stubs were registered and how many registrations failed, then closes.
      *
-     * <p>Every stub is still needed until the service has fetched its hearing, so they are removed
-     * only here, after the load. Left in place they would pile up across runs on a long-lived pod —
-     * WireMock matches each request against every mapping, so the fallback latency being measured
-     * would grow run on run. A removal that fails is reported, not fatal: the load has already run,
-     * and {@code setup-wiremock-stubs.sh} removes any leftovers before the next one.
+     * <p>The stubs are deliberately left in place. The shared pipeline runs StressSimulation and
+     * then CapacitySimulation back to back, and {@code verify-outputs.sh} only after both: when a
+     * simulation ends, the service can still be draining its backlog, and a fallback hearing whose
+     * stub had been removed would record the catch-all's literal hearing id and fail the verifier's
+     * {@code unexpected} gate. They cannot pile up across pipeline runs, because each run gets its
+     * own namespace and WireMock; {@code setup-wiremock-stubs.sh} removes any tagged leftovers on a
+     * reused one.
      */
     static void close() {
         if (INSTANCE != null) {
@@ -132,30 +133,7 @@ final class FallbackHearingStubs {
                         + "KO on the publish request; those messages were never sent.",
                         INSTANCE.failures.get());
             }
-            INSTANCE.removeTagged();
             INSTANCE.client.close();
-        }
-    }
-
-    private void removeTagged() {
-        final String body = "{\"matchesJsonPath\":{\"expression\":\"$." + HearingPayloadFixture.TAG_KEY
-                + "\",\"equalTo\":\"" + HearingPayloadFixture.TAG_VALUE + "\"}}";
-        try {
-            final HttpResponse<String> response = send(HttpRequest.newBuilder()
-                    .uri(adminUri.resolve("__admin/mappings/remove-by-metadata"))
-                    .timeout(TIMEOUT)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build());
-            if (response.statusCode() == OK) {
-                LOG.info("Fallback hearing stubs removed from WireMock");
-            } else {
-                LOG.warn("WireMock refused removing the fallback hearing stubs with {}; "
-                        + "setup-wiremock-stubs.sh removes them before the next run", response.statusCode());
-            }
-        } catch (IllegalStateException e) {
-            LOG.warn("Could not remove the fallback hearing stubs ({}); setup-wiremock-stubs.sh removes "
-                    + "them before the next run", e.getClass().getSimpleName());
         }
     }
 

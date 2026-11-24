@@ -17,7 +17,7 @@ final class HearingPayloadFixture {
 
     private static final String MAPPING = "wiremock/mappings/hearing-payload.json";
     private static final String ANY_SUFFIX = ".*";
-    /** Metadata key and value on every per-hearing stub, so a run can remove exactly its own. */
+    /** Metadata key and value on every per-hearing stub, so leftovers can be removed by tag. */
     static final String TAG_KEY = "nft";
     static final String TAG_VALUE = "fallback-hearing";
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -42,7 +42,8 @@ final class HearingPayloadFixture {
      * A WireMock mapping that answers exactly this hearing's query-API GET with its envelope. It
      * keeps the shared mapping's status and headers, drops its response transformers (the static
      * body needs none), and outranks the shared catch-all mapping. It is tagged with
-     * {@code metadata.nft = fallback-hearing} so it can be removed by tag once the run ends.
+     * {@code metadata.nft = fallback-hearing} so {@code setup-wiremock-stubs.sh} can remove
+     * leftovers by tag on a reused WireMock.
      *
      * @param hearingId the hearing the stub is for
      * @param priority  the WireMock priority; lower wins, and the catch-all has the default (5)

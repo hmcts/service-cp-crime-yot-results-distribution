@@ -403,13 +403,34 @@ installed aborts the run.
 The validation WireMock (a WAR in WildFly) does not apply response templating, so the shared
 hearing-payload mapping cannot echo a hearingId there. With `-Dgatling.wiremockAdminUrl` (the
 pipeline's port-forward to the WireMock pod) Gatling registers an exact-path stub for each hearing
-it leaves out of Redis before publishing it, tagged `metadata.nft=fallback-hearing`, and removes
-them when the run ends; the script removes any a killed run left behind. A pipeline run that would
-send hearings down the fallback without that property aborts before load. The script requires
-exactly one running WireMock pod, and its preflight registers a probe stub of the same shape and
-fetches it through the service's own `RESULTS_BASE_URL`, read from the `SERVICE_DEPLOYMENT`
-Deployment (default `yotresultsdistribution-service`). Stub registration and Redis seeding run on
-the virtual user's thread, so at stress rates compare the achieved injection rate with the target.
+it leaves out of Redis before publishing it, tagged `metadata.nft=fallback-hearing`. The stubs stay
+until the namespace goes, because the service may still be draining when a simulation ends; the
+script removes tagged leftovers on a reused WireMock. A pipeline run that would send hearings down
+the fallback without that property aborts before load. The script requires exactly one running
+WireMock pod, and its preflight registers a probe stub of the same shape and fetches it through the
+service's own `RESULTS_BASE_URL`, read from the Deployment labelled
+`app.kubernetes.io/instance=$SERVICE_CONTEXT` (default `yotresultsdistribution-service`). Stub
+registration and Redis seeding run on the virtual user's thread, so at stress rates compare the
+achieved injection rate with the target.
+
+The shared pipeline is `pipelines/springboot-asb-performance-tests.yaml` in
+`hmcts/cpp-azure-devops-templates`. It deploys an ephemeral validation stack, purges the queue,
+runs `StressSimulation` then `CapacitySimulation` and then `verify-outputs.sh`, and passes every
+`-Dgatling.*` property the simulations read. Trigger it with:
+
+| Parameter | Value |
+|---|---|
+| `repo` | `service-cp-crime-yot-results-distribution` |
+| `context` | `yotresultsdistribution-service` (queue `perf.yotresultsdistribution.requests`, namespace `ns-vld-yotresultsdistribution-service-<buildId>`) |
+| `healthPath` | `/actuator/health/readiness`: the aggregate reads DOWN on an idle queue by design, so the default `/actuator/health` never answers 200 before load |
+| `datasourceSecretName` | the `kv-mdv-ccm-01` secret this service's validation values mount as its database password |
+| `imageTag` | the image under test |
+
+It needs, outside this repo: the `perf.yotresultsdistribution.requests` queue in `sbdevccm01`, and
+a `yotresultsdistribution_service` entry in cpp-aks-deploy's validation stack whose values point the
+consumer at that queue (`YOTRESULTSDISTRIBUTION_SERVICEBUS_QUEUENAME`), set `RESULTS_BASE_URL`,
+`REFERENCEDATA_BASE_URL` and Redis to the stack's WireMock and `validation-redis`, and leave the
+generation leg off.
 
 Before any load both simulations check the readiness group (logging the aggregate health) and open
 a producer on the queue, so a rejected credential aborts the run instead of failing every publish.
