@@ -69,11 +69,19 @@ public class ProcessedRequestRepository {
      *
      * <p>{@code failure_reason} is read alongside the data model's column list so the replay can
      * carry the reason the record was parked into its audit note before the transition clears the
-     * column. It informs no decision.
+     * column. It informs no decision directly — {@code ReasonCode.fromCode}/
+     * {@code FailureCategoryMapping.categoryFor} are what a re-park resolves it through (spec
+     * 007-replay-by-sequence-number, FR-009/FR-010).
+     *
+     * <p>{@code parking_sequence_number}, {@code parking_category} and {@code parking_attempt_count}
+     * are the decision itself (FR-003/FR-004/FR-005/FR-005a); {@code updated_at} is new to this read
+     * for the same reason — nothing changes it while the row stays {@code FAILED}, so it is the
+     * parking time the FR-005 heuristic's margin is measured from.
      */
     private static final String READ_RECORD = """
             SELECT status, request_fingerprint, failure_reason, exhausted_message_id,
-                   attempts, claim_owner, claim_expires_at
+                   attempts, claim_owner, claim_expires_at,
+                   parking_sequence_number, parking_category, parking_attempt_count, updated_at
               FROM processed_request
              WHERE source = :source AND request_id = :requestId
             """;
@@ -121,11 +129,23 @@ public class ProcessedRequestRepository {
                AND claim_owner = :owner AND claim_token = :token
             """;
 
-    /** Statement 4 — the run failed on the final permitted delivery, or beyond any retrying. */
+    /**
+     * Statement 4 — the run failed on the final permitted delivery, or beyond any retrying.
+     *
+     * <p>{@code parking_attempt_count = attempts} is the bare column, not a bound parameter: the
+     * row's own current value at the moment of this write <em>is</em> the generation being parked
+     * (spec 007-replay-by-sequence-number, FR-001). The three parking columns are written only by
+     * this statement's existing {@code claim_owner}/{@code claim_token} predicate — unchanged — so a
+     * stale runner cannot overwrite them (FR-002) any more than it could overwrite the columns this
+     * statement already wrote.
+     */
     private static final String RECORD_FAILED = """
             UPDATE processed_request
                SET status = 'FAILED', failure_reason = :reason,
                    exhausted_message_id = :messageId,
+                   parking_sequence_number = :sequenceNumber,
+                   parking_category = :category,
+                   parking_attempt_count = attempts,
                    claim_owner = NULL, claim_token = NULL, claim_expires_at = NULL,
                    updated_at = now()
              WHERE source = :source AND request_id = :requestId
@@ -133,13 +153,20 @@ public class ProcessedRequestRepository {
             """;
 
     /**
-     * Statement 5 — a deliberate resubmission under a fresh identity.
+     * Statement 5 — a deliberate resubmission, admitted by a compare-and-set against the exact
+     * failure generation the delivery observed (spec 007-replay-by-sequence-number, FR-006).
      *
      * <p>{@code attempts} is carried forward, not reset: the counter is a lifetime tally, so five
-     * failed deliveries followed by a successful replay leave the row showing 6. The
-     * {@code exhausted_message_id <> :messageId} predicate is defence in depth — the same-identity
-     * case is already decided on the read — and is safe against NULL because the FAILED check
-     * guarantees the column is populated on every parked row.
+     * failed deliveries followed by a successful replay leave the row showing 6. The predicate is
+     * {@code attempts = :observedAttempts AND parking_sequence_number IS NOT DISTINCT FROM
+     * :observedParkingSequenceNumber} — not {@code exhausted_message_id <> :messageId} any more,
+     * because a different sequence number replays whatever its {@code messageId} is (FR-004).
+     * {@code IS NOT DISTINCT FROM} rather than {@code =} so a legacy row's {@code NULL} parking
+     * sequence number still matches the {@code NULL} observed on the read (FR-005, FR-006) — plain
+     * {@code =} is never true against a {@code NULL} on either side. Defence in depth, not the
+     * decision itself: {@link uk.gov.hmcts.cp.yotresultsdistribution.application.IdempotencyGuard}
+     * decides replay-or-park before this statement is ever called; this predicate only refuses the
+     * write if the row moved between that read and this update.
      */
     private static final String REPLAY_FAILED = """
             UPDATE processed_request
@@ -149,12 +176,16 @@ public class ProcessedRequestRepository {
                    attempts = attempts + 1,
                    failure_reason = NULL,
                    exhausted_message_id = NULL,
+                   parking_sequence_number = NULL,
+                   parking_category = NULL,
+                   parking_attempt_count = NULL,
                    audit_note = :note,
                    updated_at = now()
              WHERE source = :source
                AND request_id = :requestId
                AND status = 'FAILED'
-               AND exhausted_message_id <> :messageId
+               AND attempts = :observedAttempts
+               AND parking_sequence_number IS NOT DISTINCT FROM :observedParkingSequenceNumber
             """;
 
     /**
@@ -312,7 +343,11 @@ public class ProcessedRequestRepository {
                         rs.getString("exhausted_message_id"),
                         rs.getInt("attempts"),
                         rs.getString("claim_owner"),
-                        instant(rs.getObject("claim_expires_at", OffsetDateTime.class))))
+                        instant(rs.getObject("claim_expires_at", OffsetDateTime.class)),
+                        (Long) rs.getObject("parking_sequence_number"),
+                        rs.getString("parking_category"),
+                        (Integer) rs.getObject("parking_attempt_count"),
+                        instant(rs.getObject("updated_at", OffsetDateTime.class))))
                 .optional());
     }
 
@@ -364,33 +399,56 @@ public class ProcessedRequestRepository {
     }
 
     /**
-     * Statement 4 — park the request, recording the identity that exhausted the deliveries in the
-     * same statement as the state, so a parked record can never exist without saying what parked it.
+     * Statement 4 — park the request, recording the identity that exhausted the deliveries, the
+     * broker sequence number that parked it and the category it was parked under, all in the same
+     * statement as the state, so a parked record can never exist without saying what parked it (spec
+     * 007-replay-by-sequence-number, FR-001).
      *
-     * <p>The identity is the claim's own — the delivery that acquired it is by definition the one
-     * whose failure parks the request — so no caller can supply an unrelated one.
+     * <p>The identity and the sequence number are the claim's own — the delivery that acquired it is
+     * by definition the one whose failure parks the request — so no caller can supply an unrelated
+     * one. The category is not the claim's: it is which of the two parking paths is calling
+     * ({@link uk.gov.hmcts.cp.yotresultsdistribution.application.IdempotencyGuard#recordNonTransientFailure}
+     * or
+     * {@link uk.gov.hmcts.cp.yotresultsdistribution.application.IdempotencyGuard#recordExhaustion}),
+     * so it travels as its own parameter.
      *
-     * @param runClaim      the claim the run was made under; its message identity parks the row
+     * @param runClaim      the claim the run was made under; its message identity and sequence
+     *                      number park the row
      * @param failureReason the bounded reason the run failed for
+     * @param category      the {@link uk.gov.hmcts.cp.yotresultsdistribution.domain.DeadLetterReason}
+     *                      name the parking path used — {@code "NON_TRANSIENT"} or
+     *                      {@code "EXHAUSTED"}
      * @return whether the write was admitted by the owner-and-token predicate
      */
-    public boolean recordFailed(final RunClaim runClaim, final String failureReason) {
+    public boolean recordFailed(
+            final RunClaim runClaim, final String failureReason, final String category) {
         return StoreOutage.translating("park a request", () -> affected(outcome(RECORD_FAILED,
                 runClaim)
                 .param(REASON, failureReason)
                 .param(MESSAGE_ID, runClaim.messageId())
+                .param("sequenceNumber", runClaim.sequenceNumber())
+                .param("category", category)
                 .update()));
     }
 
     /**
-     * Statement 5 — replay a parked request under a fresh message identity, the claim's own.
+     * Statement 5 — replay a parked request, admitted by a compare-and-set against the exact
+     * failure generation the delivery observed (spec 007-replay-by-sequence-number, FR-006).
      *
-     * @param runClaim  the claim the replayed run would be made under
-     * @param auditNote the bounded note recording the replay
+     * @param runClaim                     the claim the replayed run would be made under
+     * @param observedAttempts             the {@code attempts} value read when the decision to
+     *                                     replay was made
+     * @param observedParkingSequenceNumber the {@code parking_sequence_number} read at the same
+     *                                      moment — {@code null} for a legacy or stale row (FR-005,
+     *                                      FR-005a); matched null-safely
+     * @param auditNote                    the bounded note recording the replay
      * @return whether the replay was admitted. False means the record moved between the read and
-     *         this update; it never means the identity was the same one, which the read decides.
+     *         this update — a concurrent replay won, or the record is no longer parked. It never
+     *         means the sequence number was the same one, which the read decides.
      */
-    public boolean replayFailed(final RunClaim runClaim, final String auditNote) {
+    public boolean replayFailed(
+            final RunClaim runClaim, final int observedAttempts,
+            final Long observedParkingSequenceNumber, final String auditNote) {
         return StoreOutage.translating("replay a parked request", () -> affected(jdbcClient
                 .sql(REPLAY_FAILED)
                 .param(SOURCE, runClaim.source())
@@ -398,7 +456,8 @@ public class ProcessedRequestRepository {
                 .param(OWNER, runClaim.owner())
                 .param(TOKEN, runClaim.token())
                 .param(LEASE_PARAM, lease())
-                .param(MESSAGE_ID, runClaim.messageId())
+                .param("observedAttempts", observedAttempts)
+                .param("observedParkingSequenceNumber", observedParkingSequenceNumber)
                 .param("note", auditNote)
                 .update()));
     }

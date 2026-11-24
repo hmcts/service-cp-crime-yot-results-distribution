@@ -223,7 +223,8 @@ class SchemaMigrationIT {
                     "source", "request_id", "hearing_id", "hearing_day", "shared_time", "event_type",
                     "request_fingerprint", "status", "attempts", "completion_reason", "failure_reason",
                     "exhausted_message_id", "audit_note", "claim_owner", "claim_token",
-                    "claim_expires_at", "created_at", "updated_at");
+                    "claim_expires_at", "created_at", "updated_at",
+                    "parking_sequence_number", "parking_category", "parking_attempt_count");
 
             assertThat(columns.get("source")).isEqualTo(new Column("text", false, null));
             assertThat(columns.get("request_id")).isEqualTo(new Column("uuid", false, null));
@@ -243,6 +244,11 @@ class SchemaMigrationIT {
             assertThat(columns.get("claim_token")).isEqualTo(new Column("uuid", true, null));
             assertThat(columns.get("claim_expires_at"))
                     .isEqualTo(new Column("timestamp with time zone", true, null));
+            assertThat(columns.get("parking_sequence_number"))
+                    .isEqualTo(new Column("bigint", true, null));
+            assertThat(columns.get("parking_category")).isEqualTo(new Column("text", true, null));
+            assertThat(columns.get("parking_attempt_count"))
+                    .isEqualTo(new Column("integer", true, null));
         }
 
         @Test
@@ -410,6 +416,226 @@ class SchemaMigrationIT {
                             + "'fingerprint', 'FAILED', 5, 'PIPELINE_TRANSIENT_FAILURE'")))
                     .isInstanceOf(SQLException.class)
                     .hasMessageContaining("processed_request_exhausted_id_chk");
+        }
+
+        /**
+         * V9 (spec 007-replay-by-sequence-number): the parking delivery's own identity, beside the
+         * existing {@code exhausted_message_id}.
+         */
+        @Nested
+        @DisplayName("parking identity (V9)")
+        class ParkingIdentity {
+
+            private static String insertFailedWithParking(
+                    final String sequenceNumber, final String category, final String attemptCount) {
+                return insertRequest(
+                        "source, request_id, hearing_id, hearing_day, shared_time, event_type, "
+                                + "request_fingerprint, status, attempts, failure_reason, "
+                                + "exhausted_message_id, parking_sequence_number, parking_category, "
+                                + "parking_attempt_count",
+                        "'RESULTS', '" + UUID.randomUUID() + "', '" + UUID.randomUUID() + "', "
+                                + "DATE '2026-08-20', TIMESTAMPTZ '2026-08-20T09:00:00Z', "
+                                + "'Hearing_Resulted', 'fingerprint', 'FAILED', 5, "
+                                + "'PIPELINE_TRANSIENT_FAILURE', 'msg-1', " + sequenceNumber + ", "
+                                + category + ", " + attemptCount);
+            }
+
+            @Test
+            void category_check_should_admit_the_two_declared_values_and_null() throws SQLException {
+                assertThat(constraintsOf(REQUEST_TABLE).get("processed_request_parking_category_chk"))
+                        .isNotNull()
+                        .contains("EXHAUSTED", "NON_TRANSIENT");
+            }
+
+            @Test
+            void category_check_should_reject_a_value_outside_the_enumeration() {
+                assertThatThrownBy(() -> inRolledBackTransaction(
+                        insertFailedWithParking("42", "'BOGUS'", "5")))
+                        .isInstanceOf(SQLException.class)
+                        .hasMessageContaining("processed_request_parking_category_chk");
+            }
+
+            @Test
+            void category_check_should_accept_non_transient_as_a_full_triple() throws SQLException {
+                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
+                        "42", "'NON_TRANSIENT'", "5")))
+                        .doesNotThrowAnyException();
+            }
+
+            @Test
+            void category_check_should_accept_exhausted_as_a_full_triple() throws SQLException {
+                // category_check_should_admit_the_two_declared_values_and_null above only confirms
+                // 'EXHAUSTED' is named in the constraint's text; this is the behavioural proof that
+                // a whole triple carrying it is actually accepted, not merely named.
+                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
+                        "99", "'EXHAUSTED'", "4")))
+                        .doesNotThrowAnyException();
+            }
+
+            @Test
+            void triple_check_should_bind_all_three_columns_together() throws SQLException {
+                assertThat(constraintsOf(REQUEST_TABLE).get("processed_request_parking_triple_chk"))
+                        .isNotNull()
+                        .contains("parking_sequence_number", "parking_category", "parking_attempt_count");
+            }
+
+            @Test
+            void triple_check_should_accept_a_legacy_row_with_all_three_null() throws SQLException {
+                // The documented legacy-record state (FR-005, FR-010, FR-014) - every existing FAILED
+                // row before this migration looks exactly like this.
+                assertThatCode(() -> inRolledBackTransaction(insertFailedWithParking(
+                        "NULL", "NULL", "NULL")))
+                        .doesNotThrowAnyException();
+            }
+
+            /**
+             * Which of the parking triple's three columns a candidate row populates, mirroring
+             * {@link ProcessedRequest.ClaimTriple}'s pattern for the same kind of constraint.
+             */
+            record ParkingTriple(boolean sequenceNumber, boolean category, boolean attemptCount) {
+                @Override
+                public String toString() {
+                    return "sequenceNumber=" + state(sequenceNumber) + ", category=" + state(category)
+                            + ", attemptCount=" + state(attemptCount);
+                }
+
+                private static String state(final boolean populated) {
+                    return populated ? "set" : "null";
+                }
+
+                private String sequenceNumberLiteral() {
+                    return sequenceNumber ? "42" : "NULL";
+                }
+
+                private String categoryLiteral() {
+                    return category ? "'EXHAUSTED'" : "NULL";
+                }
+
+                private String attemptCountLiteral() {
+                    return attemptCount ? "5" : "NULL";
+                }
+            }
+
+            /** The six ways the parking triple can be half-written. All must be refused. */
+            static Stream<ParkingTriple> partiallyWrittenParkingTriples() {
+                return Stream.of(
+                        new ParkingTriple(true, false, false),
+                        new ParkingTriple(false, true, false),
+                        new ParkingTriple(false, false, true),
+                        new ParkingTriple(true, true, false),
+                        new ParkingTriple(true, false, true),
+                        new ParkingTriple(false, true, true));
+            }
+
+            @ParameterizedTest(name = "{0}")
+            @MethodSource("partiallyWrittenParkingTriples")
+            void triple_check_should_reject_every_partially_written_triple(final ParkingTriple triple) {
+                // Enumerated rather than sampled, exactly as claim_triple_chk's own test is: the
+                // constraint is two equalities, and a single example would pass against several
+                // wrong ways of writing them.
+                assertThatThrownBy(() -> inRolledBackTransaction(insertFailedWithParking(
+                        triple.sequenceNumberLiteral(), triple.categoryLiteral(),
+                        triple.attemptCountLiteral())))
+                        .isInstanceOf(SQLException.class)
+                        .hasMessageContaining("processed_request_parking_triple_chk");
+            }
+
+            @Test
+            void a_non_failed_row_may_still_carry_a_stale_triple() throws SQLException {
+                // FR-014: clearing the triple on the way out of FAILED is a write rule, not a
+                // database constraint, precisely so an older consumer's replay statement - which
+                // does not know these columns exist, and so cannot clear them - does not fail
+                // outright. Nothing here ties the triple to status = 'FAILED'.
+                assertThatCode(() -> inRolledBackTransaction(insertRequest(
+                        "source, request_id, hearing_id, hearing_day, shared_time, event_type, "
+                                + "request_fingerprint, status, attempts, parking_sequence_number, "
+                                + "parking_category, parking_attempt_count",
+                        "'RESULTS', '" + UUID.randomUUID() + "', '" + UUID.randomUUID() + "', "
+                                + "DATE '2026-08-20', TIMESTAMPTZ '2026-08-20T09:00:00Z', "
+                                + "'Hearing_Resulted', 'fingerprint', 'RECEIVED', 6, 42, "
+                                + "'NON_TRANSIENT', 5")))
+                        .doesNotThrowAnyException();
+            }
+
+            /**
+             * Spec 007-replay-by-sequence-number, tasks.md T037: the precursor state to T036's own
+             * case, proven as a transition rather than a static end state. A row parked by a newer
+             * consumer (parking triple set) is moved {@code FAILED -&gt; RECEIVED} by a statement
+             * shaped like the <em>old</em> {@code REPLAY_FAILED} — one that clears only the
+             * pre-existing columns ({@code exhausted_message_id}, {@code failure_reason},
+             * {@code audit_note}) and has no idea the three new columns exist. The "old" statement is
+             * simulated directly here (a hand-written {@code UPDATE} mirroring the pre-this-feature
+             * shape) rather than invoked through production code — there is no older version of this
+             * statement left to call.
+             *
+             * <p>No new production code guards this case: {@link #triple_check_should_accept_a_legacy_row_with_all_three_null()}
+             * and this test together are T007's migration doing the work, and FR-014's point is
+             * exactly that clearing the triple on the way out of {@code FAILED} is a write rule, not
+             * a database constraint — so an older consumer's statement, which cannot write what it
+             * does not know exists, does not fail outright either.
+             */
+            @Test
+            @SuppressWarnings("PMD.CheckResultSet")
+            // row.next()'s return is asserted true via assertThat, which PMD's static rule does not
+            // trace through — it is checked, just in this file's own idiom for a single-row read.
+            void an_old_shaped_replay_should_leave_the_parking_triple_stale_but_constraint_valid()
+                    throws SQLException {
+                final UUID requestId = UUID.randomUUID();
+                try (Connection connection = connection()) {
+                    connection.setAutoCommit(false);
+                    try (Statement statement = connection.createStatement()) {
+                        statement.executeUpdate(insertRequest(
+                                "source, request_id, hearing_id, hearing_day, shared_time, "
+                                        + "event_type, request_fingerprint, status, attempts, "
+                                        + "failure_reason, exhausted_message_id, "
+                                        + "parking_sequence_number, parking_category, "
+                                        + "parking_attempt_count",
+                                "'RESULTS', '" + requestId + "', '" + UUID.randomUUID() + "', "
+                                        + "DATE '2026-08-20', TIMESTAMPTZ '2026-08-20T09:00:00Z', "
+                                        + "'Hearing_Resulted', 'fingerprint', 'FAILED', 5, "
+                                        + "'PIPELINE_TRANSIENT_FAILURE', 'msg-5', 5, 'EXHAUSTED', 5"));
+
+                        // The old REPLAY_FAILED shape: WHERE exhausted_message_id <> :messageId,
+                        // clearing only the three columns that existed before this feature. It has
+                        // no idea parking_sequence_number/parking_category/parking_attempt_count
+                        // exist, so it does not - and cannot - clear them.
+                        final int replayed;
+                        try (PreparedStatement replay = connection.prepareStatement(
+                                "UPDATE " + REQUEST_TABLE + " SET status = 'RECEIVED', "
+                                        + "attempts = attempts + 1, exhausted_message_id = NULL, "
+                                        + "failure_reason = NULL, "
+                                        + "audit_note = 'REPLAYED_AFTER_FAILURE prior=PIPELINE_TRANSIENT_FAILURE' "
+                                        + "WHERE source = 'RESULTS' AND request_id = ? "
+                                        + "AND status = 'FAILED' AND exhausted_message_id <> 'msg-6'")) {
+                            replay.setObject(1, requestId);
+                            replayed = replay.executeUpdate();
+                        }
+                        assertThat(replayed).isEqualTo(1);
+
+                        try (PreparedStatement select = connection.prepareStatement(
+                                "SELECT status, attempts, parking_sequence_number, "
+                                        + "parking_category, parking_attempt_count FROM "
+                                        + REQUEST_TABLE + " WHERE source = 'RESULTS' "
+                                        + "AND request_id = ?")) {
+                            select.setObject(1, requestId);
+                            try (ResultSet row = select.executeQuery()) {
+                                assertThat(row.next()).isTrue();
+                                assertThat(row.getString("status")).isEqualTo("RECEIVED");
+                                assertThat(row.getInt("attempts")).isEqualTo(6);
+                                assertThat(row.getObject("parking_sequence_number"))
+                                        .as("the triple survives, stale and non-null, on the now-"
+                                                + "RECEIVED row - the old statement never knew to "
+                                                + "clear it")
+                                        .isEqualTo(5L);
+                                assertThat(row.getString("parking_category")).isEqualTo("EXHAUSTED");
+                                assertThat(row.getObject("parking_attempt_count")).isEqualTo(5);
+                            }
+                        }
+                    } finally {
+                        connection.rollback();
+                    }
+                }
+            }
         }
     }
 

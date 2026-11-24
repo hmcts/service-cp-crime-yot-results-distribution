@@ -75,7 +75,7 @@ As the transformation pipeline lands (phases 4–6 of `specs/001-court-register-
 - Null / missing input fields on the inbound message
 - Empty collections after court-extract filtering
 - Duplicate `(source, requestId)` delivery
-- A resubmit that reuses the original `messageId` (must be recognised as the footgun it is)
+- A resubmit that reuses the original `messageId` but carries a different broker sequence number — must be recognised as a deliberate resubmission and replay (spec 007-replay-by-sequence-number); a resubmit within the broker's duplicate-detection window of the same `messageId` is silently discarded by the broker and never reaches the service at all
 - Hearing payload absent from both Redis and the query-API fallback (retryable, not a silent skip)
 - The single per-hearing POST failing on each branch of the failure taxonomy (202-only success; transient vs terminal), with `processed_output` recording what was attempted
 

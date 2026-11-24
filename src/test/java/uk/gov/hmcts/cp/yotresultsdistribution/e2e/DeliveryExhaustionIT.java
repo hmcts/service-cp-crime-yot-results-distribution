@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,6 +96,32 @@ class DeliveryExhaustionIT {
 
     private static final Duration REPLAYED_WITHIN = Duration.ofSeconds(60);
 
+    /** Bounds a held delivery's wait for the transport cut, so a failure times out rather than hangs. */
+    private static final Duration HELD_AT_MOST = Duration.ofMinutes(2);
+
+    /**
+     * The exhausting delivery's lock (the queue's own {@code LockDuration}, one minute) may still
+     * have nearly its full life left when the transport is cut underneath it, so the redelivery this
+     * suite waits for budgets for that in full, on top of the broker round trips either side of it.
+     */
+    private static final Duration RE_PARKED_WITHIN = Duration.ofSeconds(150);
+
+    /**
+     * The listener's own line once {@code deadLetter()}'s settlement retry has genuinely given up —
+     * {@code YotResultsDistributionMessageListener.accepted}'s refusal branch. Waiting for this,
+     * rather than a fixed duration, is the difference between two failure modes this test must not
+     * fall into either of: reconnecting too soon lets the <em>original</em> call succeed on a later
+     * retry, settling this exact delivery with nothing lost; waiting past the queue's own
+     * {@code LockDuration} (one minute) instead makes the lock expire on the broker's own clock,
+     * which — unlike a connection-closed release — increments the broker's own delivery count, and
+     * since this is already the fifth, final permitted delivery, that increment is the broker
+     * auto-dead-lettering the message itself under its own reason, without ever asking this service
+     * again at all. Reconnecting the instant the retry has provably given up, while the lock still
+     * has most of its life left, is the one way to land strictly inside the gap both failure modes
+     * leave open.
+     */
+    private static final String SETTLEMENT_REFUSED = "The broker refused the settlement";
+
     /**
      * How often a broker-backed condition is re-asked. Deliberately a second rather than
      * Awaitility's default hundred milliseconds: every peek opens its own AMQP connection, and a
@@ -162,6 +190,10 @@ class DeliveryExhaustionIT {
     @AfterEach
     void releaseTheDeliveryLog() {
         deliveryLog.close();
+        // Idempotent (ServiceBusEmulatorTestSupport.restore()'s own contract): a failing assertion
+        // in the transport-cut scenario must not leave the broker disconnected for the suites that
+        // run after this one.
+        ServiceBusEmulatorTestSupport.restore();
     }
 
     // --- helpers ---------------------------------------------------------------------------
@@ -228,6 +260,19 @@ class DeliveryExhaustionIT {
                 .toList();
     }
 
+    /**
+     * The broker's sequence number for every delivery of this request the listener has seen, from
+     * the same receipt line {@link #deliveryCounts()} reads — argument index 4, pinned alongside
+     * {@code deliveryCount}'s own index 2.
+     */
+    private List<Long> deliverySequenceNumbers() {
+        return deliveryLog.events().stream()
+                .filter(event -> requestId.toString().equals(event.getMDCPropertyMap().get("requestId")))
+                .filter(event -> event.getFormattedMessage().startsWith(DELIVERY_RECEIVED))
+                .map(event -> (Long) event.getArgumentArray()[4])
+                .toList();
+    }
+
     private double counter(final String name, final String tag, final String value) {
         final Counter counter = registry.find(name).tag(tag, value).counter();
         return counter == null ? 0 : counter.count();
@@ -278,6 +323,135 @@ class DeliveryExhaustionIT {
         assertThat(signals().minus(before))
                 .as("every failed run counted, one request parked, one dead-letter performed")
                 .isEqualTo(new Signals(PERMITTED_DELIVERIES, 1, 1));
+    }
+
+    // --- US2: the delivery that parked the current failure is never re-run (spec 007) ------------
+
+    /**
+     * Spec 007-replay-by-sequence-number, tasks.md T030: the delivery recorded as parking the
+     * current {@code FAILED} generation must never be re-run, even if its own dead-letter operation
+     * did not settle and the broker simply offers the same stored message again.
+     *
+     * <p>Parked by a <strong>non-transient</strong> failure on the request's very first delivery
+     * (count 0), deliberately — not the exhausting, final permitted delivery (count 4) the class's
+     * other scenario uses. {@code maxDeliveryCount} is 5; a connection-closed release is documented
+     * not to increment the broker's own count (spec 007's Assumptions), but this suite cannot prove
+     * the emulator honours that distinction for the <em>specific</em> delivery sitting at the budget's
+     * own edge — proven empirically: parking the exhausting delivery this same way left the broker
+     * auto-dead-lettering the message under its own rule once the transport outage ran past the
+     * lock's one-minute life, never reaching this service's listener again at all. Parking on the
+     * first delivery instead leaves four more deliveries of headroom regardless of what the emulator
+     * does with the count on a lost connection, so the scenario this test is actually about — the
+     * parking delivery's own settlement lost, the same stored message returned, re-parked without
+     * running — is reproducible however that count behaves.
+     *
+     * <p>The transport is cut through Toxiproxy exactly as {@code QueueOutageRecoveryIT} cuts it — a
+     * sequence rather than a race: the delivery is held open until it is confirmed in flight, the
+     * transport is cut underneath it, and only then is it let finish. The {@code processed_request}
+     * write that parks the row reaches Postgres regardless, because the connection cut is
+     * Service-Bus-only; the {@code deadLetter()} settlement that would otherwise follow it is
+     * refused by the severed transport and never reaches the broker. Once the transport is restored,
+     * the broker — having never heard that delivery settle — offers the same stored message again: a
+     * genuine redelivery, under the same sequence number. The guard must re-park it without ever
+     * invoking the payload port again.
+     */
+    @Test
+    @DisplayName("a delivery whose settlement is lost to a closed connection returns under its "
+            + "original sequence number and is re-parked without running")
+    void should_re_park_without_running_when_the_exhausting_deliverys_settlement_is_lost()
+            throws InterruptedException {
+        final CountDownLatch deliveryInFlight = new CountDownLatch(1);
+        final CountDownLatch transportCut = new CountDownLatch(1);
+
+        when(payloadSource.fetch(any(DistributionCommand.class))).thenAnswer(invocation -> {
+            final DistributionCommand incoming = invocation.getArgument(0);
+            if (!requestId.equals(incoming.requestId())) {
+                return PLACEHOLDER;
+            }
+            deliveryInFlight.countDown();
+            transportCut.await(HELD_AT_MOST.toSeconds(), TimeUnit.SECONDS);
+            throw new PayloadUnavailableException(
+                    FailureClassification.NON_TRANSIENT, ReasonCode.PAYLOAD_READ_REFUSED);
+        });
+
+        final String parking = publish();
+
+        assertThat(deliveryInFlight.await(PARKED_WITHIN.toSeconds(), TimeUnit.SECONDS))
+                .as("the parking delivery must genuinely be in flight before the transport is cut")
+                .isTrue();
+        ServiceBusEmulatorTestSupport.disconnect();
+        transportCut.countDown();
+
+        await().atMost(PARKED_WITHIN).pollInterval(POLL).until(() -> row()
+                .filter(found -> RequestStatus.FAILED.name().equals(found.status()))
+                .isPresent());
+        final Row writtenButUnsettled = requireRow();
+        assertThat(writtenButUnsettled.attempts())
+                .as("the park write reached Postgres - a connection the Service-Bus-only cut "
+                        + "never touched - on the very first delivery, non-transiently")
+                .isEqualTo(1);
+        assertThat(writtenButUnsettled.parkingSequenceNumber()).isNotNull();
+
+        // Reconnecting now would let the original deadLetter() call's own retry succeed against a
+        // lock the broker has not yet expired - settling this exact delivery, not losing it, and
+        // satisfying every assertion below for a reason this test is not about. Wait for the
+        // listener's own word that the retry has genuinely given up - not a fixed duration, which
+        // either risks reconnecting mid-retry or, if generous enough to be safe against that, risks
+        // overshooting the lock's own one-minute life for no reason now that parking no longer sits
+        // at the delivery budget's own edge.
+        await().atMost(HELD_AT_MOST).pollInterval(POLL).until(() -> deliveryLog.events().stream()
+                .filter(event -> requestId.toString().equals(event.getMDCPropertyMap().get("requestId")))
+                .anyMatch(event -> event.getFormattedMessage().startsWith(SETTLEMENT_REFUSED)));
+
+        ServiceBusEmulatorTestSupport.restore();
+
+        await().atMost(RE_PARKED_WITHIN).pollInterval(POLL).until(() -> ServiceBusEmulatorTestSupport
+                .peekFor(parking, SubQueue.DEAD_LETTER_QUEUE).isPresent());
+
+        final Row reparked = requireRow();
+        assertThat(reparked.attempts())
+                .as("nothing ran again; the lifetime tally stays at one")
+                .isEqualTo(1);
+        assertThat(reparked.parkingSequenceNumber())
+                .as("the same stored message re-parked under the sequence number it already carried")
+                .isEqualTo(writtenButUnsettled.parkingSequenceNumber());
+
+        // Positive evidence that a genuine second delivery reached the listener, not merely that the
+        // end state is consistent with one: the lost settlement's own deadLetter() call succeeding
+        // after reconnect (a delayed send on a connection the SDK quietly re-established) would leave
+        // every assertion above unchanged. A second "Delivery received" line is the one thing a
+        // same-attempt settlement retry could never log.
+        final List<Long> deliveryCounts = deliveryCounts();
+        assertThat(deliveryCounts)
+                .as("the listener itself received this stored message twice, not once")
+                .hasSize(2);
+        assertThat(deliveryCounts.get(1))
+                .as("whatever the broker did with its own count across the outage, it is the same "
+                        + "stored message's second delivery, not a sixth attempt colliding with a "
+                        + "budget this scenario no longer sits at the edge of")
+                .isGreaterThanOrEqualTo(deliveryCounts.get(0));
+        final List<Long> deliverySequenceNumbers = deliverySequenceNumbers();
+        assertThat(deliverySequenceNumbers.get(1))
+                .as("the listener received the parking sequence number again - the broker's own "
+                        + "identity for the one send, not a resend's fresh one")
+                .isEqualTo(writtenButUnsettled.parkingSequenceNumber())
+                .isEqualTo(deliverySequenceNumbers.get(0));
+
+        final ServiceBusReceivedMessage deadLettered = ServiceBusEmulatorTestSupport
+                .peekFor(parking, SubQueue.DEAD_LETTER_QUEUE).orElseThrow();
+        assertThat(deadLettered.getSequenceNumber())
+                .as("the broker never re-enqueued this delivery; it is the one it always was")
+                .isEqualTo(reparked.parkingSequenceNumber());
+        // This service's own re-park, not the broker's automatic dead-lettering on a delivery-count
+        // limit: the broker's own reason carries none of this - NON_TRANSIENT is this service's
+        // bounded category, and the description is the request's own stored failure reason (FR-009),
+        // which a broker-level park could never produce.
+        assertThat(deadLettered.getDeadLetterReason())
+                .as("parked by this service's own re-park decision, not the broker's own rule")
+                .isEqualTo(DeadLetterReason.NON_TRANSIENT.label());
+        assertThat(deadLettered.getDeadLetterErrorDescription())
+                .as("the request's own recorded reason (FR-009), carried into the re-park")
+                .isEqualTo(ReasonCode.PAYLOAD_READ_REFUSED.code());
     }
 
     /**

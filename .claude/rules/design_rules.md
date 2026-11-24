@@ -209,10 +209,15 @@ Rules:
 
 - `COMPLETED` and `FAILED` are **terminal**, and are not treated alike on a resubmission:
   - `COMPLETED` — acknowledged and `complete()`d without reprocessing.
-  - `FAILED` — **replayable**. A resubmitted message (fresh broker `messageId`, same `requestId`)
-    makes the guard transition `FAILED` → `RECEIVED`, preserving `attempts` and writing an audit
-    note, then reprocess. This is the supported way to recover a dead-lettered request.
-  - Ordinary broker redelivery of the *same* message is unaffected.
+  - `FAILED` — **replayable**. A resubmitted message — the dead-lettered body re-sent unchanged,
+    `messageId` included, or under a fresh `messageId`, either now works — makes the guard
+    transition `FAILED` → `RECEIVED` once the broker assigns it a sequence number different from
+    the one that parked the request (or, for a request parked before this change, once the FR-005
+    heuristic admits it), preserving `attempts` and writing an audit note, then reprocess. This is
+    the supported way to recover a dead-lettered request (spec 007-replay-by-sequence-number).
+  - Ordinary broker redelivery of the *same* message — same sequence number — is unaffected: it is
+    a redelivery, not a resubmission, and a terminal request short-circuits it, re-parking with its
+    own recorded reason rather than a generic one.
 - The four no-op outcomes are business outcomes, not errors — recorded, bounded, and mutually
   distinguishable (fix C33). Two of them are this flow's **most common** results.
 - **Transient** (retry, `abandon()`): connection/IO errors, HTTP 5xx, 429 and 408 (honour bounded
@@ -304,7 +309,12 @@ Queue **`yotresultsdistribution.requests`** (+ its dead-letter queue), owned by 
   delivery carries count 4.
 - **Broker duplicate detection is ON.** `messageId` = `"{source}:{requestId}"`. The service must not
   depend on it alone — the `(source, requestId)` processed-log is the real guard.
-- **Replay tooling always mints a fresh `messageId`** and keeps the original `requestId`.
+- **A fresh `messageId` is no longer required for a replay, only still useful.** The guard decides
+  a resubmission by the broker's own **sequence number**, not `messageId`
+  (spec `007-replay-by-sequence-number`), so the dead-lettered body may be re-sent unchanged — the
+  Azure portal's dead-letter "Re-send" does exactly this. Minting a fresh `messageId` still bypasses
+  the broker's duplicate-detection window immediately rather than waiting it out, and normal
+  producer publishing keeps the deterministic `messageId` regardless.
 - `maxConcurrentCalls` starts at **2**. Raise only once golden tests prove the pipeline is
   stateless.
 - **ASB health MUST NEVER gate readiness.** A broker blip must not restart the pod.

@@ -136,6 +136,8 @@ public class PropertiesValidator implements InitializingBean {
     private static final String PROCESSING_DEADLINE = "yotresultsdistribution.claim.processing-deadline";
     private static final String RENEW_DURATION =
             "yotresultsdistribution.servicebus.max-auto-lock-renew-duration";
+    private static final String LOCK_DURATION = "yotresultsdistribution.servicebus.lock-duration";
+    private static final String LEGACY_MARGIN = "yotresultsdistribution.replay.legacy-margin";
     private static final String CONNECTION_STRING = "yotresultsdistribution.servicebus.connection-string";
     private static final String NAMESPACE = "yotresultsdistribution.servicebus.namespace";
     private static final String PAYLOAD = "yotresultsdistribution.payload";
@@ -702,6 +704,7 @@ public class PropertiesValidator implements InitializingBean {
     public static void validate(final YotResultsDistributionProperties properties) {
         validateRunFinishesBeforeTheClaimExpires(properties);
         validateLockOutlivesTheRun(properties);
+        validateTheLegacyMarginCannotExplainAwayTheLock(properties);
         validateExactlyOneCredentialSource(properties);
         validateThePayloadSourceCanFetch(properties);
         validateTheSubscriptionsSourceCanFetch(properties);
@@ -748,6 +751,30 @@ public class PropertiesValidator implements InitializingBean {
                     RENEW_DURATION + " (" + renewal + MUST_BE_AT_LEAST + PROCESSING_DEADLINE
                             + " plus the " + RENEWAL_MARGIN + " renewal margin (" + required
                             + "), so the broker lock outlives any legitimate run");
+        }
+    }
+
+    /**
+     * The legacy/stale-row replay heuristic's safety margin must be at least the broker's own lock
+     * duration (spec 007-replay-by-sequence-number, FR-005).
+     *
+     * <p>The heuristic treats a delivery as a resubmission once its enqueue time is later than the
+     * row's parking time by more than this margin — and a message the broker released without
+     * incrementing the delivery count (a closed connection, which this service causes deliberately on
+     * every intake suspension and every stop) can return and be read as enqueued later purely because
+     * its lock expired. A margin shorter than the lock duration would let that expiry alone explain a
+     * false replay; a margin at least as long as it means the residual risk FR-005 accepts needs a
+     * genuine broker-clock lead on top of an ordinary lock expiry, not the expiry by itself.
+     */
+    private static void validateTheLegacyMarginCannotExplainAwayTheLock(
+            final YotResultsDistributionProperties properties) {
+        final Duration lockDuration = properties.servicebus().lockDuration();
+        final Duration margin = properties.replay().legacyMargin();
+        if (margin.compareTo(lockDuration) < 0) {
+            throw new IllegalStateException(
+                    LEGACY_MARGIN + " (" + margin + MUST_BE_AT_LEAST + LOCK_DURATION
+                            + " (" + lockDuration + "), so the heuristic cannot mistake an ordinary"
+                            + " lock expiry alone for a resubmission");
         }
     }
 

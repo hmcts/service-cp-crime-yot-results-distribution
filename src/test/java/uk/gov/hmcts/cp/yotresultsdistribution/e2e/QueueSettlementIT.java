@@ -86,12 +86,12 @@ class QueueSettlementIT {
             StoreGateTestSupport.open(),
             MAX_DELIVERY_COUNT);
 
-    /** Every delivery this suite's processor saw, as (messageId, deliveryCount). */
+    /** Every delivery this suite's processor saw, as (messageId, deliveryCount, sequenceNumber). */
     private final List<Delivery> observed = new CopyOnWriteArrayList<>();
 
     private ServiceBusProcessorClient processor;
 
-    private record Delivery(String messageId, long deliveryCount) {
+    private record Delivery(String messageId, long deliveryCount, long sequenceNumber) {
     }
 
     @BeforeAll
@@ -126,7 +126,8 @@ class QueueSettlementIT {
                 .processMessage(context -> {
                     observed.add(new Delivery(
                             context.getMessage().getMessageId(),
-                            context.getMessage().getDeliveryCount()));
+                            context.getMessage().getDeliveryCount(),
+                            context.getMessage().getSequenceNumber()));
                     listener.onMessage(context);
                 })
                 .processError(error -> LOG.warn("Processor error during the settlement suite: {}",
@@ -221,5 +222,73 @@ class QueueSettlementIT {
         assertThat(parked.getDeadLetterErrorDescription())
                 .isEqualTo(ReasonCode.IDEMPOTENCY_COLLISION.code());
         assertThat(ServiceBusEmulatorTestSupport.peekFor(messageId, SubQueue.NONE)).isEmpty();
+    }
+
+    // --- the sequence number (spec 007-replay-by-sequence-number) ---------------------------------
+
+    /**
+     * The other broker fact the FR-005 heuristic and FR-004's replay decision both turn on,
+     * observed against the real emulator rather than assumed from the SDK's documentation: a
+     * redelivery of the same stored message — an abandon, here — never changes its sequence number.
+     * It is the broker's identity for the <em>send</em>, not for each delivery attempt of it.
+     */
+    @Test
+    @DisplayName("the sequence number is unchanged across an abandoned redelivery "
+            + "(spec 007-replay-by-sequence-number)")
+    void should_keep_the_same_sequence_number_across_an_abandoned_redelivery() {
+        consumeWith(new GuardDecision.Abandon(ReasonCode.CLAIM_NOT_ACQUIRED));
+
+        final String messageId = sendRequest();
+
+        await().atMost(SETTLED_WITHIN).pollInterval(POLL)
+                .until(() -> deliveriesOf(messageId).size() >= 2);
+        final List<Long> sequenceNumbers =
+                deliveriesOf(messageId).stream().map(Delivery::sequenceNumber).toList();
+        assertThat(sequenceNumbers.get(1)).isEqualTo(sequenceNumbers.get(0));
+    }
+
+    /**
+     * The other half of the same fact: a re-send the broker accepts as a <em>new</em> message —
+     * exactly what the Azure portal's dead-letter "Re-send" does — gets a sequence number of its
+     * own, whatever {@code messageId} it carries (FR-004, the defect this feature fixes).
+     *
+     * <p>Sent under a <strong>fresh</strong> {@code messageId} here, deliberately — re-sending the
+     * dead-lettered body under its <em>original</em> {@code messageId} immediately afterwards would
+     * fall inside the queue's own duplicate-detection window
+     * (`docker/servicebus-emulator/config.json`) and the broker would silently discard it before
+     * this service ever saw it, which is the separate, already-documented edge case ("Re-send
+     * inside the duplicate-detection window", {@code spec.md}; proved end to end by the dedicated
+     * {@code UnchangedResendRecoveryIT}). This test is about the broker's sequence-number assignment
+     * on an <em>accepted</em> send, not about the window; a fresh identity is what gets it accepted
+     * immediately, and the point — a new accepted enqueue gets a new sequence number, independent of
+     * what {@code messageId} it carries — is proven exactly the same way.
+     */
+    @Test
+    @DisplayName("a re-send accepted as a new message is assigned a new sequence number "
+            + "(spec 007-replay-by-sequence-number)")
+    void should_assign_a_new_sequence_number_to_an_accepted_resend() {
+        consumeWith(new GuardDecision.DeadLetter(
+                DeadLetterReason.COLLISION, ReasonCode.IDEMPOTENCY_COLLISION));
+        final String messageId = sendRequest();
+        await().atMost(SETTLED_WITHIN).pollInterval(POLL).until(() -> ServiceBusEmulatorTestSupport
+                .peekFor(messageId, SubQueue.DEAD_LETTER_QUEUE).isPresent());
+        final ServiceBusReceivedMessage parked = ServiceBusEmulatorTestSupport
+                .peekFor(messageId, SubQueue.DEAD_LETTER_QUEUE).orElseThrow();
+        final long parkedSequenceNumber = parked.getSequenceNumber();
+
+        final String resendMessageId = "RESULTS:" + UUID.randomUUID();
+        try (ServiceBusSenderClient sender = clients().sender()
+                .queueName(ServiceBusEmulatorTestSupport.QUEUE_NAME)
+                .buildClient()) {
+            sender.sendMessage(new ServiceBusMessage(parked.getBody()).setMessageId(resendMessageId));
+        }
+
+        await().atMost(SETTLED_WITHIN).pollInterval(POLL)
+                .until(() -> !deliveriesOf(resendMessageId).isEmpty());
+        final long resendSequenceNumber = deliveriesOf(resendMessageId).getFirst().sequenceNumber();
+        assertThat(resendSequenceNumber)
+                .as("the broker accepted and enqueued this send, so it is a new delivery with a new "
+                        + "sequence number")
+                .isNotEqualTo(parkedSequenceNumber);
     }
 }

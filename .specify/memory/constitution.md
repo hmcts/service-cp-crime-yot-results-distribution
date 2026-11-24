@@ -1,6 +1,43 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 5.2.0 → 5.3.0
+Bump rationale: MINOR - the replay rule changes (2026-11-19). 5.2.0 required
+                replay tooling to mint a fresh `messageId`, and the guard
+                told a resubmission from the parking delivery coming round
+                again by that `messageId`. Support's dead-letter Re-send in
+                the Azure portal keeps the deterministic `source:requestId`,
+                and this service offers no tooling that mints another (005
+                gives the operations API no replay endpoint), so a parked
+                request could not be recovered at all. A replay is now
+                decided by the broker's own sequence number: a support
+                resubmission MAY re-send the dead-lettered message unchanged.
+                Materially expanded guidance on an existing bullet - MINOR,
+                not MAJOR: a resubmission under a fresh `messageId` keeps
+                working exactly as before, so existing practice is relaxed,
+                not invalidated.
+
+Proposed in: specs/007-replay-by-sequence-number/spec.md, "Constitution
+amendment proposal". Amended with that specification, ahead of the code: until
+007 is implemented the service still applies the 5.2.0 rule, and a same-id
+Re-send is still re-parked. FR-013 of 007 pins the new rule once it lands.
+
+Modified sections (this amendment): Technology Stack - the Messaging bullet's
+replay sub-bullet; Increments - a 007 entry. Nothing else; Principles I-VIII
+untouched.
+
+Templates / guidance reviewed:
+  - .claude/rules/design_rules.md, .claude/rules/technical-rules.md and the
+    .claude/agents/ definitions that state the fresh-`messageId` rule
+                                             ⚠ PENDING - updated in 007's
+      implementation, contract first, as its documents list sets out; until
+      then this document wins where they disagree.
+  - .specify/templates/*                     ✅ compatible - no change.
+  - Step 3 (`/speckit-analyze` on in-flight specs): 006, the only other
+    increment not marked complete, concerns the cutover flag's connection
+    string and states no replay rule - unaffected.
+
+Previous amendment (5.1.0 → 5.2.0):
 Version change: 5.1.0 → 5.2.0
 Bump rationale: MINOR - the flag's connection string changes source
                 (2026-09-30). 5.1.0 named the Key Vault secret
@@ -1261,8 +1298,15 @@ them read it the same way they read everything else.
   `ServiceBusProcessorClient`.
   - Peek-lock, explicit settlement, **`maxDeliveryCount` 5**.
   - Broker **duplicate detection on**; `messageId` = `source:requestId`.
-  - **Replay tooling MUST always mint a fresh `messageId`** — deliberate
-    replay must not be silently discarded by duplicate detection.
+  - **A replay is decided by the broker's own sequence number, never by
+    `messageId`.** The guard identifies the delivery that parked a request by
+    the sequence number the broker assigned it on accept, so a support
+    resubmission MAY re-send the dead-lettered message unchanged, `messageId`
+    included. A fresh `messageId` is no longer required by this service; it
+    remains the way to re-send *inside* the broker's duplicate-detection
+    window, where a same-`messageId` re-send is silently discarded by the
+    broker whatever this service does. Normal producer publishing keeps the
+    deterministic `messageId`.
   - `maxConcurrentCalls` starts at 2, matching the AKS fleet's pinned Durable
     Functions throttle.
 - **Idempotency**: PostgreSQL processed-log — `processed_request` keyed
@@ -1459,6 +1503,14 @@ them read it the same way they read everything else.
   fail-closed. The string is refused at start-up wherever it is set and cannot
   be parsed, and is never quoted in a refusal, a log line or a rendering of the
   settings. **No `doc/DEFECT-FIXES.md` row is added or amended.**
+- **007 "replay-by-sequence-number" — specified.** A parked (`FAILED`)
+  request is replayed by re-sending its dead-lettered message, `messageId`
+  unchanged: the guard tells the resubmission from the parking delivery by the
+  broker's sequence number, replay is a compare-and-set on the failure it
+  observed, a request parked before the change is judged by first delivery and
+  enqueue time, and a re-park reports the request's recorded failure reason
+  rather than `DELIVERY_LIMIT_EXHAUSTED`. Transport recovery only - no register
+  content, recipient, batching or rendering changes.
 
 ## Development Workflow & Quality Gates
 
@@ -1537,4 +1589,4 @@ retained as quick-reference material and MUST be kept in sync.
   needs the same written sign-off the old parity regime demanded, before
   merge. C-numbers are stable: renumber never, append only.
 
-**Version**: 5.2.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-30
+**Version**: 5.3.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-11-19

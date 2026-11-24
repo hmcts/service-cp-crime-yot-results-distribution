@@ -1,5 +1,6 @@
 package uk.gov.hmcts.cp.yotresultsdistribution.application;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import uk.gov.hmcts.cp.yotresultsdistribution.domain.CompletionReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.DeadLetterReason;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.DeliveryIdentity;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.DistributionCommand;
+import uk.gov.hmcts.cp.yotresultsdistribution.domain.FailureCategoryMapping;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.GuardDecision;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.ProcessedRequestRecord;
 import uk.gov.hmcts.cp.yotresultsdistribution.domain.ReasonCode;
@@ -33,8 +35,19 @@ import uk.gov.hmcts.cp.yotresultsdistribution.persistence.ProcessedRequestReposi
  *     new request                      -&gt; Run         (inserted, claimed, attempts = 1)
  *     same key, different request      -&gt; DeadLetter  (collision; the row is not touched)
  *     COMPLETED                        -&gt; Complete    (acknowledged, nothing re-run)
- *     FAILED, same messageId as parked -&gt; DeadLetter  (an earlier park that did not settle)
- *     FAILED, fresh messageId          -&gt; Run         (a deliberate replay, audit note written)
+ *     FAILED, exact row, same sequence -&gt; DeadLetter  (an earlier park that did not settle,
+ *                                                       whatever its messageId - spec
+ *                                                       007-replay-by-sequence-number, FR-003/FR-004;
+ *                                                       the request's own reason and category,
+ *                                                       never a generic one - FR-009/FR-010)
+ *     FAILED, exact row, different seq -&gt; Run         (a deliberate replay, audit note written,
+ *                                                       whatever its messageId - FR-004)
+ *     FAILED, legacy/stale row,        -&gt; Run         (the two-condition heuristic admits it:
+ *       count 0, enqueued past margin               first delivery, enqueued well after parking
+ *                                                       - FR-005)
+ *     FAILED, legacy/stale row,        -&gt; DeadLetter  (either condition fails, or no enqueue
+ *       otherwise                                      time at all - FR-005; the request's own
+ *                                                       reason and category, as above - FR-009/FR-010)
  *     RECEIVED / RETRYING, claim free  -&gt; Run         (the previous claim has expired)
  *     RECEIVED / RETRYING, claim held  -&gt; Abandon     (another runner has it; broker retries)
  *
@@ -84,18 +97,23 @@ public class IdempotencyGuard {
 
     private final ProcessedRequestRepository repository;
     private final ProcessingMetrics metrics;
+    private final Duration legacyMargin;
 
     /**
      * Creates the guard over the processed-request log.
      *
-     * @param repository the processed log's statements
-     * @param metrics    the instruments a discarded outcome is counted on
+     * @param repository   the processed log's statements
+     * @param metrics      the instruments a discarded outcome is counted on
+     * @param legacyMargin the safety margin a legacy or stale row's enqueue-time test is measured
+     *                     against (spec 007-replay-by-sequence-number, FR-005)
      */
     public IdempotencyGuard(
             final ProcessedRequestRepository repository,
-            final ProcessingMetrics metrics) {
+            final ProcessingMetrics metrics,
+            final Duration legacyMargin) {
         this.repository = repository;
         this.metrics = metrics;
+        this.legacyMargin = legacyMargin;
     }
 
     /**
@@ -113,7 +131,7 @@ public class IdempotencyGuard {
         final String fingerprint = RequestFingerprint.of(command);
         final RunClaim claim = new RunClaim(
                 command.source(), command.requestId(), delivery.claimOwner(), UUID.randomUUID(),
-                delivery.messageId());
+                delivery.messageId(), delivery.sequenceNumber());
         final GuardDecision decision;
 
         if (repository.insertNew(command, fingerprint, claim)) {
@@ -124,7 +142,7 @@ public class IdempotencyGuard {
             final Optional<ProcessedRequestRecord> found =
                     repository.read(command.source(), command.requestId());
             decision = found
-                    .map(record -> branch(record, command, fingerprint, claim))
+                    .map(record -> branch(record, command, fingerprint, claim, delivery))
                     .orElseGet(() -> recordAbsent(command));
         }
         return decision;
@@ -196,10 +214,11 @@ public class IdempotencyGuard {
      * {@code DELIVERY_LIMIT_EXHAUSTED} — a reason that tells support the service ran out of tries
      * rather than that the register was unusable.
      *
-     * <p>The row is written by the same statement an exhaustion uses, so the identity of this
-     * delivery is stamped onto it: a redelivery of the same message re-parks without re-running,
-     * while a deliberate resubmission under a fresh identity replays. That is the behaviour a parked
-     * request already has, and a non-transient failure is not a different kind of parking.
+     * <p>The row is written by the same statement an exhaustion uses, so the identity and the broker
+     * sequence number of this delivery are stamped onto it: a redelivery carrying the same sequence
+     * number re-parks without re-running, while a different one replays, whatever its
+     * {@code messageId} (spec 007-replay-by-sequence-number, FR-003/FR-004). That is the behaviour a
+     * parked request already has, and a non-transient failure is not a different kind of parking.
      *
      * @param claim  the claim the run was made under
      * @param reason the bounded reason the run failed for
@@ -207,7 +226,7 @@ public class IdempotencyGuard {
      */
     public GuardDecision recordNonTransientFailure(final RunClaim claim, final ReasonCode reason) {
         final GuardDecision decision;
-        if (repository.recordFailed(claim, reason.code())) {
+        if (repository.recordFailed(claim, reason.code(), DeadLetterReason.NON_TRANSIENT.name())) {
             LOG.info("Request parked; no redelivery could change it. source={} requestId={} reason={}",
                     claim.source(), claim.requestId(), reason.code());
             decision = new GuardDecision.DeadLetter(DeadLetterReason.NON_TRANSIENT, reason);
@@ -231,7 +250,7 @@ public class IdempotencyGuard {
      */
     public GuardDecision recordExhaustion(final RunClaim claim, final ReasonCode reason) {
         final GuardDecision decision;
-        if (repository.recordFailed(claim, reason.code())) {
+        if (repository.recordFailed(claim, reason.code(), DeadLetterReason.EXHAUSTED.name())) {
             LOG.info("Request parked after its final permitted delivery. source={} requestId={} reason={}",
                     claim.source(), claim.requestId(), reason.code());
             decision = new GuardDecision.DeadLetter(
@@ -249,11 +268,12 @@ public class IdempotencyGuard {
             final ProcessedRequestRecord record,
             final DistributionCommand command,
             final String fingerprint,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
 
         final GuardDecision decision;
         if (fingerprint.equals(record.fingerprint())) {
-            decision = byState(record, command, claim);
+            decision = byState(record, command, claim, delivery);
         } else {
             // The key has been reused for a different request. The record is not written to at all:
             // absorbing this delivery would silently drop one of the two hearings' registers.
@@ -270,7 +290,8 @@ public class IdempotencyGuard {
     private GuardDecision byState(
             final ProcessedRequestRecord record,
             final DistributionCommand command,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
 
         return switch (record.status()) {
             case COMPLETED -> {
@@ -278,40 +299,216 @@ public class IdempotencyGuard {
                         command.source(), command.requestId());
                 yield new GuardDecision.Complete(ReasonCode.ALREADY_COMPLETED);
             }
-            case FAILED -> replayOrPark(record, claim);
+            case FAILED -> replayOrPark(record, claim, delivery);
             case RECEIVED, RETRYING -> claimOrHandBack(claim);
         };
     }
 
     /**
-     * A parked request, decided by which identity is delivering it.
+     * A parked request, decided by which broker sequence number is delivering it (spec
+     * 007-replay-by-sequence-number, FR-003/FR-004) — for a row this version parked itself.
      *
-     * <p>The same identity that exhausted the retries is dead-lettering that did not settle: nothing
-     * runs and the parking is attempted again. Any other identity is a deliberate resubmission —
-     * which is the supported way to recover a dead-lettered court register, the replay tooling
-     * minting a fresh {@code messageId} and keeping the original {@code requestId}.
+     * <p>"This version parked itself" is {@link #isExactParking}: the row's recorded
+     * {@code parking_attempt_count} still equals its current {@code attempts}, so
+     * {@code parking_sequence_number} describes the <em>current</em> {@code FAILED} generation, not
+     * one an older consumer has since written over without knowing these columns exist (FR-005a).
+     * The same sequence number is dead-lettering that did not settle: nothing runs and the parking
+     * is attempted again, under the request's own recorded reason and category (FR-009), never a
+     * generic one. A different sequence number is a deliberate resubmission — the supported way to
+     * recover a dead-lettered court register — admitted by a compare-and-set against the exact
+     * failure generation observed (FR-006), whatever the delivery's {@code messageId} is (FR-004).
+     *
+     * <p>A row with no recorded parking sequence number, or a stale one (FR-005a), has no exact
+     * signal to decide by and falls to the legacy/stale heuristic instead (FR-005).
      */
     private GuardDecision replayOrPark(
             final ProcessedRequestRecord record,
-            final RunClaim claim) {
+            final RunClaim claim,
+            final DeliveryIdentity delivery) {
+        return isExactParking(record)
+                ? replayOrParkExact(record, claim)
+                : replayOrParkLegacy(record, claim, delivery);
+    }
 
+    /**
+     * Whether the row's recorded parking fields describe the <em>current</em> {@code FAILED}
+     * generation, rather than one an older consumer has since re-parked without knowing these
+     * columns exist (FR-005a).
+     */
+    private static boolean isExactParking(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() != null
+                && Objects.equals(record.parkingAttemptCount(), record.attempts());
+    }
+
+    /**
+     * The new rule: decided by sequence-number equality alone (FR-003/FR-004). The re-park branch
+     * reports the request's own recorded or mapped reason and category (FR-009/FR-010), never the
+     * generic {@code exhausted / DELIVERY_LIMIT_EXHAUSTED} — see {@link #reParkDecision}.
+     */
+    private GuardDecision replayOrParkExact(
+            final ProcessedRequestRecord record, final RunClaim claim) {
         final GuardDecision decision;
-        if (Objects.equals(record.exhaustedMessageId(), claim.messageId())) {
-            LOG.warn("Redelivery of the identity that exhausted the retries; re-parking. "
-                    + "source={} requestId={}", claim.source(), claim.requestId());
-            decision = new GuardDecision.DeadLetter(
-                    DeadLetterReason.EXHAUSTED, ReasonCode.DELIVERY_LIMIT_EXHAUSTED);
-        } else if (repository.replayFailed(claim, replayNote(record))) {
-            LOG.info("Parked request replayed under a fresh identity. source={} requestId={}",
-                    claim.source(), claim.requestId());
+        if (record.parkingSequenceNumber() == claim.sequenceNumber()) {
+            LOG.warn("Delivery carries the sequence number that parked this request; re-parking. "
+                    + "source={} requestId={} sequenceNumber={}",
+                    claim.source(), claim.requestId(), claim.sequenceNumber());
+            decision = reParkDecision(record, claim, trustedCategoryOf(record));
+        } else if (repository.replayFailed(
+                claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
+            LOG.info("Parked request replayed. source={} requestId={} parkedSequenceNumber={} "
+                    + "replayingSequenceNumber={}",
+                    claim.source(), claim.requestId(), record.parkingSequenceNumber(),
+                    claim.sequenceNumber());
             decision = new GuardDecision.Run(claim);
         } else {
-            // Not "the same identity" — that is decided on the read. The record moved underneath us.
+            // Not "the same sequence number" — that is decided on the read above. The record moved
+            // underneath us: a concurrent replay won, or the record is no longer parked.
             LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
                     claim.source(), claim.requestId());
             decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
         }
         return decision;
+    }
+
+    /**
+     * A row with no exact signal to decide by — parked before this feature shipped, or re-parked by
+     * an older consumer mid-rollout without knowing the parking triple exists (FR-005a) — decided by
+     * FR-005's two-condition heuristic: a first delivery (the broker's count is zero-based) enqueued
+     * later than this row's own {@code updated_at} — which, for a {@code FAILED} row nothing else
+     * touches, is the parking time — by more than the configured {@link #legacyMargin} is treated as
+     * a deliberate resubmission and replayed. Anything that fails either condition, including a
+     * delivery with no enqueue time at all, is re-parked.
+     *
+     * <p>Neither condition is proof on its own, and the residual false-replay risk this accepts is
+     * deliberate: the broker does not increment the delivery count when a message is released by a
+     * closed connection — which this service causes deliberately on every stop and whenever it
+     * suspends intake during a processed-log outage — and the enqueue-time test compares broker time
+     * with database time. A false replay needs both a release without an increment <strong>and</strong>
+     * a broker clock ahead of the database clock by more than the margin.
+     *
+     * <p>{@code record.parkingSequenceNumber()}'s own value — present but stale, or absent — plays no
+     * part in this decision; only the compare-and-set's null-safe match against whatever is actually
+     * stored cares what it is. The re-park branch reports the request's own recorded or mapped
+     * reason and category (FR-009/FR-010), never the generic
+     * {@code exhausted / DELIVERY_LIMIT_EXHAUSTED} — see {@link #reParkDecision}.
+     */
+    private GuardDecision replayOrParkLegacy(
+            final ProcessedRequestRecord record, final RunClaim claim, final DeliveryIdentity delivery) {
+        final GuardDecision decision;
+        if (isLegacyResubmission(record, delivery)) {
+            if (repository.replayFailed(
+                    claim, record.attempts(), record.parkingSequenceNumber(), replayNote(record))) {
+                LOG.info("Parked request replayed under the legacy heuristic. source={} requestId={} "
+                        + "parkingGeneration={} parkedSequenceNumber={} replayingSequenceNumber={} "
+                        + "deliveryCount={} enqueueTime={}",
+                        claim.source(), claim.requestId(), parkingGenerationLabel(record),
+                        parkedSequenceNumberOrNone(record), claim.sequenceNumber(),
+                        delivery.deliveryCount(), delivery.enqueueTime());
+                decision = new GuardDecision.Run(claim);
+            } else {
+                LOG.warn("Replay not admitted; the record changed under it. source={} requestId={}",
+                        claim.source(), claim.requestId());
+                decision = new GuardDecision.Abandon(ReasonCode.REPLAY_NOT_ADMITTED);
+            }
+        } else {
+            LOG.warn("Legacy heuristic refused; re-parking. source={} requestId={} "
+                    + "parkingGeneration={} parkedSequenceNumber={} deliveredSequenceNumber={} "
+                    + "deliveryCount={} enqueueTime={}",
+                    claim.source(), claim.requestId(), parkingGenerationLabel(record),
+                    parkedSequenceNumberOrNone(record), claim.sequenceNumber(),
+                    delivery.deliveryCount(), delivery.enqueueTime());
+            // No trusted category, ever — a legacy/stale row's own parking_category column, even
+            // where physically non-null, describes a parking this decision has already judged not
+            // to be the current one (isExactParking returned false to route here at all); FR-005a
+            // says to decide as though it were absent, not merely as though it were unwritten.
+            decision = reParkDecision(record, claim, Optional.empty());
+        }
+        return decision;
+    }
+
+    /**
+     * FR-008's "or {@code none}": this branch is reached only when {@link #isExactParking} answered
+     * false, which a {@code null} {@code parking_sequence_number} alone is enough to cause — so a
+     * {@code null} here always means the column is genuinely empty, never that this method chose not
+     * to read it.
+     */
+    private static String parkedSequenceNumberOrNone(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() == null
+                ? "none" : String.valueOf(record.parkingSequenceNumber());
+    }
+
+    /**
+     * FR-005a's two ways a row ends up in this branch, named rather than conflated: {@code absent} —
+     * no parking triple was ever recorded (a row from before this feature, or one a legacy consumer
+     * wrote under the pre-this-feature columns alone) — and {@code stale} — a triple was recorded,
+     * by this version or a newer one, but {@code parking_attempt_count} no longer matches
+     * {@code attempts}, so {@link #isExactParking} refused it. Support reading the log cannot tell
+     * these apart from {@link #parkedSequenceNumberOrNone} alone, since a stale triple still prints a
+     * real number.
+     */
+    private static String parkingGenerationLabel(final ProcessedRequestRecord record) {
+        return record.parkingSequenceNumber() == null ? "absent" : "stale";
+    }
+
+    /**
+     * The stored {@code parking_category}, as an exact row's re-park branch alone may trust it
+     * (FR-010); a legacy/stale row never calls this at all (FR-005a) and passes
+     * {@link Optional#empty()} directly instead.
+     */
+    private static Optional<DeadLetterReason> trustedCategoryOf(final ProcessedRequestRecord record) {
+        return Optional.ofNullable(record.parkingCategory()).map(DeadLetterReason::valueOf);
+    }
+
+    /**
+     * A re-park's dead-letter reason and category: the request's own recorded or mapped values,
+     * never the generic {@code exhausted / DELIVERY_LIMIT_EXHAUSTED} (spec 007-replay-by-sequence-number,
+     * FR-009/FR-010). Shared by both re-park branches — the exact row's same-sequence case and the
+     * legacy/stale row's heuristic refusal — because the reason a request failed does not depend on
+     * which decision path re-parked it; what differs between the two callers is {@code
+     * trustedCategory}, since only the exact branch may trust what {@code parking_category} says.
+     *
+     * <p>A present {@code trustedCategory} is used exactly as given and never reconstructed from
+     * the reason code (FR-010); an absent one — the legacy/stale branch always passes one, the exact
+     * branch only when the column itself is empty — falls to {@link FailureCategoryMapping}. A
+     * stored {@code failure_reason} that does not parse to a known {@link ReasonCode} — missing,
+     * or written by a version that does not exist yet — dead-letters as
+     * {@code exhausted / UNEXPECTED_FAILURE} rather than propagate text this service did not write:
+     * the sanitised log line below names the anomaly by identifiers only, never the unrecognised
+     * text itself, and nothing here throws (FR-009).
+     *
+     * @param trustedCategory the stored {@code parking_category}, if and only if the caller has
+     *                        established it still describes the current {@code FAILED} generation;
+     *                        {@link Optional#empty()} otherwise, however the column itself reads
+     */
+    private GuardDecision reParkDecision(
+            final ProcessedRequestRecord record, final RunClaim claim,
+            final Optional<DeadLetterReason> trustedCategory) {
+        final Optional<ReasonCode> reason = ReasonCode.fromCode(record.failureReason());
+        final GuardDecision decision;
+        if (reason.isPresent()) {
+            final DeadLetterReason category = trustedCategory
+                    .orElseGet(() -> FailureCategoryMapping.categoryFor(record.failureReason()));
+            decision = new GuardDecision.DeadLetter(category, reason.get());
+        } else {
+            LOG.error("Re-park found a stored failure reason this version cannot classify; "
+                    + "dead-lettering as exhausted/UNEXPECTED_FAILURE. source={} requestId={}",
+                    claim.source(), claim.requestId());
+            decision = new GuardDecision.DeadLetter(
+                    DeadLetterReason.EXHAUSTED, ReasonCode.UNEXPECTED_FAILURE);
+        }
+        return decision;
+    }
+
+    /**
+     * FR-005's own two conditions, both required: a first delivery, enqueued strictly later than the
+     * parking time plus the margin. The boundary is exclusive — an enqueue time exactly equal to
+     * {@code updated_at + legacyMargin} re-parks, not replays.
+     */
+    private boolean isLegacyResubmission(
+            final ProcessedRequestRecord record, final DeliveryIdentity delivery) {
+        return delivery.deliveryCount() == 0
+                && delivery.enqueueTime() != null
+                && delivery.enqueueTime().isAfter(record.updatedAt().plus(legacyMargin));
     }
 
     /**
@@ -338,9 +535,12 @@ public class IdempotencyGuard {
      * otherwise leave, and a rise in them means runs are outliving their leases.
      */
     private GuardDecision rejectStaleRunner(final RunClaim claim) {
+        // claim.owner() carries the broker's own lock token (never logged, technical-rules.md) -
+        // source and requestId are enough to correlate which request lost its claim; which runner
+        // held it is in the row itself for anyone who needs to go further.
         LOG.warn("Outcome discarded: this runner's claim was reclaimed while it worked. "
-                        + "source={} requestId={} owner={}",
-                claim.source(), claim.requestId(), claim.owner());
+                        + "source={} requestId={}",
+                claim.source(), claim.requestId());
         metrics.staleRunnerRejected();
         return new GuardDecision.Abandon(ReasonCode.STALE_RUNNER);
     }
