@@ -427,14 +427,18 @@ runs `StressSimulation` then `CapacitySimulation` and then `verify-outputs.sh`, 
 | `repo_branch` | the branch whose Gatling sources and scripts are cloned (required, e.g. `main`) |
 | `context` | `yotresultsdistribution-service` (queue `perf.yotresultsdistribution.requests`, namespace `ns-vld-yotresultsdistribution-service-<buildId>`) |
 | `healthPath` | `/actuator/health/readiness`: the pipeline purges the queue before deploy, so the aggregate's `servicebus` component reads DOWN once its 60s start-up grace passes with no delivery; only the readiness group is a reliable gate |
-| `datasourceSecretName` | the `kv-mdv-ccm-01` secret this service's validation values mount as its database password |
+| `datasourceSecretName` | `CP-VALIDATION-YOT-DATASOURCE-PASSWORD`, the `kv-mdv-ccm-01` secret the MDV values mount as the database password |
 | `imageTag` | the image under test |
+| `maxE2eP95Ms` / `maxE2eP99Ms` | `5000` / `10000` to start; tighten after a baseline run |
+| `aksDeployBranch` | `main` (the branch carrying the MDV values below) |
 
-It needs, outside this repo: the `perf.yotresultsdistribution.requests` queue in `sbdevccm01`, and
-a `yotresultsdistribution_service` entry in cpp-aks-deploy's validation stack whose values point the
-consumer at that queue (`YOTRESULTSDISTRIBUTION_SERVICEBUS_QUEUENAME`), set `RESULTS_BASE_URL`,
-`REFERENCEDATA_BASE_URL` and Redis to the stack's WireMock and `validation-redis`, and leave the
-generation leg off.
+It needs, outside this repo: the `perf.yotresultsdistribution.requests` queue in `sbdevccm01`
+(hmcts/cpp-terraform-azurerm-servicebus#35, applied before the first run), and the
+`yotresultsdistribution-service` entry in cpp-aks-deploy's validation stack (hmcts/cpp-aks-deploy#1013),
+whose MDV values point the consumer at that queue (`YOTRESULTSDISTRIBUTION_SERVICEBUS_QUEUENAME`), set
+`RESULTS_BASE_URL`, `REFERENCEDATA_BASE_URL` and Redis to the stack's WireMock and `validation-redis`,
+map `CP-NFT-SYSTEM-USER-ID` to `YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID`, and leave the generation leg
+off.
 
 Before any load both simulations check the readiness group (logging the aggregate health) and open
 a producer on the queue, so a rejected credential aborts the run instead of failing every publish.
