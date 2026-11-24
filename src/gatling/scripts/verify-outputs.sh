@@ -8,8 +8,9 @@
 # register rows of `processed_output` (one per recorded hearing). Read-only: nothing is written.
 #
 # Correlation: every published message has a requestId and a hearingId. A duplicate reuses both; a
-# re-share reuses the hearingId under a fresh requestId. The hearing-payload stub and the Redis seed
-# echo the hearingId back as hearing.id, so each recorded register row carries it. Every stubbed
+# re-share reuses the hearingId under a fresh requestId. The hearing payload the service fetches
+# carries it as hearing.id — seeded into Redis for cache hits, or a per-hearing WireMock stub
+# registered by Gatling for the query fallback — so each recorded register row carries it. Every stubbed
 # hearing has a surviving youth defendant and matches the stubbed youth court-register
 # subscription, so the one correct outcome for every unique request is COMPLETED with
 # completion_reason = recorded and one register row of its own. The stubbed payload's sharedTime is

@@ -8,10 +8,10 @@ import java.util.UUID;
  * output verifier correlates on.
  *
  * <p>{@code requestId} is the correlation key into {@code processed_request}, and {@code hearingId}
- * into the register rows of {@code processed_output}: the WireMock hearing-payload stub (and the
- * Redis seed) echo it back as {@code hearing.id}, so the register recorded for this message carries
- * it. A duplicate is the same instance republished — same requestId, same hearingId — and must
- * record nothing further.
+ * into the register rows of {@code processed_output}: the hearing payload the service fetches for
+ * it — from Redis, or from its own WireMock stub on the query fallback — carries it as
+ * {@code hearing.id}, so the register recorded for this message carries it. A duplicate is the
+ * same instance republished — same requestId, same hearingId — and must record nothing further.
  *
  * @param requestId the message's requestId (the service's idempotency key with {@code source})
  * @param hearingId the message's hearingId (the register row's correlation key)

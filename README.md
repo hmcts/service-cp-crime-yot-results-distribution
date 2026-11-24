@@ -398,11 +398,25 @@ ASB_EMULATOR_KEY=SAS_KEY_VALUE REDIS_URI=redis://localhost:6379 \
 In a pipeline, `src/gatling/scripts/setup-wiremock-stubs.sh` installs the stubs through
 `kubectl exec` and Gatling runs with `-Dgatling.wiremockViaScript=true`, which the build turns on
 by itself wherever `TF_BUILD` is set (every Azure DevOps agent); locally, a stub that cannot be
-installed aborts the run. `verify-outputs.sh` reaches Postgres through `NAMESPACE` alone,
-selecting the validation stack's `postgres` release (override with `POSTGRES_POD_SELECTOR` /
-`POSTGRES_CONTAINER`), and connects as the chart's `postgres` admin with the password the pod
-already holds, read inside the pod so it never reaches the agent. PMD and Checkstyle do not run
-on the `gatling` source set.
+installed aborts the run.
+
+The validation WireMock (a WAR in WildFly) does not apply response templating, so the shared
+hearing-payload mapping cannot echo a hearingId there. With `-Dgatling.wiremockAdminUrl` (the
+pipeline's port-forward to the WireMock pod) Gatling registers an exact-path stub for each hearing
+it leaves out of Redis before publishing it, tagged `metadata.nft=fallback-hearing`, and removes
+them when the run ends; the script removes any a killed run left behind. A pipeline run that would
+send hearings down the fallback without that property aborts before load. The script requires
+exactly one running WireMock pod, and its preflight registers a probe stub of the same shape and
+fetches it through the service's own `RESULTS_BASE_URL`, read from the `SERVICE_DEPLOYMENT`
+Deployment (default `yotresultsdistribution-service`). Stub registration and Redis seeding run on
+the virtual user's thread, so at stress rates compare the achieved injection rate with the target.
+
+Before any load both simulations check the readiness group (logging the aggregate health) and open
+a producer on the queue, so a rejected credential aborts the run instead of failing every publish.
+`verify-outputs.sh` reaches Postgres through `NAMESPACE` alone, selecting the validation stack's
+`postgres` release (override with `POSTGRES_POD_SELECTOR` / `POSTGRES_CONTAINER`), and connects as
+the chart's `postgres` admin with the password the pod already holds, read inside the pod so it
+never reaches the agent. PMD and Checkstyle do not run on the `gatling` source set.
 
 ### Contribute to this repository
 

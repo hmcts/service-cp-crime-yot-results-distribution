@@ -12,9 +12,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link PublishManifest} only once the send has succeeded.
  *
  * <p>When an ephemeral Redis URI is configured, the claim-check payload is seeded before the send
- * and before the timestamp. The verifier's publish-to-record latency includes the broker publish but
- * not fixture setup. A failed send exits the virtual user before the manifest write: a message that
- * never reached the queue must not be counted as a request that produced no output.
+ * and before the timestamp; a hearing left out of Redis gets its own query-fallback WireMock stub
+ * instead ({@link FallbackHearingStubs}). The verifier's publish-to-record latency includes the
+ * broker publish but not fixture setup. A failed send exits the virtual user before the manifest
+ * write: a message that never reached the queue must not be counted as a request that produced no
+ * output.
+ *
+ * <p>Fixture setup is synchronous on the virtual user's thread — a Redis {@code SETEX}, or for a new
+ * fallback hearing a WireMock admin POST through the pipeline's port-forward. At stress rates that
+ * can hold the achieved injection rate below the target without being flagged; compare the
+ * report's achieved rate with the target, or run with {@code gatling.redisHitPercent=100} for pure
+ * load.
  *
  * <p>The body is sent as a JMS {@code BytesMessage}, which Qpid JMS encodes as an AMQP {@code data}
  * section — the shape the producer's Azure SDK sends, and the only one
@@ -34,7 +42,9 @@ final class PublishScenarios {
         return scenario(scenarioName)
                 .exec(session -> {
                     final PublishedMessage message = MessageBuilder.next();
-                    RedisPayloadSeeder.seed(message);
+                    if (!RedisPayloadSeeder.seed(message)) {
+                        FallbackHearingStubs.register(message);
+                    }
                     return session.set("message", message)
                             .set("payload", message.body().getBytes(StandardCharsets.UTF_8))
                             .set("publishedAt", System.currentTimeMillis());

@@ -9,10 +9,6 @@ import static io.gatling.javaapi.jms.JmsDsl.jms;
 import io.gatling.javaapi.core.ScenarioBuilder;
 import io.gatling.javaapi.core.Simulation;
 import io.gatling.javaapi.jms.JmsProtocolBuilder;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -88,43 +84,20 @@ public class CapacitySimulation extends Simulation {
 
     @Override
     public void before() {
-        LOG.info("Sanity check: verifying service is healthy at {}", ACTUATOR_URL);
-        try (HttpClient client = HttpClient.newHttpClient()) {
-            HttpRequest request = HttpRequest.newBuilder()
-                    // Readiness, not the aggregate: the Service Bus component reports DOWN on an idle
-                    // queue by design (no round trip inside its staleness window), and is kept out
-                    // of readiness for that reason, so before any load the aggregate reads DOWN
-                    .uri(URI.create(ACTUATOR_URL + "/actuator/health/readiness"))
-                    .GET()
-                    .build();
-            HttpResponse<String> response = client.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                throw new RuntimeException(
-                        "ABORTING: Service health check returned " + response.statusCode()
-                        + ". Is the service running?");
-            }
-            String body = response.body();
-            if (body.contains("\"status\":\"DOWN\"")) {
-                throw new RuntimeException(
-                        "ABORTING: Service reports not ready. Check database connectivity and intake start-up.");
-            }
-            LOG.info("Health check passed (HTTP {}).", response.statusCode());
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("Health check failed: " + e.getMessage(), e);
-        }
+        ServiceReadiness.verify(ACTUATOR_URL);
+        ServiceBusConnectionFactory.verifyCanSend(QUEUE_NAME);
 
         LOG.info("Configuring WireMock stubs at {}", WIREMOCK_URL);
         WireMockStubs.configure(WIREMOCK_URL);
         RedisPayloadSeeder.verifyReady();
+        FallbackHearingStubs.verifyReady();
     }
 
     @Override
     public void after() {
         PublishManifest.close();
         RedisPayloadSeeder.close();
+        FallbackHearingStubs.close();
         LOG.info("Simulation complete. Published {} messages, recorded in {}. Output completeness "
                         + "and publish-to-record latency are verified by "
                         + "src/gatling/scripts/verify-outputs.sh once the pipeline drains.",

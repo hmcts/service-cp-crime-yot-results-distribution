@@ -195,7 +195,9 @@ gatling {
   if (System.getProperty('gatling.redisUri') != null) {
     args.add("-Dgatling.redisUri=${System.getProperty('gatling.redisUri')}")
   }
-  ['gatling.redisHitPercent', 'gatling.redisTtlSeconds'].each { key ->
+  // Pipeline port-forward to the WireMock pod: per-hearing stubs for the query fallback
+  // (FallbackHearingStubs), since the validation WireMock does not apply response templating
+  ['gatling.redisHitPercent', 'gatling.redisTtlSeconds', 'gatling.wiremockAdminUrl'].each { key ->
     if (System.getProperty(key) != null) {
       args.add("-D${key}=${System.getProperty(key)}")
     }

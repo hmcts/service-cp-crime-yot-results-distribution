@@ -41,7 +41,8 @@ import org.slf4j.LoggerFactory;
  * In the pipeline the Gatling process cannot reach WireMock (the agent's istio sidecar routes
  * localhost:8080 to the service pod), so the shell script installs the stubs and the build sets
  * {@code -Dgatling.wiremockViaScript=true} (by default wherever {@code TF_BUILD} is set, i.e. on
- * every Azure DevOps agent), which skips this class entirely.
+ * every Azure DevOps agent), which skips this class entirely. The pipeline's separate port-forward
+ * to WireMock ({@code gatling.wiremockAdminUrl}) is used only by {@link FallbackHearingStubs}.
  */
 public final class WireMockStubs {
 
