@@ -18,8 +18,8 @@ final class HearingPayloadFixture {
     private static final String MAPPING = "wiremock/mappings/hearing-payload.json";
     private static final String ANY_SUFFIX = ".*";
     /** Metadata key and value on every per-hearing stub, so leftovers can be removed by tag. */
-    static final String TAG_KEY = "nft";
-    static final String TAG_VALUE = "fallback-hearing";
+    private static final String TAG_KEY = "nft";
+    private static final String TAG_VALUE = "fallback-hearing";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final JsonNode TEMPLATE = load();
 

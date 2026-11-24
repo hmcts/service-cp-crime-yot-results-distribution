@@ -408,21 +408,25 @@ until the namespace goes, because the service may still be draining when a simul
 script removes tagged leftovers on a reused WireMock. A pipeline run that would send hearings down
 the fallback without that property aborts before load. The script requires exactly one running
 WireMock pod, and its preflight registers a probe stub of the same shape and fetches it through the
-service's own `RESULTS_BASE_URL`, read from the Deployment labelled
-`app.kubernetes.io/instance=$SERVICE_CONTEXT` (default `yotresultsdistribution-service`). Stub
+service's own `RESULTS_BASE_URL`, read from the running pod labelled
+`app.kubernetes.io/instance=$SERVICE_CONTEXT` (default `yotresultsdistribution-service`). Each
+simulation logs WireMock's mapping count before load: a later simulation in the same run starts
+with an earlier one's stubs still installed. Stub
 registration and Redis seeding run on the virtual user's thread, so at stress rates compare the
 achieved injection rate with the target.
 
 The shared pipeline is `pipelines/springboot-asb-performance-tests.yaml` in
 `hmcts/cpp-azure-devops-templates`. It deploys an ephemeral validation stack, purges the queue,
 runs `StressSimulation` then `CapacitySimulation` and then `verify-outputs.sh`, and passes every
-`-Dgatling.*` property the simulations read. Trigger it with:
+`-Dgatling.*` property a pipeline run needs; the rest default (`gatling.wiremockViaScript` through
+`TF_BUILD`). Trigger it with:
 
 | Parameter | Value |
 |---|---|
 | `repo` | `service-cp-crime-yot-results-distribution` |
+| `repo_branch` | the branch whose Gatling sources and scripts are cloned (required, e.g. `main`) |
 | `context` | `yotresultsdistribution-service` (queue `perf.yotresultsdistribution.requests`, namespace `ns-vld-yotresultsdistribution-service-<buildId>`) |
-| `healthPath` | `/actuator/health/readiness`: the aggregate reads DOWN on an idle queue by design, so the default `/actuator/health` never answers 200 before load |
+| `healthPath` | `/actuator/health/readiness`: the pipeline purges the queue before deploy, so the aggregate's `servicebus` component reads DOWN once its 60s start-up grace passes with no delivery; only the readiness group is a reliable gate |
 | `datasourceSecretName` | the `kv-mdv-ccm-01` secret this service's validation values mount as its database password |
 | `imageTag` | the image under test |
 

@@ -23,9 +23,9 @@
 # -Dgatling.wiremockViaScript=true — build.gradle defaults it on wherever TF_BUILD is set, i.e. on
 # every Azure DevOps agent — so the simulations do not try to install the stubs again (they cannot
 # reach WireMock from the agent, and would abort). SERVICE_CONTEXT is the service's Helm release
-# (default yotresultsdistribution-service, the pipeline's `context`), whose Deployment is found by
-# its app.kubernetes.io/instance label as the pipeline finds the pod; setting RESULTS_BASE_URL skips
-# reading it from that Deployment.
+# (default yotresultsdistribution-service, the pipeline's `context`), whose running pod is found by
+# its app.kubernetes.io/instance label exactly as the pipeline finds it; setting RESULTS_BASE_URL
+# skips reading it from that pod.
 set -euo pipefail
 
 : "${NAMESPACE:?NAMESPACE must be set}"
@@ -98,8 +98,8 @@ done
 # WireMock's context root. Calling the pod directly at /results-query-api 404s in
 # WildFly — that context path exists only on the VirtualService — and would prove
 # nothing about whether the stubs match what the service actually sends. The URL is
-# read from the service's own Deployment (selected by SERVICE_CONTEXT) so it cannot drift from what
-# the service resolves; a kubectl failure stops the script rather than reading as "not set".
+# read from the service's own running pod (selected by SERVICE_CONTEXT) so it cannot drift from
+# what the service resolves; a kubectl failure stops the script rather than reading as "not set".
 #
 # No -f here: a 404 (stub not matched) or 500 (WireMock error) must surface its
 # status and body, not die as a bare "exit code 22". The status is appended on its
@@ -108,12 +108,13 @@ done
 # ending the script there, so it reaches the diagnostics below like any other failure.
 SERVICE_CONTEXT="${SERVICE_CONTEXT:-yotresultsdistribution-service}"
 if [ -z "${RESULTS_BASE_URL:-}" ]; then
-  SERVICE_ENV=$(kubectl get deployments -n "$NAMESPACE" -l "app.kubernetes.io/instance=$SERVICE_CONTEXT" \
-    -o jsonpath='{range .items[*].spec.template.spec.containers[*].env[?(@.name=="RESULTS_BASE_URL")]}{.value}{"\n"}{end}')
+  SERVICE_ENV=$(kubectl get pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$SERVICE_CONTEXT" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{range .items[*].spec.containers[*].env[?(@.name=="RESULTS_BASE_URL")]}{.value}{"\n"}{end}')
   RESULTS_BASE_URL=$(printf '%s\n' "$SERVICE_ENV" | grep -m 1 . || true)
 fi
 if [ -z "$RESULTS_BASE_URL" ]; then
-  echo "ERROR: no $SERVICE_CONTEXT Deployment in $NAMESPACE sets RESULTS_BASE_URL;"
+  echo "ERROR: no running $SERVICE_CONTEXT pod in $NAMESPACE sets RESULTS_BASE_URL;"
   echo "       cannot probe the route the service uses (set SERVICE_CONTEXT or RESULTS_BASE_URL)."
   exit 1
 fi

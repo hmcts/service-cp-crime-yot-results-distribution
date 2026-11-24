@@ -77,6 +77,9 @@ final class FallbackHearingStubs {
      * that needs no stubs is one that caches every hearing ({@code gatling.redisUri} set and
      * {@code gatling.redisHitPercent=100}).
      *
+     * <p>Logs WireMock's mapping count, which includes any stubs an earlier simulation in the same
+     * run left installed.
+     *
      * @throws IllegalStateException if WireMock does not answer its admin API, or the pipeline run
      *                               needs per-hearing stubs and has no admin URL to register them
      */
@@ -99,6 +102,11 @@ final class FallbackHearingStubs {
             throw new IllegalStateException(
                     "WireMock admin API at " + INSTANCE.adminUri + " returned " + response.statusCode());
         }
+        // Stubs stay until the namespace goes, so a later simulation in the same run starts with an
+        // earlier one's still installed, and WireMock matches every request against every mapping.
+        // The count is logged so a slower fallback can be told apart from a slower service.
+        LOG.info("WireMock mappings installed before load: {}",
+                MAPPER.readTree(response.body()).path("meta").path("total").asString("unknown"));
     }
 
     /**
