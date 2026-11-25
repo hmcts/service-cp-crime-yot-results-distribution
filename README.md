@@ -352,6 +352,101 @@ fixtures mount the same file, so local, CI and deployed queue properties cannot 
 local-only, and `bootRun` does not inherit compose environment variables — which is why the command
 above passes them itself.
 
+### Performance tests (Gatling)
+
+`src/gatling/` load-tests the intake leg, following `service-cp-crime-informant-register`'s suite:
+it publishes `DistributionCommand` messages to `yotresultsdistribution.requests` over AMQP/JMS
+(Qpid JMS with SAS for the emulator, `azure-servicebus-jms` with `DefaultAzureCredential` for an
+Entra-only namespace), seeds the Redis claim-check for a share of hearings, and stubs the
+results-query fallback and reference data in WireMock.
+
+| Simulation | What it is | Gate |
+|---|---|---|
+| `CapacitySimulation` | warm-up, then peak (1.51 msg/s) ramping to 10× peak | publish p95 < 100 ms, p99 < 500 ms, > 99.9% OK |
+| `StressSimulation` | ramp to 50 msg/s plus a 200-user spike | none, report-only |
+
+The message mix is 55% standard, 20% without `userId`, 10% byte-identical duplicates, 5% re-shares
+(an already-published hearing under a fresh `requestId`) and 10% older hearing days. Duplicates
+exercise the service's `(source, requestId)` guard only: the publisher cannot set the JMS
+`MessageId`, so the broker's duplicate detection never fires and every duplicate reaches the
+listener. Bodies are sent as a JMS `BytesMessage` because the listener's `getBody()` reads only an
+AMQP data section; a `TextMessage` arrives as an AMQP value and is never processed.
+
+The service records each register in its own store and POSTs nothing, so
+`src/gatling/scripts/verify-outputs.sh` reads `processed_request` and `processed_output` rather than
+a WireMock journal. It checks that every unique request ended `COMPLETED` with `recorded` and has a
+register row of its own, that each hearing is left with exactly one active register (a re-share
+must supersede the earlier one at the write), and that no row exists for a request that was never
+published or carries another request's hearing. It also gates publish-to-`COMPLETED` latency. Never
+run it across 18:00 Europe/London on a weekday where the `YotResultsDistributionService` flag is ON
+and generation is enabled: a register the nightly run has batched can no longer be superseded, so a
+later re-share leaves two active rows and the verifier fails a correct service. Let the queue drain
+between runs. Seeded Redis keys expire after
+six hours (`-Dgatling.redisTtlSeconds`). The service under test must run its intake adapters
+`LIVE` against the stubs, with a Redis, rather than in the compose `app`'s `STUB` shape. Gradle has
+to run on JDK 25, because `gatlingRun` forks with Gradle's own JVM:
+
+```bash
+docker compose up -d postgres servicebus-emulator wiremock && docker run -d -p 6379:6379 redis:7-alpine
+RESULTS_BASE_URL=http://localhost:8089 REFERENCEDATA_BASE_URL=http://localhost:8089 \
+  YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID=00000000-0000-0000-0000-000000000000 ./gradlew bootRun
+ASB_EMULATOR_KEY=SAS_KEY_VALUE REDIS_URI=redis://localhost:6379 \
+  DATABASE_URL=postgresql://yotresultsdistribution:yotresultsdistribution@localhost:5432/yotresultsdistribution \
+  ./perfTest.sh
+```
+
+In a pipeline, `src/gatling/scripts/setup-wiremock-stubs.sh` installs the stubs through
+`kubectl exec` and Gatling runs with `-Dgatling.wiremockViaScript=true`, which the build turns on
+by itself wherever `TF_BUILD` is set (every Azure DevOps agent); locally, a stub that cannot be
+installed aborts the run.
+
+The validation WireMock (a WAR in WildFly) does not apply response templating, so the shared
+hearing-payload mapping cannot echo a hearingId there. With `-Dgatling.wiremockAdminUrl` (the
+pipeline's port-forward to the WireMock pod) Gatling registers an exact-path stub for each hearing
+it leaves out of Redis before publishing it, tagged `metadata.nft=fallback-hearing`. The stubs stay
+until the namespace goes, because the service may still be draining when a simulation ends; the
+script removes tagged leftovers on a reused WireMock. A pipeline run that would send hearings down
+the fallback without that property aborts before load. The script requires exactly one running
+WireMock pod, and its preflight registers a probe stub of the same shape and fetches it through the
+service's own `RESULTS_BASE_URL`, read from the running pod labelled
+`app.kubernetes.io/instance=$SERVICE_CONTEXT` (default `yotresultsdistribution-service`). Each
+simulation logs WireMock's mapping count before load: a later simulation in the same run starts
+with an earlier one's stubs still installed. Stub
+registration and Redis seeding run on the virtual user's thread, so at stress rates compare the
+achieved injection rate with the target.
+
+The shared pipeline is `pipelines/springboot-asb-performance-tests.yaml` in
+`hmcts/cpp-azure-devops-templates`. It deploys an ephemeral validation stack, purges the queue,
+runs `StressSimulation` then `CapacitySimulation` and then `verify-outputs.sh`, and passes every
+`-Dgatling.*` property a pipeline run needs; the rest default (`gatling.wiremockViaScript` through
+`TF_BUILD`). Trigger it with:
+
+| Parameter | Value |
+|---|---|
+| `repo` | `service-cp-crime-yot-results-distribution` |
+| `repo_branch` | the branch whose Gatling sources and scripts are cloned (required, e.g. `main`) |
+| `context` | `yotresultsdistribution-service` (queue `perf.yotresultsdistribution.requests`, namespace `ns-vld-yotresultsdistribution-service-<buildId>`) |
+| `healthPath` | `/actuator/health/readiness`: the pipeline purges the queue before deploy, so the aggregate's `servicebus` component reads DOWN once its 60s start-up grace passes with no delivery; only the readiness group is a reliable gate |
+| `datasourceSecretName` | `CP-VALIDATION-YOT-DATASOURCE-PASSWORD`, the `kv-mdv-ccm-01` secret the MDV values mount as the database password |
+| `imageTag` | the image under test |
+| `maxE2eP95Ms` / `maxE2eP99Ms` | `5000` / `10000` to start; tighten after a baseline run |
+| `aksDeployBranch` | `main` (the branch carrying the MDV values below) |
+
+It needs, outside this repo: the `perf.yotresultsdistribution.requests` queue in `sbdevccm01`
+(hmcts/cpp-terraform-azurerm-servicebus#35, applied before the first run), and the
+`yotresultsdistribution-service` entry in cpp-aks-deploy's validation stack (hmcts/cpp-aks-deploy#1013),
+whose MDV values point the consumer at that queue (`YOTRESULTSDISTRIBUTION_SERVICEBUS_QUEUENAME`), set
+`RESULTS_BASE_URL`, `REFERENCEDATA_BASE_URL` and Redis to the stack's WireMock and `validation-redis`,
+map `CP-NFT-SYSTEM-USER-ID` to `YOT_RESULTS_DISTRIBUTION_SYSTEM_USER_ID`, and leave the generation leg
+off.
+
+Before any load both simulations check the readiness group (logging the aggregate health) and open
+a producer on the queue, so a rejected credential aborts the run instead of failing every publish.
+`verify-outputs.sh` reaches Postgres through `NAMESPACE` alone, selecting the validation stack's
+`postgres` release (override with `POSTGRES_POD_SELECTOR` / `POSTGRES_CONTAINER`), and connects as
+the chart's `postgres` admin with the password the pod already holds, read inside the pod so it
+never reaches the agent. PMD and Checkstyle do not run on the `gatling` source set.
+
 ### Contribute to this repository
 
 See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md). Repository working conventions live in

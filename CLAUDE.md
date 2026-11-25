@@ -135,6 +135,9 @@ notification enabled against production data outside cutover.
                              # before jacocoTestCoverageVerification reads it, so a failing gate
                              # still leaves a report saying which lines were missed
 ./gradlew bootRun            # Run locally
+./perfTest.sh                # Gatling NFT of the intake leg (README "Performance tests"); the
+                             # `gatling` source set is load tooling that never ships, so it is
+                             # compiled by `check` but exempt from PMD and Checkstyle
 ```
 
 The operational surface is HTTP, not a command in the image: `docker compose up -d app`, then
