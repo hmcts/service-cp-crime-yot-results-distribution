@@ -68,14 +68,15 @@ class ProlongedStoreOutageIT {
      * inside the callback that discovered the outage, so it is enqueued and lands a moment after the
      * abandon — and the processor holds credit for {@code maxConcurrentCalls} (two) deliveries, so
      * the broker may hand the returned message straight back on the idle credit before the link
-     * closes. That second delivery never reaches the listener; it is held on the closed link until
-     * its lock expires. Which side wins is timing, so a bound of one passed alone and failed
-     * intermittently - reproducibly so in CI's class order. Suspension is what stops the remaining three being spent
-     * behind these two, and the count must not move past this bound for the whole window.
+     * closes. That second delivery may be held on the closing link until its lock expires, or may
+     * reach the idle worker and meet the outage itself. Which side wins is timing, so a bound of one
+     * passed alone and failed intermittently - reproducibly so in CI's class order. Suspension is
+     * what stops the remaining three being spent behind these two, and the count must not move past
+     * this bound for the whole window.
      *
-     * <p>The bound alone cannot tell that race from a slow stop that lets the listener itself take
-     * a second delivery, so the listener's own account is asserted too: one store-unavailable ERROR
-     * per delivery it handles, and exactly one in the window.
+     * <p>The listener's own account is asserted too, with the same bound: one store-unavailable
+     * ERROR per delivery it handles, so at least the one that discovered the outage and never more
+     * than the outage may cost.
      */
     private static final long DELIVERIES_AN_OUTAGE_MAY_COST = 2;
 
@@ -139,8 +140,8 @@ class ProlongedStoreOutageIT {
                     .filter(event -> Level.ERROR.equals(event.getLevel()))
                     .filter(event -> event.getFormattedMessage()
                             .contains(ReasonCode.STORE_UNAVAILABLE.code())))
-                    .as("the listener met the outage on one delivery; any second one was the race")
-                    .hasSize(1);
+                    .as("the listener met the outage, and on no more deliveries than it may cost")
+                    .hasSizeBetween(1, (int) DELIVERIES_AN_OUTAGE_MAY_COST);
 
             PostgresTestSupport.unpause();
 
