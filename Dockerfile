@@ -5,11 +5,11 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE:-eclipse-temurin:25-jre}
 
-# install curl for debugging; take openssl past the base image's for CVE-2026-84782 until the
-# base image is rebuilt with it
+# install curl for debugging; take openssl (CVE-2026-84782), apt (CVE-2026-109518) and brotli
+# (CVE-2026-111497) past the base image's until the base image is rebuilt with them
 RUN apt-get update \
     && apt-get install -y curl \
-    && apt-get install -y --only-upgrade openssl libssl3t64 \
+    && apt-get install -y --only-upgrade openssl libssl3t64 apt libapt-pkg7.0 libbrotli1 \
     && rm -rf /var/lib/apt/lists/*
 
 # run as non-root ... group and user "app"
